@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import * as coachConfigModule from "../../lib/coachConfig";
 import {
   type CoachPlayerPool,
@@ -14,6 +14,8 @@ type PositionState = {
 };
 
 type TeamState = Record<PositionKey, PositionState>;
+
+type TeamsByCoach = Record<number, TeamState>;
 
 type CoachConfigShape = {
   id: number;
@@ -92,6 +94,8 @@ const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
     emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
   },
 ];
+
+const STORAGE_KEY = "coach-selection-app-teams-v1";
 
 function emptyTeamState(): TeamState {
   return {
@@ -192,14 +196,64 @@ function normaliseCoachConfigs(): CoachConfigShape[] {
   return FALLBACK_COACH_CONFIGS;
 }
 
-function createTeamsByCoach(coaches: CoachConfigShape[]): Record<number, TeamState> {
-  const initial: Record<number, TeamState> = {};
+function createTeamsByCoach(coaches: CoachConfigShape[]): TeamsByCoach {
+  const initial: TeamsByCoach = {};
 
   for (const coach of coaches) {
     initial[coach.id] = emptyTeamState();
   }
 
   return initial;
+}
+
+function mergeSavedTeamsIntoCoachList(
+  coaches: CoachConfigShape[],
+  savedTeams: unknown
+): TeamsByCoach {
+  const base = createTeamsByCoach(coaches);
+
+  if (!savedTeams || typeof savedTeams !== "object") {
+    return base;
+  }
+
+  const saved = savedTeams as Record<string, unknown>;
+
+  for (const coach of coaches) {
+    const coachKey = String(coach.id);
+    const savedTeam = saved[coachKey];
+
+    if (!savedTeam || typeof savedTeam !== "object") {
+      continue;
+    }
+
+    const nextTeam = emptyTeamState();
+    const teamObj = savedTeam as Record<string, unknown>;
+
+    for (const position of POSITIONS) {
+      const savedPosition = teamObj[position];
+
+      if (!savedPosition || typeof savedPosition !== "object") {
+        continue;
+      }
+
+      const positionObj = savedPosition as Record<string, unknown>;
+
+      nextTeam[position] = {
+        onField: Array.isArray(positionObj.onField)
+          ? positionObj.onField.filter((value): value is string => typeof value === "string")
+          : [],
+        emergencies: Array.isArray(positionObj.emergencies)
+          ? positionObj.emergencies.filter(
+              (value): value is string => typeof value === "string"
+            )
+          : [],
+      };
+    }
+
+    base[coach.id] = nextTeam;
+  }
+
+  return base;
 }
 
 function getAllSelectedPlayers(teamState: TeamState): string[] {
@@ -240,10 +294,11 @@ export default function SelectTeamPage() {
   const [selectedCoachId, setSelectedCoachId] = useState<number>(
     coachConfigs[0]?.id ?? 1
   );
-  const [teamsByCoach, setTeamsByCoach] = useState<Record<number, TeamState>>(() =>
+  const [teamsByCoach, setTeamsByCoach] = useState<TeamsByCoach>(() =>
     createTeamsByCoach(coachConfigs)
   );
   const [submitMessage, setSubmitMessage] = useState<string>("");
+  const [isLoadedFromStorage, setIsLoadedFromStorage] = useState(false);
 
   const selectedCoach =
     coachConfigs.find((coach) => coach.id === selectedCoachId) ?? coachConfigs[0];
@@ -262,6 +317,36 @@ export default function SelectTeamPage() {
 
     return lookup;
   }, [coachPool]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+
+      if (!raw) {
+        setIsLoadedFromStorage(true);
+        return;
+      }
+
+      const parsed = JSON.parse(raw);
+      const merged = mergeSavedTeamsIntoCoachList(coachConfigs, parsed);
+
+      setTeamsByCoach(merged);
+    } catch (error) {
+      console.error("Failed to load saved teams:", error);
+    } finally {
+      setIsLoadedFromStorage(true);
+    }
+  }, [coachConfigs]);
+
+  useEffect(() => {
+    if (!isLoadedFromStorage) return;
+
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(teamsByCoach));
+    } catch (error) {
+      console.error("Failed to save teams:", error);
+    }
+  }, [teamsByCoach, isLoadedFromStorage]);
 
   function getPlayerClub(playerName: string): string {
     return playerLookup.get(playerName)?.club ?? "";
@@ -338,7 +423,7 @@ export default function SelectTeamPage() {
 
   function handleResetCoachTeam() {
     updateCoachTeamState(emptyTeamState());
-    setSubmitMessage("");
+    setSubmitMessage(`Reset saved team for ${selectedCoach?.name}.`);
   }
 
   function validateTeam(): { valid: boolean; errors: string[] } {
@@ -388,7 +473,7 @@ export default function SelectTeamPage() {
       return;
     }
 
-    setSubmitMessage(`Team submitted for ${selectedCoach?.name}.`);
+    setSubmitMessage(`Team saved and submitted for ${selectedCoach?.name}.`);
   }
 
   function availablePlayersForPosition(position: PositionKey) {
@@ -404,6 +489,9 @@ export default function SelectTeamPage() {
           <h1 className="text-3xl font-bold">Coach Team Selection</h1>
           <p className="mt-2 text-sm text-white/70">
             Each coach only sees the players assigned to their own locked pool.
+          </p>
+          <p className="mt-2 text-xs text-white/50">
+            Teams now save locally in this browser and will still be there after a refresh.
           </p>
 
           <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
