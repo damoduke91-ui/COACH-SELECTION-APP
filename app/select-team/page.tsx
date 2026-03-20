@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -44,14 +43,54 @@ const DEFAULT_EMERGENCY_LIMITS: Record<PositionKey, number> = {
 };
 
 const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
-  { id: 1, name: "Adrian Coach 1", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
-  { id: 2, name: "Chris Coach 2", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
-  { id: 3, name: "Damian Coach 3", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
-  { id: 4, name: "Dane Coach 4", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
-  { id: 5, name: "Josh Coach 5", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
-  { id: 6, name: "Mark Coach 6", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
-  { id: 7, name: "Rick Coach 7", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
-  { id: 8, name: "Troy Coach 8", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
+  {
+    id: 1,
+    name: "Adrian Coach 1",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 2,
+    name: "Chris Coach 2",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 3,
+    name: "Damian Coach 3",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 4,
+    name: "Dane Coach 4",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 5,
+    name: "Josh Coach 5",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 6,
+    name: "Mark Coach 6",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 7,
+    name: "Rick Coach 7",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 8,
+    name: "Troy Coach 8",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
 ];
 
 function emptyTeamState(): TeamState {
@@ -211,6 +250,22 @@ export default function SelectTeamPage() {
 
   const teamState = teamsByCoach[selectedCoachId] ?? emptyTeamState();
   const coachPool = getCoachPool(selectedCoach);
+
+  const playerLookup = useMemo(() => {
+    const lookup = new Map<string, { name: string; club: string }>();
+
+    for (const position of POSITIONS) {
+      for (const player of coachPool[position]) {
+        lookup.set(player.name, { name: player.name, club: player.club });
+      }
+    }
+
+    return lookup;
+  }, [coachPool]);
+
+  function getPlayerClub(playerName: string): string {
+    return playerLookup.get(playerName)?.club ?? "";
+  }
 
   function updateCoachTeamState(nextTeamState: TeamState) {
     setTeamsByCoach((prev) => ({
@@ -405,9 +460,7 @@ export default function SelectTeamPage() {
             >
               <div className="text-lg font-bold">{position}</div>
               <div className="mt-2 space-y-1 text-sm text-white/70">
-                <div>
-                  Pool: {coachPool[position].length}
-                </div>
+                <div>Pool: {coachPool[position].length}</div>
                 <div>
                   On-field: {teamState[position].onField.length} /{" "}
                   {selectedCoach.slots[position]}
@@ -449,13 +502,11 @@ export default function SelectTeamPage() {
                       ) : (
                         availablePlayers.map((player) => (
                           <div
-                            key={`${position}-${player.number}-${player.name}`}
+                            key={`${position}-${player.name}-${player.club}`}
                             className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/5 p-3"
                           >
                             <div className="text-sm font-medium">{player.name}</div>
-                            <div className="text-xs text-white/60">
-                              #{player.number} • {player.club}
-                            </div>
+                            <div className="text-xs text-white/60">{player.club}</div>
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
@@ -471,7 +522,9 @@ export default function SelectTeamPage() {
 
                               <button
                                 type="button"
-                                onClick={() => handleAddPlayer(position, "emergencies", player.name)}
+                                onClick={() =>
+                                  handleAddPlayer(position, "emergencies", player.name)
+                                }
                                 disabled={
                                   selectedCoach.emergencyLimits[position] <= 0 ||
                                   teamState[position].emergencies.length >=
@@ -500,7 +553,13 @@ export default function SelectTeamPage() {
                             key={player}
                             className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 p-3"
                           >
-                            <div className="text-sm font-medium">{player}</div>
+                            <div>
+                              <div className="text-sm font-medium">{player}</div>
+                              <div className="text-xs text-white/60">
+                                {getPlayerClub(player)}
+                              </div>
+                            </div>
+
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
@@ -542,7 +601,13 @@ export default function SelectTeamPage() {
                             key={player}
                             className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 p-3"
                           >
-                            <div className="text-sm font-medium">{player}</div>
+                            <div>
+                              <div className="text-sm font-medium">{player}</div>
+                              <div className="text-xs text-white/60">
+                                {getPlayerClub(player)}
+                              </div>
+                            </div>
+
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
