@@ -7,6 +7,12 @@ import {
   type PositionKey,
   getPlayersForCoach,
 } from "../../lib/playersByCoach";
+import { supabase } from "../../lib/supabase";
+import {
+  type LoginSession,
+  getCoachAccessByPasscode,
+  isAdminPasscode,
+} from "../../lib/coachAccess";
 
 type PositionState = {
   onField: string[];
@@ -14,7 +20,6 @@ type PositionState = {
 };
 
 type TeamState = Record<PositionKey, PositionState>;
-
 type TeamsByCoach = Record<number, TeamState>;
 
 type CoachConfigShape = {
@@ -22,6 +27,15 @@ type CoachConfigShape = {
   name: string;
   slots: Record<PositionKey, number>;
   emergencyLimits: Record<PositionKey, number>;
+};
+
+type SavedTeamRow = {
+  coach_id: number;
+  coach_name: string;
+  team_data: unknown;
+  is_submitted: boolean;
+  submitted_at: string | null;
+  updated_at: string;
 };
 
 const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
@@ -95,7 +109,7 @@ const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
   },
 ];
 
-const STORAGE_KEY = "coach-selection-app-teams-v1";
+const SESSION_STORAGE_KEY = "coach-selection-app-login-v1";
 
 function emptyTeamState(): TeamState {
   return {
@@ -206,54 +220,35 @@ function createTeamsByCoach(coaches: CoachConfigShape[]): TeamsByCoach {
   return initial;
 }
 
-function mergeSavedTeamsIntoCoachList(
-  coaches: CoachConfigShape[],
-  savedTeams: unknown
-): TeamsByCoach {
-  const base = createTeamsByCoach(coaches);
+function sanitiseTeamState(input: unknown): TeamState {
+  const clean = emptyTeamState();
 
-  if (!savedTeams || typeof savedTeams !== "object") {
-    return base;
+  if (!input || typeof input !== "object") {
+    return clean;
   }
 
-  const saved = savedTeams as Record<string, unknown>;
+  const obj = input as Record<string, unknown>;
 
-  for (const coach of coaches) {
-    const coachKey = String(coach.id);
-    const savedTeam = saved[coachKey];
+  for (const position of POSITIONS) {
+    const savedPosition = obj[position];
 
-    if (!savedTeam || typeof savedTeam !== "object") {
+    if (!savedPosition || typeof savedPosition !== "object") {
       continue;
     }
 
-    const nextTeam = emptyTeamState();
-    const teamObj = savedTeam as Record<string, unknown>;
+    const positionObj = savedPosition as Record<string, unknown>;
 
-    for (const position of POSITIONS) {
-      const savedPosition = teamObj[position];
-
-      if (!savedPosition || typeof savedPosition !== "object") {
-        continue;
-      }
-
-      const positionObj = savedPosition as Record<string, unknown>;
-
-      nextTeam[position] = {
-        onField: Array.isArray(positionObj.onField)
-          ? positionObj.onField.filter((value): value is string => typeof value === "string")
-          : [],
-        emergencies: Array.isArray(positionObj.emergencies)
-          ? positionObj.emergencies.filter(
-              (value): value is string => typeof value === "string"
-            )
-          : [],
-      };
-    }
-
-    base[coach.id] = nextTeam;
+    clean[position] = {
+      onField: Array.isArray(positionObj.onField)
+        ? positionObj.onField.filter((value): value is string => typeof value === "string")
+        : [],
+      emergencies: Array.isArray(positionObj.emergencies)
+        ? positionObj.emergencies.filter((value): value is string => typeof value === "string")
+        : [],
+    };
   }
 
-  return base;
+  return clean;
 }
 
 function getAllSelectedPlayers(teamState: TeamState): string[] {
@@ -291,6 +286,9 @@ function getCoachPool(selectedCoach: CoachConfigShape | undefined): CoachPlayerP
 
 export default function SelectTeamPage() {
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
+  const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
+  const [loginPasscode, setLoginPasscode] = useState("");
+  const [loginError, setLoginError] = useState("");
   const [selectedCoachId, setSelectedCoachId] = useState<number>(
     coachConfigs[0]?.id ?? 1
   );
@@ -298,7 +296,34 @@ export default function SelectTeamPage() {
     createTeamsByCoach(coachConfigs)
   );
   const [submitMessage, setSubmitMessage] = useState<string>("");
-  const [isLoadedFromStorage, setIsLoadedFromStorage] = useState(false);
+  const [isLoadingTeam, setIsLoadingTeam] = useState(false);
+  const [isSavingTeam, setIsSavingTeam] = useState(false);
+  const [loadedCoachIds, setLoadedCoachIds] = useState<Record<number, boolean>>({});
+  const [submittedCoachIds, setSubmittedCoachIds] = useState<Record<number, boolean>>({});
+
+  const isAdmin = loginSession?.role === "admin";
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as LoginSession;
+      if (!parsed || typeof parsed !== "object" || !("role" in parsed)) return;
+
+      setLoginSession(parsed);
+    } catch {
+      // ignore bad storage
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!loginSession) return;
+
+    if (loginSession.role === "coach" && loginSession.coachId) {
+      setSelectedCoachId(loginSession.coachId);
+    }
+  }, [loginSession]);
 
   const selectedCoach =
     coachConfigs.find((coach) => coach.id === selectedCoachId) ?? coachConfigs[0];
@@ -319,34 +344,51 @@ export default function SelectTeamPage() {
   }, [coachPool]);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+    async function loadCoachTeam() {
+      if (!selectedCoach) return;
+      if (!loginSession) return;
+      if (loadedCoachIds[selectedCoach.id]) return;
 
-      if (!raw) {
-        setIsLoadedFromStorage(true);
+      setIsLoadingTeam(true);
+
+      const { data, error } = await supabase
+        .from("coach_team_selections")
+        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at")
+        .eq("coach_id", selectedCoach.id)
+        .maybeSingle();
+
+      if (error) {
+        setSubmitMessage(`Load failed: ${error.message}`);
+        setIsLoadingTeam(false);
         return;
       }
 
-      const parsed = JSON.parse(raw);
-      const merged = mergeSavedTeamsIntoCoachList(coachConfigs, parsed);
+      const row = data as SavedTeamRow | null;
 
-      setTeamsByCoach(merged);
-    } catch (error) {
-      console.error("Failed to load saved teams:", error);
-    } finally {
-      setIsLoadedFromStorage(true);
+      if (row?.team_data) {
+        const cleanTeam = sanitiseTeamState(row.team_data);
+
+        setTeamsByCoach((prev) => ({
+          ...prev,
+          [selectedCoach.id]: cleanTeam,
+        }));
+      }
+
+      setSubmittedCoachIds((prev) => ({
+        ...prev,
+        [selectedCoach.id]: Boolean(row?.is_submitted),
+      }));
+
+      setLoadedCoachIds((prev) => ({
+        ...prev,
+        [selectedCoach.id]: true,
+      }));
+
+      setIsLoadingTeam(false);
     }
-  }, [coachConfigs]);
 
-  useEffect(() => {
-    if (!isLoadedFromStorage) return;
-
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(teamsByCoach));
-    } catch (error) {
-      console.error("Failed to save teams:", error);
-    }
-  }, [teamsByCoach, isLoadedFromStorage]);
+    loadCoachTeam();
+  }, [selectedCoach, loadedCoachIds, loginSession]);
 
   function getPlayerClub(playerName: string): string {
     return playerLookup.get(playerName)?.club ?? "";
@@ -357,6 +399,61 @@ export default function SelectTeamPage() {
       ...prev,
       [selectedCoachId]: nextTeamState,
     }));
+    setSubmitMessage("");
+  }
+
+  function handleLogin(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const passcode = loginPasscode.trim();
+
+    if (!passcode) {
+      setLoginError("Enter a passcode.");
+      return;
+    }
+
+    if (isAdminPasscode(passcode)) {
+      const session: LoginSession = {
+        role: "admin",
+        coachId: null,
+        coachName: "Admin",
+      };
+
+      setLoginSession(session);
+      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+      setLoginPasscode("");
+      setLoginError("");
+      setSubmitMessage("");
+      return;
+    }
+
+    const coachAccess = getCoachAccessByPasscode(passcode);
+
+    if (!coachAccess) {
+      setLoginError("Invalid passcode.");
+      return;
+    }
+
+    const session: LoginSession = {
+      role: "coach",
+      coachId: coachAccess.coachId,
+      coachName: coachAccess.coachName,
+    };
+
+    setLoginSession(session);
+    setSelectedCoachId(coachAccess.coachId);
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    setLoginPasscode("");
+    setLoginError("");
+    setSubmitMessage("");
+  }
+
+  function handleLogout() {
+    setLoginSession(null);
+    setLoginPasscode("");
+    setLoginError("");
+    setSubmitMessage("");
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
   }
 
   function handleAddPlayer(
@@ -366,6 +463,7 @@ export default function SelectTeamPage() {
   ) {
     if (!selectedCoach) return;
     if (!playerName) return;
+    if (submittedCoachIds[selectedCoach.id]) return;
 
     const limit =
       bucket === "onField"
@@ -383,7 +481,6 @@ export default function SelectTeamPage() {
     const nextState = structuredClone(teamState) as TeamState;
     nextState[position][bucket].push(playerName);
     updateCoachTeamState(nextState);
-    setSubmitMessage("");
   }
 
   function handleRemovePlayer(
@@ -391,12 +488,14 @@ export default function SelectTeamPage() {
     bucket: "onField" | "emergencies",
     playerName: string
   ) {
+    if (!selectedCoach) return;
+    if (submittedCoachIds[selectedCoach.id]) return;
+
     const nextState = structuredClone(teamState) as TeamState;
     nextState[position][bucket] = nextState[position][bucket].filter(
       (name) => name !== playerName
     );
     updateCoachTeamState(nextState);
-    setSubmitMessage("");
   }
 
   function handleMovePlayer(
@@ -407,6 +506,7 @@ export default function SelectTeamPage() {
   ) {
     if (!selectedCoach) return;
     if (from === to) return;
+    if (submittedCoachIds[selectedCoach.id]) return;
 
     const limit =
       to === "onField"
@@ -418,12 +518,17 @@ export default function SelectTeamPage() {
     const nextState = removePlayerFromAllSlots(teamState, playerName);
     nextState[position][to].push(playerName);
     updateCoachTeamState(nextState);
-    setSubmitMessage("");
   }
 
   function handleResetCoachTeam() {
-    updateCoachTeamState(emptyTeamState());
-    setSubmitMessage(`Reset saved team for ${selectedCoach?.name}.`);
+    if (!selectedCoach) return;
+    if (submittedCoachIds[selectedCoach.id]) return;
+
+    setTeamsByCoach((prev) => ({
+      ...prev,
+      [selectedCoach.id]: emptyTeamState(),
+    }));
+    setSubmitMessage(`Reset team for ${selectedCoach.name}. Click Save Team to store it.`);
   }
 
   function validateTeam(): { valid: boolean; errors: string[] } {
@@ -465,15 +570,58 @@ export default function SelectTeamPage() {
     };
   }
 
-  function handleSubmitTeam() {
-    const result = validateTeam();
+  async function saveTeam(isSubmitting: boolean) {
+    if (!selectedCoach) return;
 
-    if (!result.valid) {
-      setSubmitMessage(`Team not ready: ${result.errors.join(" ")}`);
+    if (isSubmitting) {
+      const result = validateTeam();
+
+      if (!result.valid) {
+        setSubmitMessage(`Team not ready: ${result.errors.join(" ")}`);
+        return;
+      }
+    }
+
+    setIsSavingTeam(true);
+    setSubmitMessage(isSubmitting ? "Submitting team..." : "Saving team...");
+
+    const alreadySubmitted = submittedCoachIds[selectedCoach.id] ?? false;
+
+    const payload = {
+      coach_id: selectedCoach.id,
+      coach_name: selectedCoach.name,
+      team_data: teamState,
+      is_submitted: isSubmitting ? true : alreadySubmitted,
+      submitted_at: isSubmitting ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from("coach_team_selections")
+      .upsert(payload, { onConflict: "coach_id" });
+
+    if (error) {
+      setSubmitMessage(`Save failed: ${error.message}`);
+      setIsSavingTeam(false);
       return;
     }
 
-    setSubmitMessage(`Team saved and submitted for ${selectedCoach?.name}.`);
+    if (isSubmitting) {
+      setSubmittedCoachIds((prev) => ({
+        ...prev,
+        [selectedCoach.id]: true,
+      }));
+      setSubmitMessage(`Team saved and submitted for ${selectedCoach.name}.`);
+    } else {
+      setSubmitMessage(`Team saved for ${selectedCoach.name}.`);
+    }
+
+    setLoadedCoachIds((prev) => ({
+      ...prev,
+      [selectedCoach.id]: true,
+    }));
+
+    setIsSavingTeam(false);
   }
 
   function availablePlayersForPosition(position: PositionKey) {
@@ -482,17 +630,83 @@ export default function SelectTeamPage() {
     );
   }
 
+  const isSubmitted = selectedCoach ? Boolean(submittedCoachIds[selectedCoach.id]) : false;
+
+  if (!loginSession) {
+    return (
+      <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
+        <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
+          <h1 className="text-3xl font-bold">Coach Team Login</h1>
+          <p className="mt-2 text-sm text-white/70">
+            Enter your coach passcode to manage your own team, or use the admin passcode for
+            full access.
+          </p>
+
+          <form onSubmit={handleLogin} className="mt-6 space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-white/80">
+                Passcode
+              </label>
+              <input
+                type="password"
+                value={loginPasscode}
+                onChange={(e) => {
+                  setLoginPasscode(e.target.value);
+                  setLoginError("");
+                }}
+                className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
+                placeholder="Enter passcode"
+              />
+            </div>
+
+            {loginError ? (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {loginError}
+              </div>
+            ) : null}
+
+            <button
+              type="submit"
+              className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90"
+            >
+              Log In
+            </button>
+          </form>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
-          <h1 className="text-3xl font-bold">Coach Team Selection</h1>
-          <p className="mt-2 text-sm text-white/70">
-            Each coach only sees the players assigned to their own locked pool.
-          </p>
-          <p className="mt-2 text-xs text-white/50">
-            Teams now save locally in this browser and will still be there after a refresh.
-          </p>
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold">Coach Team Selection</h1>
+              <p className="mt-2 text-sm text-white/70">
+                {isAdmin
+                  ? "Admin view: you can switch between all coaches."
+                  : `Coach view: you are locked to ${loginSession.coachName}.`}
+              </p>
+              <p className="mt-2 text-xs text-white/50">
+                Teams save to Supabase and can load again after refresh or on another device.
+              </p>
+            </div>
+
+            <div className="flex flex-col items-start gap-2 md:items-end">
+              <div className="text-sm text-white/70">
+                Logged in as <span className="font-semibold text-white">{loginSession.coachName}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold hover:bg-white/10"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
 
           <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
@@ -502,10 +716,12 @@ export default function SelectTeamPage() {
               <select
                 value={selectedCoachId}
                 onChange={(e) => {
+                  if (!isAdmin) return;
                   setSelectedCoachId(Number(e.target.value));
                   setSubmitMessage("");
                 }}
-                className="w-full min-w-[240px] rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
+                disabled={!isAdmin}
+                className="w-full min-w-[240px] rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {coachConfigs.map((coach) => (
                   <option key={coach.id} value={coach.id}>
@@ -515,23 +731,44 @@ export default function SelectTeamPage() {
               </select>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <button
                 type="button"
                 onClick={handleResetCoachTeam}
-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold hover:bg-white/10"
+                disabled={isSavingTeam || isLoadingTeam || isSubmitted}
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Reset Coach Team
               </button>
               <button
                 type="button"
-                onClick={handleSubmitTeam}
-                className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90"
+                onClick={() => saveTeam(false)}
+                disabled={isSavingTeam || isLoadingTeam}
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Submit Team
+                Save Team
+              </button>
+              <button
+                type="button"
+                onClick={() => saveTeam(true)}
+                disabled={isSavingTeam || isLoadingTeam || isSubmitted}
+                className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isSubmitted ? "Team Submitted" : "Submit Team"}
               </button>
             </div>
           </div>
+
+          {selectedCoach ? (
+            <div className="mt-4 text-xs text-white/60">
+              Status:{" "}
+              {isLoadingTeam
+                ? "Loading saved team..."
+                : isSubmitted
+                  ? "Submitted"
+                  : "Editable"}
+            </div>
+          ) : null}
 
           {submitMessage ? (
             <div className="mt-4 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/85">
@@ -575,7 +812,7 @@ export default function SelectTeamPage() {
                   <div>
                     <h2 className="text-2xl font-bold">{position}</h2>
                     <p className="text-sm text-white/70">
-                      Available only from {selectedCoach.name}'s player pool.
+                      Available only from {selectedCoach.name}&apos;s player pool.
                     </p>
                   </div>
                 </div>
@@ -600,8 +837,8 @@ export default function SelectTeamPage() {
                                 type="button"
                                 onClick={() => handleAddPlayer(position, "onField", player.name)}
                                 disabled={
-                                  teamState[position].onField.length >=
-                                  selectedCoach.slots[position]
+                                  isSubmitted ||
+                                  teamState[position].onField.length >= selectedCoach.slots[position]
                                 }
                                 className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
                               >
@@ -614,6 +851,7 @@ export default function SelectTeamPage() {
                                   handleAddPlayer(position, "emergencies", player.name)
                                 }
                                 disabled={
+                                  isSubmitted ||
                                   selectedCoach.emergencyLimits[position] <= 0 ||
                                   teamState[position].emergencies.length >=
                                     selectedCoach.emergencyLimits[position]
@@ -655,6 +893,7 @@ export default function SelectTeamPage() {
                                   handleMovePlayer(position, "onField", "emergencies", player)
                                 }
                                 disabled={
+                                  isSubmitted ||
                                   selectedCoach.emergencyLimits[position] <= 0 ||
                                   teamState[position].emergencies.length >=
                                     selectedCoach.emergencyLimits[position]
@@ -666,7 +905,8 @@ export default function SelectTeamPage() {
                               <button
                                 type="button"
                                 onClick={() => handleRemovePlayer(position, "onField", player)}
-                                className="rounded-lg bg-red-500/90 px-3 py-2 text-xs font-semibold text-white"
+                                disabled={isSubmitted}
+                                className="rounded-lg bg-red-500/90 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 Remove
                               </button>
@@ -703,8 +943,8 @@ export default function SelectTeamPage() {
                                   handleMovePlayer(position, "emergencies", "onField", player)
                                 }
                                 disabled={
-                                  teamState[position].onField.length >=
-                                  selectedCoach.slots[position]
+                                  isSubmitted ||
+                                  teamState[position].onField.length >= selectedCoach.slots[position]
                                 }
                                 className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                               >
@@ -715,7 +955,8 @@ export default function SelectTeamPage() {
                                 onClick={() =>
                                   handleRemovePlayer(position, "emergencies", player)
                                 }
-                                className="rounded-lg bg-red-500/90 px-3 py-2 text-xs font-semibold text-white"
+                                disabled={isSubmitted}
+                                className="rounded-lg bg-red-500/90 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 Remove
                               </button>
