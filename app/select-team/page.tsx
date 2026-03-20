@@ -1,10 +1,13 @@
+
 "use client";
 
 import React, { useMemo, useState } from "react";
 import * as coachConfigModule from "../../lib/coachConfig";
-import { PLAYERS } from "../../lib/players";
-
-type PositionKey = "KD" | "DEF" | "MID" | "FOR" | "KF" | "RUC";
+import {
+  type CoachPlayerPool,
+  type PositionKey,
+  getPlayersForCoach,
+} from "../../lib/playersByCoach";
 
 type PositionState = {
   onField: string[];
@@ -41,54 +44,14 @@ const DEFAULT_EMERGENCY_LIMITS: Record<PositionKey, number> = {
 };
 
 const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
-  {
-    id: 1,
-    name: "Coach 1",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 2,
-    name: "Coach 2",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 3,
-    name: "Coach 3",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 4,
-    name: "Coach 4",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 5,
-    name: "Coach 5",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 6,
-    name: "Coach 6",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 7,
-    name: "Coach 7",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 8,
-    name: "Coach 8",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
+  { id: 1, name: "Adrian Coach 1", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
+  { id: 2, name: "Chris Coach 2", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
+  { id: 3, name: "Damian Coach 3", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
+  { id: 4, name: "Dane Coach 4", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
+  { id: 5, name: "Josh Coach 5", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
+  { id: 6, name: "Mark Coach 6", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
+  { id: 7, name: "Rick Coach 7", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
+  { id: 8, name: "Troy Coach 8", slots: DEFAULT_ON_FIELD_SLOTS, emergencyLimits: DEFAULT_EMERGENCY_LIMITS },
 ];
 
 function emptyTeamState(): TeamState {
@@ -190,6 +153,16 @@ function normaliseCoachConfigs(): CoachConfigShape[] {
   return FALLBACK_COACH_CONFIGS;
 }
 
+function createTeamsByCoach(coaches: CoachConfigShape[]): Record<number, TeamState> {
+  const initial: Record<number, TeamState> = {};
+
+  for (const coach of coaches) {
+    initial[coach.id] = emptyTeamState();
+  }
+
+  return initial;
+}
+
 function getAllSelectedPlayers(teamState: TeamState): string[] {
   return POSITIONS.flatMap((position) => [
     ...teamState[position].onField,
@@ -216,14 +189,11 @@ function removePlayerFromAllSlots(teamState: TeamState, playerName: string): Tea
   return nextState;
 }
 
-function createTeamsByCoach(coaches: CoachConfigShape[]): Record<number, TeamState> {
-  const initial: Record<number, TeamState> = {};
-
-  for (const coach of coaches) {
-    initial[coach.id] = emptyTeamState();
-  }
-
-  return initial;
+function getCoachPool(selectedCoach: CoachConfigShape | undefined): CoachPlayerPool {
+  return getPlayersForCoach({
+    coachId: selectedCoach?.id,
+    coachName: selectedCoach?.name,
+  });
 }
 
 export default function SelectTeamPage() {
@@ -240,6 +210,7 @@ export default function SelectTeamPage() {
     coachConfigs.find((coach) => coach.id === selectedCoachId) ?? coachConfigs[0];
 
   const teamState = teamsByCoach[selectedCoachId] ?? emptyTeamState();
+  const coachPool = getCoachPool(selectedCoach);
 
   function updateCoachTeamState(nextTeamState: TeamState) {
     setTeamsByCoach((prev) => ({
@@ -365,10 +336,10 @@ export default function SelectTeamPage() {
     setSubmitMessage(`Team submitted for ${selectedCoach?.name}.`);
   }
 
-  function availablePlayersForPosition(position: PositionKey): string[] {
-    return PLAYERS[position]
-      .map((player) => player.name)
-      .filter((playerName) => !isPlayerAlreadySelected(teamState, playerName));
+  function availablePlayersForPosition(position: PositionKey) {
+    return coachPool[position].filter(
+      (player) => !isPlayerAlreadySelected(teamState, player.name)
+    );
   }
 
   return (
@@ -377,7 +348,7 @@ export default function SelectTeamPage() {
         <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
           <h1 className="text-3xl font-bold">Coach Team Selection</h1>
           <p className="mt-2 text-sm text-white/70">
-            Build each coach’s on-field team and emergencies by position.
+            Each coach only sees the players assigned to their own locked pool.
           </p>
 
           <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -435,6 +406,9 @@ export default function SelectTeamPage() {
               <div className="text-lg font-bold">{position}</div>
               <div className="mt-2 space-y-1 text-sm text-white/70">
                 <div>
+                  Pool: {coachPool[position].length}
+                </div>
+                <div>
                   On-field: {teamState[position].onField.length} /{" "}
                   {selectedCoach.slots[position]}
                 </div>
@@ -460,8 +434,7 @@ export default function SelectTeamPage() {
                   <div>
                     <h2 className="text-2xl font-bold">{position}</h2>
                     <p className="text-sm text-white/70">
-                      On-field limit: {selectedCoach.slots[position]} | Emergency limit:{" "}
-                      {selectedCoach.emergencyLimits[position]}
+                      Available only from {selectedCoach.name}'s player pool.
                     </p>
                   </div>
                 </div>
@@ -476,14 +449,17 @@ export default function SelectTeamPage() {
                       ) : (
                         availablePlayers.map((player) => (
                           <div
-                            key={player}
+                            key={`${position}-${player.number}-${player.name}`}
                             className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/5 p-3"
                           >
-                            <div className="text-sm font-medium">{player}</div>
+                            <div className="text-sm font-medium">{player.name}</div>
+                            <div className="text-xs text-white/60">
+                              #{player.number} • {player.club}
+                            </div>
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
-                                onClick={() => handleAddPlayer(position, "onField", player)}
+                                onClick={() => handleAddPlayer(position, "onField", player.name)}
                                 disabled={
                                   teamState[position].onField.length >=
                                   selectedCoach.slots[position]
@@ -495,7 +471,7 @@ export default function SelectTeamPage() {
 
                               <button
                                 type="button"
-                                onClick={() => handleAddPlayer(position, "emergencies", player)}
+                                onClick={() => handleAddPlayer(position, "emergencies", player.name)}
                                 disabled={
                                   selectedCoach.emergencyLimits[position] <= 0 ||
                                   teamState[position].emergencies.length >=
