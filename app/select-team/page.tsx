@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import * as coachConfigModule from "../../lib/coachConfig";
+import { PLAYERS } from "../../lib/players";
 
 type PositionKey = "KD" | "DEF" | "MID" | "FOR" | "KF" | "RUC";
 
@@ -23,46 +24,72 @@ const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
 
 const DEFAULT_ON_FIELD_SLOTS: Record<PositionKey, number> = {
   KD: 2,
-  DEF: 4,
-  MID: 5,
-  FOR: 4,
+  DEF: 5,
+  MID: 7,
+  FOR: 5,
   KF: 2,
   RUC: 1,
 };
 
-const PLACEHOLDER_PLAYERS: Record<PositionKey, string[]> = {
-  KD: ["Key Defender 1", "Key Defender 2", "Key Defender 3", "Key Defender 4"],
-  DEF: [
-    "Defender 1",
-    "Defender 2",
-    "Defender 3",
-    "Defender 4",
-    "Defender 5",
-    "Defender 6",
-    "Defender 7",
-  ],
-  MID: [
-    "Midfielder 1",
-    "Midfielder 2",
-    "Midfielder 3",
-    "Midfielder 4",
-    "Midfielder 5",
-    "Midfielder 6",
-    "Midfielder 7",
-    "Midfielder 8",
-  ],
-  FOR: [
-    "Forward 1",
-    "Forward 2",
-    "Forward 3",
-    "Forward 4",
-    "Forward 5",
-    "Forward 6",
-    "Forward 7",
-  ],
-  KF: ["Key Forward 1", "Key Forward 2", "Key Forward 3", "Key Forward 4"],
-  RUC: ["Ruck 1", "Ruck 2", "Ruck 3"],
+const DEFAULT_EMERGENCY_LIMITS: Record<PositionKey, number> = {
+  KD: 3,
+  DEF: 2,
+  MID: 0,
+  FOR: 2,
+  KF: 3,
+  RUC: 0,
 };
+
+const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
+  {
+    id: 1,
+    name: "Coach 1",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 2,
+    name: "Coach 2",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 3,
+    name: "Coach 3",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 4,
+    name: "Coach 4",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 5,
+    name: "Coach 5",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 6,
+    name: "Coach 6",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 7,
+    name: "Coach 7",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+  {
+    id: 8,
+    name: "Coach 8",
+    slots: DEFAULT_ON_FIELD_SLOTS,
+    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
+  },
+];
 
 function emptyTeamState(): TeamState {
   return {
@@ -75,111 +102,92 @@ function emptyTeamState(): TeamState {
   };
 }
 
+function toNumber(value: unknown, fallback: number): number {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function buildCoachConfig(rawCoach: any, fallbackId: number): CoachConfigShape {
+  const id = toNumber(rawCoach?.id ?? rawCoach?.coachId ?? fallbackId, fallbackId);
+  const name = String(
+    rawCoach?.name ?? rawCoach?.coachName ?? rawCoach?.label ?? `Coach ${id}`
+  );
+
+  const rawSlots =
+    rawCoach?.slots ??
+    rawCoach?.positionLimits ??
+    rawCoach?.onFieldSlots ??
+    rawCoach?.positions ??
+    {};
+
+  const rawEmergencyLimits =
+    rawCoach?.emergencyLimits ??
+    rawCoach?.emergencies ??
+    rawCoach?.benchLimits ??
+    rawCoach?.emergencySlots ??
+    {};
+
+  return {
+    id,
+    name,
+    slots: {
+      KD: toNumber(rawSlots?.KD, DEFAULT_ON_FIELD_SLOTS.KD),
+      DEF: toNumber(rawSlots?.DEF, DEFAULT_ON_FIELD_SLOTS.DEF),
+      MID: toNumber(rawSlots?.MID, DEFAULT_ON_FIELD_SLOTS.MID),
+      FOR: toNumber(rawSlots?.FOR, DEFAULT_ON_FIELD_SLOTS.FOR),
+      KF: toNumber(rawSlots?.KF, DEFAULT_ON_FIELD_SLOTS.KF),
+      RUC: toNumber(rawSlots?.RUC, DEFAULT_ON_FIELD_SLOTS.RUC),
+    },
+    emergencyLimits: {
+      KD: toNumber(rawEmergencyLimits?.KD, DEFAULT_EMERGENCY_LIMITS.KD),
+      DEF: toNumber(rawEmergencyLimits?.DEF, DEFAULT_EMERGENCY_LIMITS.DEF),
+      MID: toNumber(rawEmergencyLimits?.MID, DEFAULT_EMERGENCY_LIMITS.MID),
+      FOR: toNumber(rawEmergencyLimits?.FOR, DEFAULT_EMERGENCY_LIMITS.FOR),
+      KF: toNumber(rawEmergencyLimits?.KF, DEFAULT_EMERGENCY_LIMITS.KF),
+      RUC: toNumber(rawEmergencyLimits?.RUC, DEFAULT_EMERGENCY_LIMITS.RUC),
+    },
+  };
+}
+
 function normaliseCoachConfigs(): CoachConfigShape[] {
   const mod = coachConfigModule as Record<string, unknown>;
 
-  const candidate =
+  const arrayCandidate =
     mod.coachConfigs ??
     mod.COACH_CONFIGS ??
+    mod.coaches ??
+    mod.COACHES ??
+    mod.default;
+
+  if (Array.isArray(arrayCandidate) && arrayCandidate.length > 0) {
+    return arrayCandidate.map((coach: any, index: number) =>
+      buildCoachConfig(coach, index + 1)
+    );
+  }
+
+  const objectCandidate =
     mod.coachConfig ??
-    mod.default ??
-    [];
+    mod.COACH_CONFIG ??
+    mod.defaultCoachConfig ??
+    mod.default_coach_config;
 
-  if (Array.isArray(candidate)) {
-    return candidate.map((coach: any, index: number) => {
-      const id = Number(coach?.id ?? coach?.coachId ?? index + 1);
-      const name = String(coach?.name ?? coach?.coachName ?? `Coach ${id}`);
+  if (objectCandidate && typeof objectCandidate === "object") {
+    const entries = Object.entries(objectCandidate as Record<string, any>);
 
-      const rawSlots =
-        coach?.slots ??
-        coach?.positionLimits ??
-        coach?.onFieldSlots ??
-        DEFAULT_ON_FIELD_SLOTS;
-
-      const rawEmergencyLimits =
-        coach?.emergencyLimits ??
-        coach?.emergencies ??
-        coach?.benchLimits ??
-        {};
-
-      const slots: Record<PositionKey, number> = {
-        KD: Number(rawSlots?.KD ?? DEFAULT_ON_FIELD_SLOTS.KD),
-        DEF: Number(rawSlots?.DEF ?? DEFAULT_ON_FIELD_SLOTS.DEF),
-        MID: Number(rawSlots?.MID ?? DEFAULT_ON_FIELD_SLOTS.MID),
-        FOR: Number(rawSlots?.FOR ?? DEFAULT_ON_FIELD_SLOTS.FOR),
-        KF: Number(rawSlots?.KF ?? DEFAULT_ON_FIELD_SLOTS.KF),
-        RUC: Number(rawSlots?.RUC ?? DEFAULT_ON_FIELD_SLOTS.RUC),
-      };
-
-      const emergencyLimits: Record<PositionKey, number> = {
-        KD: Number(rawEmergencyLimits?.KD ?? 0),
-        DEF: Number(rawEmergencyLimits?.DEF ?? 0),
-        MID: Number(rawEmergencyLimits?.MID ?? 0),
-        FOR: Number(rawEmergencyLimits?.FOR ?? 0),
-        KF: Number(rawEmergencyLimits?.KF ?? 0),
-        RUC: Number(rawEmergencyLimits?.RUC ?? 0),
-      };
-
-      return { id, name, slots, emergencyLimits };
-    });
+    if (entries.length > 0) {
+      return entries.map(([key, coach], index) =>
+        buildCoachConfig(
+          {
+            id: coach?.id ?? coach?.coachId ?? key,
+            ...coach,
+          },
+          index + 1
+        )
+      );
+    }
   }
 
-  if (candidate && typeof candidate === "object") {
-    const entries = Object.entries(candidate as Record<string, any>);
-
-    return entries.map(([key, coach], index) => {
-      const id = Number(coach?.id ?? coach?.coachId ?? key ?? index + 1);
-      const name = String(coach?.name ?? coach?.coachName ?? `Coach ${id}`);
-
-      const rawSlots =
-        coach?.slots ??
-        coach?.positionLimits ??
-        coach?.onFieldSlots ??
-        DEFAULT_ON_FIELD_SLOTS;
-
-      const rawEmergencyLimits =
-        coach?.emergencyLimits ??
-        coach?.emergencies ??
-        coach?.benchLimits ??
-        {};
-
-      const slots: Record<PositionKey, number> = {
-        KD: Number(rawSlots?.KD ?? DEFAULT_ON_FIELD_SLOTS.KD),
-        DEF: Number(rawSlots?.DEF ?? DEFAULT_ON_FIELD_SLOTS.DEF),
-        MID: Number(rawSlots?.MID ?? DEFAULT_ON_FIELD_SLOTS.MID),
-        FOR: Number(rawSlots?.FOR ?? DEFAULT_ON_FIELD_SLOTS.FOR),
-        KF: Number(rawSlots?.KF ?? DEFAULT_ON_FIELD_SLOTS.KF),
-        RUC: Number(rawSlots?.RUC ?? DEFAULT_ON_FIELD_SLOTS.RUC),
-      };
-
-      const emergencyLimits: Record<PositionKey, number> = {
-        KD: Number(rawEmergencyLimits?.KD ?? 0),
-        DEF: Number(rawEmergencyLimits?.DEF ?? 0),
-        MID: Number(rawEmergencyLimits?.MID ?? 0),
-        FOR: Number(rawEmergencyLimits?.FOR ?? 0),
-        KF: Number(rawEmergencyLimits?.KF ?? 0),
-        RUC: Number(rawEmergencyLimits?.RUC ?? 0),
-      };
-
-      return { id, name, slots, emergencyLimits };
-    });
-  }
-
-  return [
-    {
-      id: 1,
-      name: "Coach 1",
-      slots: DEFAULT_ON_FIELD_SLOTS,
-      emergencyLimits: {
-        KD: 0,
-        DEF: 0,
-        MID: 0,
-        FOR: 0,
-        KF: 0,
-        RUC: 0,
-      },
-    },
-  ];
+  return FALLBACK_COACH_CONFIGS;
 }
 
 function getAllSelectedPlayers(teamState: TeamState): string[] {
@@ -208,18 +216,24 @@ function removePlayerFromAllSlots(teamState: TeamState, playerName: string): Tea
   return nextState;
 }
 
+function createTeamsByCoach(coaches: CoachConfigShape[]): Record<number, TeamState> {
+  const initial: Record<number, TeamState> = {};
+
+  for (const coach of coaches) {
+    initial[coach.id] = emptyTeamState();
+  }
+
+  return initial;
+}
+
 export default function SelectTeamPage() {
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
-  const [selectedCoachId, setSelectedCoachId] = useState<number>(coachConfigs[0]?.id ?? 1);
-
-  const [teamsByCoach, setTeamsByCoach] = useState<Record<number, TeamState>>(() => {
-    const initial: Record<number, TeamState> = {};
-    for (const coach of coachConfigs) {
-      initial[coach.id] = emptyTeamState();
-    }
-    return initial;
-  });
-
+  const [selectedCoachId, setSelectedCoachId] = useState<number>(
+    coachConfigs[0]?.id ?? 1
+  );
+  const [teamsByCoach, setTeamsByCoach] = useState<Record<number, TeamState>>(() =>
+    createTeamsByCoach(coachConfigs)
+  );
   const [submitMessage, setSubmitMessage] = useState<string>("");
 
   const selectedCoach =
@@ -251,17 +265,9 @@ export default function SelectTeamPage() {
 
     const currentBucket = teamState[position][bucket];
 
-    if (currentBucket.includes(playerName)) {
-      return;
-    }
-
-    if (currentBucket.length >= limit) {
-      return;
-    }
-
-    if (isPlayerAlreadySelected(teamState, playerName)) {
-      return;
-    }
+    if (currentBucket.includes(playerName)) return;
+    if (currentBucket.length >= limit) return;
+    if (isPlayerAlreadySelected(teamState, playerName)) return;
 
     const nextState = structuredClone(teamState) as TeamState;
     nextState[position][bucket].push(playerName);
@@ -296,12 +302,9 @@ export default function SelectTeamPage() {
         ? selectedCoach.slots[position]
         : selectedCoach.emergencyLimits[position];
 
-    if (teamState[position][to].length >= limit) {
-      return;
-    }
+    if (teamState[position][to].length >= limit) return;
 
     const nextState = removePlayerFromAllSlots(teamState, playerName);
-
     nextState[position][to].push(playerName);
     updateCoachTeamState(nextState);
     setSubmitMessage("");
@@ -322,7 +325,6 @@ export default function SelectTeamPage() {
     for (const position of POSITIONS) {
       const onFieldRequired = selectedCoach.slots[position];
       const emergenciesAllowed = selectedCoach.emergencyLimits[position];
-
       const onFieldCount = teamState[position].onField.length;
       const emergencyCount = teamState[position].emergencies.length;
 
@@ -364,22 +366,9 @@ export default function SelectTeamPage() {
   }
 
   function availablePlayersForPosition(position: PositionKey): string[] {
-    return PLACEHOLDER_PLAYERS[position].filter(
-      (player) => !isPlayerAlreadySelected(teamState, player)
-    );
-  }
-
-  if (!selectedCoach) {
-    return (
-      <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
-        <div className="mx-auto max-w-5xl rounded-2xl border border-white/10 bg-white/5 p-6">
-          <h1 className="text-2xl font-bold">Select Team</h1>
-          <p className="mt-4 text-sm text-white/70">
-            No coach configuration found. Check <code>lib/coachConfig.ts</code>.
-          </p>
-        </div>
-      </main>
-    );
+    return PLAYERS[position]
+      .map((player) => player.name)
+      .filter((playerName) => !isPlayerAlreadySelected(teamState, playerName));
   }
 
   return (
@@ -445,7 +434,10 @@ export default function SelectTeamPage() {
             >
               <div className="text-lg font-bold">{position}</div>
               <div className="mt-2 space-y-1 text-sm text-white/70">
-                <div>On-field: {teamState[position].onField.length} / {selectedCoach.slots[position]}</div>
+                <div>
+                  On-field: {teamState[position].onField.length} /{" "}
+                  {selectedCoach.slots[position]}
+                </div>
                 <div>
                   Emergencies: {teamState[position].emergencies.length} /{" "}
                   {selectedCoach.emergencyLimits[position]}
@@ -550,9 +542,7 @@ export default function SelectTeamPage() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() =>
-                                  handleRemovePlayer(position, "onField", player)
-                                }
+                                onClick={() => handleRemovePlayer(position, "onField", player)}
                                 className="rounded-lg bg-red-500/90 px-3 py-2 text-xs font-semibold text-white"
                               >
                                 Remove
