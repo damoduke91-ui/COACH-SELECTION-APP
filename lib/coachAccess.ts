@@ -1,3 +1,5 @@
+import { supabase } from "./supabase";
+
 export type AppRole = "admin" | "coach";
 
 export type CoachAccessRecord = {
@@ -5,19 +7,6 @@ export type CoachAccessRecord = {
   coachName: string;
   passcode: string;
 };
-
-export const ADMIN_PASSCODE = "super8admin";
-
-export const COACH_ACCESS: CoachAccessRecord[] = [
-  { coachId: 1, coachName: "Adrian Coach 1", passcode: "adrian1" },
-  { coachId: 2, coachName: "Chris Coach 2", passcode: "chris2" },
-  { coachId: 3, coachName: "Damian Coach 3", passcode: "damian3" },
-  { coachId: 4, coachName: "Dane Coach 4", passcode: "dane4" },
-  { coachId: 5, coachName: "Josh Coach 5", passcode: "josh5" },
-  { coachId: 6, coachName: "Mark Coach 6", passcode: "mark6" },
-  { coachId: 7, coachName: "Rick Coach 7", passcode: "rick7" },
-  { coachId: 8, coachName: "Troy Coach 8", passcode: "troy8" },
-];
 
 export type LoginSession =
   | {
@@ -31,14 +20,34 @@ export type LoginSession =
       coachName: string;
     };
 
-export function getCoachAccessByPasscode(passcode: string): CoachAccessRecord | null {
+/**
+ * Fetch a login match from Supabase
+ */
+export async function getAccessByPasscode(
+  passcode: string
+): Promise<LoginSession | null> {
   const normalised = passcode.trim().toLowerCase();
 
-  return (
-    COACH_ACCESS.find((coach) => coach.passcode.trim().toLowerCase() === normalised) ?? null
-  );
-}
+  const { data, error } = await supabase
+    .from("coach_access")
+    .select("*")
+    .ilike("passcode", normalised)
+    .limit(1)
+    .maybeSingle();
 
-export function isAdminPasscode(passcode: string): boolean {
-  return passcode.trim().toLowerCase() === ADMIN_PASSCODE.trim().toLowerCase();
+  if (error || !data) return null;
+
+  if (data.role === "admin") {
+    return {
+      role: "admin",
+      coachId: null,
+      coachName: "Admin",
+    };
+  }
+
+  return {
+    role: "coach",
+    coachId: data.coach_id,
+    coachName: data.coach_name,
+  };
 }
