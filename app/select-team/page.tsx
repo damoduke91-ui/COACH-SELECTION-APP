@@ -392,6 +392,18 @@ export default function SelectTeamPage() {
   const teamState = teamsByCoach[selectedCoachId] ?? emptyTeamState();
   const coachPool = getCoachPool(selectedCoach);
 
+  const canEditSelectedCoach = Boolean(
+    selectedCoach &&
+      loginSession &&
+      !isLoadingTeam &&
+      (isAdmin || loginSession.coachId === selectedCoach.id) &&
+      !Boolean(submittedCoachIds[selectedCoach.id])
+  );
+
+  const canUnlockSelectedCoach = Boolean(
+    isAdmin && selectedCoach && Boolean(submittedCoachIds[selectedCoach.id])
+  );
+
   const playerLookup = useMemo(() => {
     const lookup = new Map<string, { name: string; club: string; number: number }>();
 
@@ -851,7 +863,7 @@ export default function SelectTeamPage() {
     if (!selectedCoach) return;
     if (!playerName) return;
     if (isSavingTeam) return;
-    if (submittedCoachIds[selectedCoach.id]) return;
+    if (!canEditSelectedCoach) return;
 
     const limit =
       bucket === "onField"
@@ -878,7 +890,7 @@ export default function SelectTeamPage() {
   ) {
     if (!selectedCoach) return;
     if (isSavingTeam) return;
-    if (submittedCoachIds[selectedCoach.id]) return;
+    if (!canEditSelectedCoach) return;
 
     const nextState = structuredClone(teamState) as TeamState;
     nextState[position][bucket] = nextState[position][bucket].filter(
@@ -896,7 +908,7 @@ export default function SelectTeamPage() {
     if (!selectedCoach) return;
     if (from === to) return;
     if (isSavingTeam) return;
-    if (submittedCoachIds[selectedCoach.id]) return;
+    if (!canEditSelectedCoach) return;
 
     const limit =
       to === "onField"
@@ -913,7 +925,7 @@ export default function SelectTeamPage() {
   function handleMoveEmergencyUp(position: PositionKey, index: number) {
     if (!selectedCoach) return;
     if (isSavingTeam) return;
-    if (submittedCoachIds[selectedCoach.id]) return;
+    if (!canEditSelectedCoach) return;
     if (index <= 0) return;
 
     const nextState = structuredClone(teamState) as TeamState;
@@ -928,7 +940,7 @@ export default function SelectTeamPage() {
   function handleMoveEmergencyDown(position: PositionKey, index: number) {
     if (!selectedCoach) return;
     if (isSavingTeam) return;
-    if (submittedCoachIds[selectedCoach.id]) return;
+    if (!canEditSelectedCoach) return;
     if (index >= teamState[position].emergencies.length - 1) return;
 
     const nextState = structuredClone(teamState) as TeamState;
@@ -943,7 +955,7 @@ export default function SelectTeamPage() {
   function handleResetCoachTeam() {
     if (!selectedCoach) return;
     if (isSavingTeam) return;
-    if (submittedCoachIds[selectedCoach.id]) return;
+    if (!canEditSelectedCoach) return;
 
     updateCoachTeamState(emptyTeamState());
     setSubmitMessage(`Team reset for ${selectedCoach.name}. Save it again when ready.`);
@@ -999,6 +1011,21 @@ export default function SelectTeamPage() {
       skipIncompleteWarning = false,
       source = "manual",
     }: SaveTeamOptions) => {
+      if (!loginSession) {
+        setSubmitMessage("You must be logged in to save a team.");
+        return;
+      }
+
+      if (!isAdmin && loginSession.coachId !== coach.id) {
+        setSubmitMessage("You do not have permission to save this team.");
+        return;
+      }
+
+      if (!isSubmitting && (submittedCoachIds[coach.id] ?? false)) {
+        setSubmitMessage(`${coach.name} is locked because the final team has already been submitted.`);
+        return;
+      }
+
       const result = validateTeamState(coach, team);
 
       if (isSubmitting) {
@@ -1090,6 +1117,8 @@ export default function SelectTeamPage() {
       coachMetaById,
       dirtyCoachIds,
       getCoachChangeVersion,
+      isAdmin,
+      loginSession,
       markCoachAsSaved,
       setCoachDirtyState,
       submittedCoachIds,
@@ -1098,6 +1127,10 @@ export default function SelectTeamPage() {
 
   async function unlockTeam() {
     if (!selectedCoach) return;
+    if (!isAdmin) {
+      setSubmitMessage("Only admin can unlock a submitted team.");
+      return;
+    }
 
     setIsSavingTeam(true);
     setCoachDirtyState(selectedCoach.id, "saving");
@@ -1143,8 +1176,20 @@ export default function SelectTeamPage() {
       [selectedCoach.id]: true,
     }));
 
+    setDirtyCoachIds((prev) => ({
+      ...prev,
+      [selectedCoach.id]: false,
+    }));
+
+    setSaveIndicatorByCoachId((prev) => ({
+      ...prev,
+      [selectedCoach.id]: "saved",
+    }));
+
     markCoachAsSaved(selectedCoach.id);
-    setSubmitMessage(`${selectedCoach.name}'s team has been unlocked. Changes can now be made.`);
+    setSubmitMessage(
+      `${selectedCoach.name}'s team has been unlocked. Save Team, Reset Team, and Submit Final Team are available again.`
+    );
     setIsSavingTeam(false);
   }
 
@@ -1676,7 +1721,7 @@ export default function SelectTeamPage() {
               <h2 className="text-2xl font-bold">Team Controls</h2>
               <p className="mt-1 text-sm text-white/70">
                 {isAdmin
-                  ? "Admin can switch between all coaches."
+                  ? "Admin can switch between all coaches and unlock submitted teams."
                   : "Coach access is locked to your own team."}
               </p>
             </div>
@@ -1711,11 +1756,15 @@ export default function SelectTeamPage() {
 
             {isSubmitted ? (
               <div className="text-xs text-emerald-200/90">
-                This final team is locked until it is unlocked for changes.
+                This final team is locked until admin unlocks it for changes.
+              </div>
+            ) : canEditSelectedCoach ? (
+              <div className="text-xs text-white/60">
+                Save Team, Reset Team, and Submit Final Team are available.
               </div>
             ) : (
               <div className="text-xs text-white/60">
-                This team can still be edited before final submission.
+                This team cannot be edited from the current session.
               </div>
             )}
 
@@ -1731,8 +1780,19 @@ export default function SelectTeamPage() {
             <div>Submitted at: {formatTimestamp(coachMeta.submittedAt)}</div>
           </div>
 
+          {canUnlockSelectedCoach ? (
+            <div className="mt-4 rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
+              <div className="mb-2 text-sm font-semibold text-sky-100">
+                Admin unlock available
+              </div>
+              <div className="text-sm text-sky-100/80">
+                Unlock this submitted team to restore Save Team, Reset Team, and Submit Final Team.
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-4 flex flex-wrap gap-3">
-            {!isSubmitted && (
+            {canEditSelectedCoach && (
               <>
                 <button
                   type="button"
@@ -1781,7 +1841,7 @@ export default function SelectTeamPage() {
               </>
             )}
 
-            {isAdmin && isSubmitted && (
+            {canUnlockSelectedCoach && (
               <button
                 type="button"
                 onClick={() => void unlockTeam()}
@@ -1923,7 +1983,7 @@ export default function SelectTeamPage() {
                             <div className="font-semibold">{player}</div>
                             <div className="text-xs text-white/50">{getPlayerClub(player)}</div>
 
-                            {!isSubmitted && (
+                            {canEditSelectedCoach && (
                               <div className="mt-3 flex flex-wrap gap-2">
                                 <button
                                   type="button"
@@ -1951,7 +2011,7 @@ export default function SelectTeamPage() {
                       )}
                     </div>
 
-                    {!isSubmitted &&
+                    {canEditSelectedCoach &&
                     selectedCoach &&
                     teamState[position].onField.length < selectedCoach.slots[position] ? (
                       <div className="mt-4">
@@ -2000,7 +2060,7 @@ export default function SelectTeamPage() {
                             </div>
                             <div className="text-xs text-white/50">{getPlayerClub(player)}</div>
 
-                            {!isSubmitted && (
+                            {canEditSelectedCoach && (
                               <div className="mt-3 flex flex-wrap gap-2">
                                 <button
                                   type="button"
@@ -2046,7 +2106,7 @@ export default function SelectTeamPage() {
                       )}
                     </div>
 
-                    {!isSubmitted &&
+                    {canEditSelectedCoach &&
                     selectedCoach &&
                     teamState[position].emergencies.length <
                       selectedCoach.emergencyLimits[position] ? (
