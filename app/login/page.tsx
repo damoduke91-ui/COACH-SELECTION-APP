@@ -18,9 +18,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [loginError, setLoginError] = useState("");
   const [isCheckingSession, setIsCheckingSession] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -36,7 +36,7 @@ export default function LoginPage() {
       if (!isMounted) return;
 
       if (error) {
-        setLoginError(`Session check failed: ${error.message}`);
+        setMessage(`Session check failed: ${error.message}`);
         setIsCheckingSession(false);
         return;
       }
@@ -54,10 +54,14 @@ export default function LoginPage() {
 
       if (!isMounted) return;
 
-      if (profileError || !profile) {
-        setLoginError(
-          `Profile load failed: ${profileError?.message ?? "No profile found for this user."}`
-        );
+      if (profileError) {
+        setMessage(`Profile check failed: ${profileError.message}`);
+        setIsCheckingSession(false);
+        return;
+      }
+
+      if (!(profile as UserProfileRow | null)) {
+        setMessage("No profile found for this account.");
         setIsCheckingSession(false);
         return;
       }
@@ -72,23 +76,23 @@ export default function LoginPage() {
     };
   }, [router]);
 
-  async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const trimmedEmail = email.trim();
 
     if (!trimmedEmail) {
-      setLoginError("Enter your email.");
+      setMessage("Enter your email address.");
       return;
     }
 
     if (!password) {
-      setLoginError("Enter your password.");
+      setMessage("Enter your password.");
       return;
     }
 
-    setLoginError("");
-    setIsSubmitting(true);
+    setIsSigningIn(true);
+    setMessage("");
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email: trimmedEmail,
@@ -96,16 +100,16 @@ export default function LoginPage() {
     });
 
     if (error) {
-      setLoginError(`Login failed: ${error.message}`);
-      setIsSubmitting(false);
+      setMessage(`Login failed: ${error.message}`);
+      setIsSigningIn(false);
       return;
     }
 
     const user = data.user;
 
     if (!user) {
-      setLoginError("Login succeeded, but no user was returned.");
-      setIsSubmitting(false);
+      setMessage("Login succeeded, but no user was returned.");
+      setIsSigningIn(false);
       return;
     }
 
@@ -115,137 +119,103 @@ export default function LoginPage() {
       .eq("id", user.id)
       .single();
 
-    if (profileError || !profile) {
-      setLoginError(
-        `Profile load failed: ${profileError?.message ?? "No profile found for this user."}`
-      );
-      await supabase.auth.signOut();
-      setIsSubmitting(false);
+    if (profileError) {
+      setMessage(`Profile load failed: ${profileError.message}`);
+      setIsSigningIn(false);
       return;
     }
 
-    const typedProfile = profile as UserProfileRow;
-
-    if (typedProfile.role === "coach" && !typedProfile.coach_id) {
-      setLoginError("Coach profile is missing coach_id.");
-      await supabase.auth.signOut();
-      setIsSubmitting(false);
+    if (!(profile as UserProfileRow | null)) {
+      setMessage("No profile found for this user.");
+      setIsSigningIn(false);
       return;
     }
 
     router.replace("/select-team");
-    router.refresh();
-  }
-
-  if (isCheckingSession) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-white">
-        <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-6 py-12">
-          <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center shadow-2xl">
-            <h1 className="text-2xl font-semibold">Coach Login</h1>
-            <p className="mt-3 text-sm text-slate-400">Checking your session...</p>
-          </div>
-        </div>
-      </main>
-    );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-6 py-12">
-        <div className="grid w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl md:grid-cols-2">
-          <div className="flex flex-col justify-center bg-gradient-to-br from-emerald-700 via-emerald-800 to-slate-900 p-8 md:p-12">
-            <div className="inline-flex w-fit rounded-full bg-white/10 px-3 py-1 text-sm font-medium text-emerald-100">
-              Coaches Portal
-            </div>
+    <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
+      <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
+        <h1 className="text-3xl font-bold">Coach Team Login</h1>
+        <p className="mt-2 text-sm text-white/70">
+          Sign in with your Supabase Auth email and password.
+        </p>
 
-            <h1 className="mt-6 text-3xl font-bold sm:text-4xl">
-              Login to submit your weekly team
-            </h1>
-
-            <p className="mt-4 max-w-md text-sm leading-6 text-emerald-50/85 sm:text-base">
-              Coaches will log in here, select their team for the round, order
-              emergencies by position, and submit before the weekly deadline.
-            </p>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-white/80">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setMessage("");
+              }}
+              className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
+              placeholder="Enter email"
+              autoComplete="email"
+              disabled={isCheckingSession || isSigningIn}
+            />
           </div>
 
-          <div className="flex items-center justify-center p-8 md:p-12">
-            <div className="w-full max-w-md">
-              <h2 className="text-2xl font-semibold">Coach Login</h2>
-              <p className="mt-2 text-sm text-slate-400">
-                Sign in with your Supabase Auth email and password.
-              </p>
-
-              <form onSubmit={handleLogin} className="mt-8 space-y-5">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-200">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      setLoginError("");
-                    }}
-                    placeholder="coach@email.com"
-                    autoComplete="email"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-200">
-                    Password
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={password}
-                      onChange={(e) => {
-                        setPassword(e.target.value);
-                        setLoginError("");
-                      }}
-                      placeholder="Enter password"
-                      autoComplete="current-password"
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                      className="shrink-0 rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:border-emerald-400"
-                    >
-                      {showPassword ? "Hide" : "Show"}
-                    </button>
-                  </div>
-                </div>
-
-                {loginError ? (
-                  <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                    {loginError}
-                  </div>
-                ) : null}
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full rounded-xl bg-emerald-500 px-4 py-3 font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSubmitting ? "Logging in..." : "Login"}
-                </button>
-              </form>
-
-              <div className="mt-6 flex items-center justify-between text-sm text-slate-400">
-                <Link href="/" className="hover:text-white">
-                  Back to Home
-                </Link>
-
-                <Link href="/select-team" className="hover:text-white">
-                  Go to Selection Page
-                </Link>
-              </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-white/80">Password</label>
+            <div className="flex gap-2">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setMessage("");
+                }}
+                className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
+                placeholder="Enter password"
+                autoComplete="current-password"
+                disabled={isCheckingSession || isSigningIn}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                disabled={isCheckingSession || isSigningIn}
+                className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
             </div>
           </div>
+
+          {message ? (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              {message}
+            </div>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={isCheckingSession || isSigningIn}
+            className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isCheckingSession ? "Checking Session..." : isSigningIn ? "Signing In..." : "Log In"}
+          </button>
+        </form>
+
+        <div className="mt-4 text-center">
+          <Link
+            href="/forgot-password"
+            className="text-sm font-semibold text-sky-200 hover:text-sky-100"
+          >
+            Forgot Password?
+          </Link>
+        </div>
+
+        <div className="mt-6">
+          <Link
+            href="/"
+            className="block w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-white/10"
+          >
+            Back to Home
+          </Link>
         </div>
       </div>
     </main>
