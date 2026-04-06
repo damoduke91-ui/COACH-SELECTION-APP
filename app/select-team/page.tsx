@@ -392,16 +392,24 @@ export default function SelectTeamPage() {
   const teamState = teamsByCoach[selectedCoachId] ?? emptyTeamState();
   const coachPool = getCoachPool(selectedCoach);
 
+  const canViewSelectedCoach = Boolean(
+    selectedCoach && loginSession && (isAdmin || loginSession.coachId === selectedCoach.id)
+  );
+
   const canEditSelectedCoach = Boolean(
     selectedCoach &&
       loginSession &&
       !isLoadingTeam &&
-      (isAdmin || loginSession.coachId === selectedCoach.id) &&
+      canViewSelectedCoach &&
       !Boolean(submittedCoachIds[selectedCoach.id])
   );
 
   const canUnlockSelectedCoach = Boolean(
-    isAdmin && selectedCoach && Boolean(submittedCoachIds[selectedCoach.id])
+    selectedCoach &&
+      loginSession &&
+      !isLoadingTeam &&
+      canViewSelectedCoach &&
+      Boolean(submittedCoachIds[selectedCoach.id])
   );
 
   const playerLookup = useMemo(() => {
@@ -1127,8 +1135,15 @@ export default function SelectTeamPage() {
 
   async function unlockTeam() {
     if (!selectedCoach) return;
-    if (!isAdmin) {
-      setSubmitMessage("Only admin can unlock a submitted team.");
+    if (!loginSession) {
+      setSubmitMessage("You must be logged in to unlock a team.");
+      return;
+    }
+
+    const canUnlockThisTeam = isAdmin || loginSession.coachId === selectedCoach.id;
+
+    if (!canUnlockThisTeam) {
+      setSubmitMessage("You do not have permission to unlock this team.");
       return;
     }
 
@@ -1722,7 +1737,7 @@ export default function SelectTeamPage() {
               <p className="mt-1 text-sm text-white/70">
                 {isAdmin
                   ? "Admin can switch between all coaches and unlock submitted teams."
-                  : "Coach access is locked to your own team."}
+                  : "Coach access is locked to your own team, including unlocking your own submitted team."}
               </p>
             </div>
 
@@ -1756,7 +1771,7 @@ export default function SelectTeamPage() {
 
             {isSubmitted ? (
               <div className="text-xs text-emerald-200/90">
-                This final team is locked until admin unlocks it for changes.
+                This final team is locked until it is unlocked for changes.
               </div>
             ) : canEditSelectedCoach ? (
               <div className="text-xs text-white/60">
@@ -1783,7 +1798,7 @@ export default function SelectTeamPage() {
           {canUnlockSelectedCoach ? (
             <div className="mt-4 rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
               <div className="mb-2 text-sm font-semibold text-sky-100">
-                Admin unlock available
+                Unlock available
               </div>
               <div className="text-sm text-sky-100/80">
                 Unlock this submitted team to restore Save Team, Reset Team, and Submit Final Team.
