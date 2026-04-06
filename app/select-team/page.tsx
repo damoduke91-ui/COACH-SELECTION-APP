@@ -9,7 +9,6 @@ import {
   getPlayersForCoach,
 } from "../../lib/playersByCoach";
 import { supabase } from "../../lib/supabase";
-import { type LoginSession, getAccessByPasscode } from "../../lib/coachAccess";
 
 type PositionState = {
   onField: string[];
@@ -57,6 +56,21 @@ type ExportPlayerRow = {
   "Player Name": string;
   Selected: string;
   "Selection Order": number | string;
+};
+
+type LoginSession = {
+  userId: string;
+  email: string;
+  role: "admin" | "coach";
+  coachId: number | null;
+  coachName: string;
+};
+
+type UserProfileRow = {
+  id: string;
+  role: "admin" | "coach";
+  coach_id: number | null;
+  coach_name: string | null;
 };
 
 const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
@@ -130,32 +144,7 @@ const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
   },
 ];
 
-const SESSION_STORAGE_KEY = "coach-selection-app-login-v1";
 const AUTO_SAVE_DEBOUNCE_MS = 10000;
-
-function readStoredLoginSession(): LoginSession | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
-
-    if (!raw) {
-      return null;
-    }
-
-    const parsed = JSON.parse(raw) as LoginSession;
-
-    if (!parsed || typeof parsed !== "object" || !("role" in parsed)) {
-      return null;
-    }
-
-    return parsed;
-  } catch {
-    return null;
-  }
-}
 
 function emptyTeamState(): TeamState {
   return {
@@ -369,16 +358,15 @@ function safeSheetName(input: string): string {
 
 export default function SelectTeamPage() {
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
-  const initialLoginSession = readStoredLoginSession();
-  const [loginSession, setLoginSession] = useState<LoginSession | null>(initialLoginSession);
-  const [loginPasscode, setLoginPasscode] = useState("");
-  const [showPasscode, setShowPasscode] = useState(false);
+
+  const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState("");
-  const [selectedCoachId, setSelectedCoachId] = useState<number>(() =>
-    initialLoginSession?.role === "coach"
-      ? initialLoginSession.coachId
-      : (coachConfigs[0]?.id ?? 1)
-  );
+  const [isAuthenticating, setIsAuthenticating] = useState(true);
+
+  const [selectedCoachId, setSelectedCoachId] = useState<number>(coachConfigs[0]?.id ?? 1);
   const [teamsByCoach, setTeamsByCoach] = useState<TeamsByCoach>(() =>
     createTeamsByCoach(coachConfigs)
   );
@@ -419,6 +407,153 @@ export default function SelectTeamPage() {
 
     return lookup;
   }, [coachPool]);
+
+  const resetSessionScopedState = useCallback(() => {
+    setLoadedCoachIds({});
+    setSubmittedCoachIds({});
+    setCoachMetaById({});
+    setDirtyCoachIds({});
+    setSaveIndicatorByCoachId({});
+    setSubmitMessage("");
+    setTeamsByCoach(createTeamsByCoach(coachConfigs));
+    changeVersionByCoachIdRef.current = {};
+  }, [coachConfigs]);
+
+  const loadProfileForUser = useCallback(
+    async (userId: string, email: string): Promise<LoginSession | null> => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, role, coach_id, coach_name")
+        .eq("id", userId)
+        .single();
+
+      if (error) {
+        setLoginError(`Profile load failed: ${error.message}`);
+        return null;
+      }
+
+      const profile = data as UserProfileRow | null;
+
+      if (!profile) {
+        setLoginError("No profile found for this user.");
+        return null;
+      }
+
+      if (profile.role === "coach" && !profile.coach_id) {
+        setLoginError("Coach profile is missing coach_id.");
+        return null;
+      }
+
+      return {
+        userId,
+        email,
+        role: profile.role,
+        coachId: profile.coach_id,
+        coachName:
+          profile.coach_name?.trim() ||
+          (profile.role === "admin"
+            ? "Admin"
+            : `Coach ${profile.coach_id ?? ""}`.trim()),
+      };
+    },
+    []
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function bootstrapAuth() {
+      setIsAuthenticating(true);
+      setLoginError("");
+
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+
+      if (!isMounted) return;
+
+      if (error) {
+        setLoginError(`Session check failed: ${error.message}`);
+        setIsAuthenticating(false);
+        return;
+      }
+
+      if (!session?.user) {
+        setLoginSession(null);
+        setIsAuthenticating(false);
+        return;
+      }
+
+      const nextSession = await loadProfileForUser(
+        session.user.id,
+        session.user.email ?? ""
+      );
+
+      if (!isMounted) return;
+
+      if (nextSession) {
+        setLoginSession(nextSession);
+
+        if (nextSession.role === "coach" && nextSession.coachId) {
+          setSelectedCoachId(nextSession.coachId);
+        }
+      } else {
+        setLoginSession(null);
+      }
+
+      setIsAuthenticating(false);
+    }
+
+    void bootstrapAuth();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      void (async () => {
+        if (!isMounted) return;
+
+        if (!session?.user) {
+          setLoginSession(null);
+          resetSessionScopedState();
+          setIsAuthenticating(false);
+          return;
+        }
+
+        const nextSession = await loadProfileForUser(
+          session.user.id,
+          session.user.email ?? ""
+        );
+
+        if (!isMounted) return;
+
+        if (nextSession) {
+          setLoginSession(nextSession);
+
+          if (nextSession.role === "coach" && nextSession.coachId) {
+            setSelectedCoachId(nextSession.coachId);
+          }
+        } else {
+          setLoginSession(null);
+        }
+
+        setIsAuthenticating(false);
+      })();
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [loadProfileForUser, resetSessionScopedState]);
+
+  useEffect(() => {
+    if (!loginSession) return;
+
+    if (loginSession.role === "coach" && loginSession.coachId) {
+      setSelectedCoachId(loginSession.coachId);
+    }
+  }, [loginSession]);
 
   useEffect(() => {
     async function loadCoachTeam() {
@@ -468,11 +603,14 @@ export default function SelectTeamPage() {
         ...prev,
         [selectedCoach.id]: true,
       }));
+
       changeVersionByCoachIdRef.current[selectedCoach.id] = 0;
+
       setDirtyCoachIds((prev) => ({
         ...prev,
         [selectedCoach.id]: false,
       }));
+
       setSaveIndicatorByCoachId((prev) => ({
         ...prev,
         [selectedCoach.id]: "saved",
@@ -481,7 +619,7 @@ export default function SelectTeamPage() {
       setIsLoadingTeam(false);
     }
 
-    loadCoachTeam();
+    void loadCoachTeam();
   }, [selectedCoach, loadedCoachIds, loginSession]);
 
   useEffect(() => {
@@ -571,7 +709,7 @@ export default function SelectTeamPage() {
       setIsLoadingTeam(false);
     }
 
-    loadAllCoachTeamsForAdmin();
+    void loadAllCoachTeamsForAdmin();
   }, [loginSession, isAdmin]);
 
   function getPlayerClub(playerName: string): string {
@@ -589,37 +727,47 @@ export default function SelectTeamPage() {
     return changeVersionByCoachIdRef.current[coachId] ?? 0;
   }, []);
 
-  const markCoachAsDirty = useCallback((coachId: number) => {
-    changeVersionByCoachIdRef.current[coachId] = getCoachChangeVersion(coachId) + 1;
-    setDirtyCoachIds((prev) => ({
-      ...prev,
-      [coachId]: true,
-    }));
-    setCoachDirtyState(coachId, "unsaved");
-  }, [getCoachChangeVersion, setCoachDirtyState]);
+  const markCoachAsDirty = useCallback(
+    (coachId: number) => {
+      changeVersionByCoachIdRef.current[coachId] = getCoachChangeVersion(coachId) + 1;
 
-  const markCoachAsSaved = useCallback((coachId: number, expectedVersion?: number) => {
-    if (
-      typeof expectedVersion === "number" &&
-      getCoachChangeVersion(coachId) !== expectedVersion
-    ) {
+      setDirtyCoachIds((prev) => ({
+        ...prev,
+        [coachId]: true,
+      }));
+
       setCoachDirtyState(coachId, "unsaved");
-      return false;
-    }
+    },
+    [getCoachChangeVersion, setCoachDirtyState]
+  );
 
-    setDirtyCoachIds((prev) => ({
-      ...prev,
-      [coachId]: false,
-    }));
-    setCoachDirtyState(coachId, "saved");
-    return true;
-  }, [getCoachChangeVersion, setCoachDirtyState]);
+  const markCoachAsSaved = useCallback(
+    (coachId: number, expectedVersion?: number) => {
+      if (
+        typeof expectedVersion === "number" &&
+        getCoachChangeVersion(coachId) !== expectedVersion
+      ) {
+        setCoachDirtyState(coachId, "unsaved");
+        return false;
+      }
+
+      setDirtyCoachIds((prev) => ({
+        ...prev,
+        [coachId]: false,
+      }));
+
+      setCoachDirtyState(coachId, "saved");
+      return true;
+    },
+    [getCoachChangeVersion, setCoachDirtyState]
+  );
 
   function updateCoachTeamState(nextTeamState: TeamState) {
     setTeamsByCoach((prev) => ({
       ...prev,
       [selectedCoachId]: nextTeamState,
     }));
+
     markCoachAsDirty(selectedCoachId);
     setSubmitMessage("");
   }
@@ -627,41 +775,72 @@ export default function SelectTeamPage() {
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const passcode = loginPasscode.trim();
+    const email = loginEmail.trim();
+    const password = loginPassword;
 
-    if (!passcode) {
-      setLoginError("Enter a passcode.");
+    if (!email) {
+      setLoginError("Enter your email.");
+      return;
+    }
+
+    if (!password) {
+      setLoginError("Enter your password.");
       return;
     }
 
     setLoginError("");
+    setIsAuthenticating(true);
+    resetSessionScopedState();
 
-    const session = await getAccessByPasscode(passcode);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      setLoginError(`Login failed: ${error.message}`);
+      setIsAuthenticating(false);
+      return;
+    }
+
+    const user = data.user;
+
+    if (!user) {
+      setLoginError("Login succeeded, but no user was returned.");
+      setIsAuthenticating(false);
+      return;
+    }
+
+    const session = await loadProfileForUser(user.id, user.email ?? email);
 
     if (!session) {
-      setLoginError("Invalid passcode.");
+      await supabase.auth.signOut();
+      setIsAuthenticating(false);
       return;
     }
 
     setLoginSession(session);
 
-    if (session.role === "coach") {
+    if (session.role === "coach" && session.coachId) {
       setSelectedCoachId(session.coachId);
     }
 
-    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-    setLoginPasscode("");
-    setShowPasscode(false);
+    setLoginPassword("");
+    setShowPassword(false);
     setSubmitMessage("");
+    setIsAuthenticating(false);
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    setIsAuthenticating(true);
+    await supabase.auth.signOut();
     setLoginSession(null);
-    setLoginPasscode("");
-    setShowPasscode(false);
+    setLoginEmail("");
+    setLoginPassword("");
+    setShowPassword(false);
     setLoginError("");
-    setSubmitMessage("");
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    resetSessionScopedState();
+    setIsAuthenticating(false);
   }
 
   function handleAddPlayer(
@@ -812,24 +991,26 @@ export default function SelectTeamPage() {
     };
   }
 
-  const saveTeam = useCallback(async ({
-    coach,
-    team,
-    isSubmitting,
-    skipIncompleteWarning = false,
-    source = "manual",
-  }: SaveTeamOptions) => {
-    const result = validateTeamState(coach, team);
+  const saveTeam = useCallback(
+    async ({
+      coach,
+      team,
+      isSubmitting,
+      skipIncompleteWarning = false,
+      source = "manual",
+    }: SaveTeamOptions) => {
+      const result = validateTeamState(coach, team);
 
-    if (isSubmitting) {
-      if (!result.valid) {
-        setSubmitMessage(`Team not ready to submit: ${result.errors.join(" ")}`);
-        return;
-      }
-    } else {
-      if (!result.valid && !skipIncompleteWarning) {
+      if (isSubmitting) {
+        if (!result.valid) {
+          setSubmitMessage(`Team not ready to submit: ${result.errors.join(" ")}`);
+          return;
+        }
+      } else if (!result.valid && !skipIncompleteWarning) {
         const confirmed = window.confirm(
-          `This team is incomplete.\n\n${result.errors.join("\n")}\n\nDo you still want to save it as a draft?`
+          `This team is incomplete.\n\n${result.errors.join(
+            "\n"
+          )}\n\nDo you still want to save it as a draft?`
         );
 
         if (!confirmed) {
@@ -837,84 +1018,83 @@ export default function SelectTeamPage() {
           return;
         }
       }
-    }
 
-    setIsSavingTeam(true);
+      setIsSavingTeam(true);
 
-    if (source === "auto") {
-      setCoachDirtyState(coach.id, "saving");
-    }
+      if (source === "auto") {
+        setCoachDirtyState(coach.id, "saving");
+      }
 
-    if (source === "manual") {
-      setSubmitMessage(isSubmitting ? "Submitting final team..." : "Saving team...");
-    }
-
-    const alreadySubmitted = submittedCoachIds[coach.id] ?? false;
-    const nowIso = new Date().toISOString();
-    const existingMeta = coachMetaById[coach.id];
-    const saveVersion = getCoachChangeVersion(coach.id);
-
-    const payload = {
-      coach_id: coach.id,
-      coach_name: coach.name,
-      team_data: team,
-      is_submitted: isSubmitting ? true : alreadySubmitted,
-      submitted_at: isSubmitting ? nowIso : existingMeta?.submittedAt ?? null,
-      updated_at: nowIso,
-    };
-
-    const { error } = await supabase
-      .from("coach_team_selections")
-      .upsert(payload, { onConflict: "coach_id" });
-
-    if (error) {
-      setSubmitMessage(
-        source === "auto" ? `Auto-save failed: ${error.message}` : `Save failed: ${error.message}`
-      );
-      setCoachDirtyState(coach.id, dirtyCoachIds[coach.id] ? "unsaved" : "saved");
-      setIsSavingTeam(false);
-      return;
-    }
-
-    setCoachMetaById((prev) => ({
-      ...prev,
-      [coach.id]: {
-        updatedAt: nowIso,
-        submittedAt: isSubmitting ? nowIso : prev[coach.id]?.submittedAt ?? null,
-      },
-    }));
-
-    if (isSubmitting) {
-      setSubmittedCoachIds((prev) => ({
-        ...prev,
-        [coach.id]: true,
-      }));
-      setSubmitMessage(`Final team submitted for ${coach.name}. It is now locked.`);
-    } else {
       if (source === "manual") {
+        setSubmitMessage(isSubmitting ? "Submitting final team..." : "Saving team...");
+      }
+
+      const alreadySubmitted = submittedCoachIds[coach.id] ?? false;
+      const nowIso = new Date().toISOString();
+      const existingMeta = coachMetaById[coach.id];
+      const saveVersion = getCoachChangeVersion(coach.id);
+
+      const payload = {
+        coach_id: coach.id,
+        coach_name: coach.name,
+        team_data: team,
+        is_submitted: isSubmitting ? true : alreadySubmitted,
+        submitted_at: isSubmitting ? nowIso : existingMeta?.submittedAt ?? null,
+        updated_at: nowIso,
+      };
+
+      const { error } = await supabase
+        .from("coach_team_selections")
+        .upsert(payload, { onConflict: "coach_id" });
+
+      if (error) {
+        setSubmitMessage(
+          source === "auto" ? `Auto-save failed: ${error.message}` : `Save failed: ${error.message}`
+        );
+        setCoachDirtyState(coach.id, dirtyCoachIds[coach.id] ? "unsaved" : "saved");
+        setIsSavingTeam(false);
+        return;
+      }
+
+      setCoachMetaById((prev) => ({
+        ...prev,
+        [coach.id]: {
+          updatedAt: nowIso,
+          submittedAt: isSubmitting ? nowIso : prev[coach.id]?.submittedAt ?? null,
+        },
+      }));
+
+      if (isSubmitting) {
+        setSubmittedCoachIds((prev) => ({
+          ...prev,
+          [coach.id]: true,
+        }));
+        setSubmitMessage(`Final team submitted for ${coach.name}. It is now locked.`);
+      } else if (source === "manual") {
         setSubmitMessage(
           result.valid
             ? `Team saved for ${coach.name}.`
             : `Incomplete draft saved for ${coach.name}.`
         );
       }
-    }
 
-    setLoadedCoachIds((prev) => ({
-      ...prev,
-      [coach.id]: true,
-    }));
-    markCoachAsSaved(coach.id, saveVersion);
+      setLoadedCoachIds((prev) => ({
+        ...prev,
+        [coach.id]: true,
+      }));
 
-    setIsSavingTeam(false);
-  }, [
-    coachMetaById,
-    dirtyCoachIds,
-    getCoachChangeVersion,
-    markCoachAsSaved,
-    setCoachDirtyState,
-    submittedCoachIds,
-  ]);
+      markCoachAsSaved(coach.id, saveVersion);
+      setIsSavingTeam(false);
+    },
+    [
+      coachMetaById,
+      dirtyCoachIds,
+      getCoachChangeVersion,
+      markCoachAsSaved,
+      setCoachDirtyState,
+      submittedCoachIds,
+    ]
+  );
 
   async function unlockTeam() {
     if (!selectedCoach) return;
@@ -962,8 +1142,8 @@ export default function SelectTeamPage() {
       ...prev,
       [selectedCoach.id]: true,
     }));
-    markCoachAsSaved(selectedCoach.id);
 
+    markCoachAsSaved(selectedCoach.id);
     setSubmitMessage(`${selectedCoach.name}'s team has been unlocked. Changes can now be made.`);
     setIsSavingTeam(false);
   }
@@ -1171,9 +1351,9 @@ export default function SelectTeamPage() {
         worksheet["!cols"] = [
           { wch: 10 },
           { wch: 10 },
-          { wch: 10 },
+          { wch: 12 },
           { wch: 28 },
-          { wch: 10 },
+          { wch: 16 },
           { wch: 16 },
         ];
 
@@ -1181,46 +1361,24 @@ export default function SelectTeamPage() {
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      XLSX.writeFile(workbook, `coach-teams-export-${timestamp}.xlsx`);
-      setSubmitMessage("Teams exported to XLSX.");
+      XLSX.writeFile(workbook, `coach-team-selections-${timestamp}.xlsx`);
+      setSubmitMessage("XLSX export complete.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown export error";
+      const message = error instanceof Error ? error.message : "Unknown export error.";
       setSubmitMessage(`Export failed: ${message}`);
+    } finally {
+      setIsExportingTeams(false);
     }
-
-    setIsExportingTeams(false);
   }
 
-  function availablePlayersForPosition(position: PositionKey) {
-    return coachPool[position].filter(
-      (player) => !isPlayerAlreadySelected(teamState, player.name)
-    );
-  }
-
-  const isSubmitted = selectedCoach ? Boolean(submittedCoachIds[selectedCoach.id]) : false;
-  const isEditingLocked = isSubmitted || isSavingTeam;
-
-  const coachMeta = selectedCoach
-    ? coachMetaById[selectedCoach.id] ?? { updatedAt: null, submittedAt: null }
-    : { updatedAt: null, submittedAt: null };
-
-  const statusBadgeClass = isSubmitted
-    ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-    : "border-amber-500/30 bg-amber-500/15 text-amber-200";
-
-  const panelClass = isSubmitted
-    ? "rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 opacity-75"
-    : "rounded-2xl border border-white/10 bg-black/20 p-4";
-
-  const sectionClass = isSubmitted
-    ? "rounded-2xl border border-emerald-500/20 bg-white/5 p-5"
-    : "rounded-2xl border border-white/10 bg-white/5 p-5";
-
-  const validationResult = validateTeamState(selectedCoach, teamState);
+  const validationResult = selectedCoach
+    ? validateTeamState(selectedCoach, teamState)
+    : { valid: false, errors: ["No coach selected."] };
 
   const duplicateCheck = (() => {
     const allPlayers = getAllSelectedPlayers(teamState);
     const uniquePlayers = new Set(allPlayers);
+
     return {
       hasDuplicates: allPlayers.length !== uniquePlayers.size,
       totalSelected: allPlayers.length,
@@ -1266,6 +1424,11 @@ export default function SelectTeamPage() {
   })();
 
   const readyToSubmit = validationResult.valid;
+  const isSubmitted = selectedCoach ? Boolean(submittedCoachIds[selectedCoach.id]) : false;
+  const coachMeta = selectedCoach
+    ? coachMetaById[selectedCoach.id] ?? { updatedAt: null, submittedAt: null }
+    : { updatedAt: null, submittedAt: null };
+
   const currentSaveIndicator = selectedCoach
     ? saveIndicatorByCoachId[selectedCoach.id] ?? "saved"
     : "saved";
@@ -1284,38 +1447,66 @@ export default function SelectTeamPage() {
         ? "Unsaved changes"
         : "All changes saved";
 
+  const statusBadgeClass = isSubmitted
+    ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
+    : "border-amber-500/30 bg-amber-500/15 text-amber-200";
+
+  if (isAuthenticating) {
+    return (
+      <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
+        <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
+          <h1 className="text-3xl font-bold">Coach Team Login</h1>
+          <p className="mt-2 text-sm text-white/70">Checking your session...</p>
+        </div>
+      </main>
+    );
+  }
+
   if (!loginSession) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
         <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
           <h1 className="text-3xl font-bold">Coach Team Login</h1>
           <p className="mt-2 text-sm text-white/70">
-            Enter your coach passcode to manage your own team, or use the admin passcode for
-            full access.
+            Sign in with your Supabase Auth email and password.
           </p>
 
           <form onSubmit={handleLogin} className="mt-6 space-y-4">
             <div>
-              <label className="mb-2 block text-sm font-medium text-white/80">
-                Passcode
-              </label>
+              <label className="mb-2 block text-sm font-medium text-white/80">Email</label>
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={(e) => {
+                  setLoginEmail(e.target.value);
+                  setLoginError("");
+                }}
+                className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
+                placeholder="Enter email"
+                autoComplete="email"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-white/80">Password</label>
               <div className="flex gap-2">
                 <input
-                  type={showPasscode ? "text" : "password"}
-                  value={loginPasscode}
+                  type={showPassword ? "text" : "password"}
+                  value={loginPassword}
                   onChange={(e) => {
-                    setLoginPasscode(e.target.value);
+                    setLoginPassword(e.target.value);
                     setLoginError("");
                   }}
                   className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
-                  placeholder="Enter passcode"
+                  placeholder="Enter password"
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPasscode((prev) => !prev)}
+                  onClick={() => setShowPassword((prev) => !prev)}
                   className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
                 >
-                  {showPasscode ? "Hide" : "Show"}
+                  {showPassword ? "Hide" : "Show"}
                 </button>
               </div>
             </div>
@@ -1328,9 +1519,10 @@ export default function SelectTeamPage() {
 
             <button
               type="submit"
-              className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90"
+              disabled={isAuthenticating}
+              className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Log In
+              {isAuthenticating ? "Signing In..." : "Log In"}
             </button>
           </form>
         </div>
@@ -1341,6 +1533,25 @@ export default function SelectTeamPage() {
   return (
     <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
       <div className="mx-auto max-w-7xl">
+        <section className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold">Coach Team Selection</h1>
+              <p className="mt-1 text-sm text-white/70">
+                Signed in as {loginSession.email} • {isAdmin ? "Admin" : loginSession.coachName}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
+            >
+              Log Out
+            </button>
+          </div>
+        </section>
+
         {isAdmin && (
           <section className="mb-6 rounded-2xl border border-sky-500/20 bg-sky-500/5 p-6">
             <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -1421,12 +1632,9 @@ export default function SelectTeamPage() {
                                 {coachTeam[position].onField.map((player, index) => (
                                   <div
                                     key={`${coach.id}-${position}-on-${player}-${index}`}
-                                    className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs text-white/85"
+                                    className="rounded-lg bg-black/20 px-2 py-1 text-xs text-white/85"
                                   >
-                                    <span className="font-semibold text-violet-200">
-                                      {position} {index + 1}
-                                    </span>{" "}
-                                    • {player}
+                                    {player}
                                   </div>
                                 ))}
                               </div>
@@ -1434,7 +1642,7 @@ export default function SelectTeamPage() {
                           </div>
 
                           <div>
-                            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-sky-200">
+                            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-200">
                               Emergencies
                             </div>
                             {coachTeam[position].emergencies.length === 0 ? (
@@ -1444,12 +1652,9 @@ export default function SelectTeamPage() {
                                 {coachTeam[position].emergencies.map((player, index) => (
                                   <div
                                     key={`${coach.id}-${position}-em-${player}-${index}`}
-                                    className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs text-white/85"
+                                    className="rounded-lg bg-black/20 px-2 py-1 text-xs text-white/85"
                                   >
-                                    <span className="font-semibold text-sky-200">
-                                      Emergency {index + 1}
-                                    </span>{" "}
-                                    • {player}
+                                    {index + 1}. {player}
                                   </div>
                                 ))}
                               </div>
@@ -1458,19 +1663,6 @@ export default function SelectTeamPage() {
                         </div>
                       ))}
                     </div>
-
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedCoachId(coach.id);
-                          setSubmitMessage("");
-                        }}
-                        className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold hover:bg-white/10"
-                      >
-                        Open {coach.name}
-                      </button>
-                    </div>
                   </div>
                 );
               })}
@@ -1478,162 +1670,128 @@ export default function SelectTeamPage() {
           </section>
         )}
 
-        <div
-          className={`mb-6 rounded-2xl border p-6 ${
-            isSubmitted
-              ? "border-emerald-500/20 bg-emerald-500/5"
-              : "border-white/10 bg-white/5"
-          }`}
-        >
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <section className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
-              <h1 className="text-3xl font-bold">Coach Team Selection</h1>
-              <p className="mt-2 text-sm text-white/70">
+              <h2 className="text-2xl font-bold">Team Controls</h2>
+              <p className="mt-1 text-sm text-white/70">
                 {isAdmin
-                  ? "Admin view: you can switch between all coaches."
-                  : `Coach view: you are locked to ${loginSession.coachName}.`}
-              </p>
-              <p className="mt-2 text-xs text-white/50">
-                Teams save to Supabase and can load again after refresh or on another device.
+                  ? "Admin can switch between all coaches."
+                  : "Coach access is locked to your own team."}
               </p>
             </div>
 
-            <div className="flex flex-col items-start gap-2 md:items-end">
-              <div className="text-sm text-white/70">
-                Logged in as{" "}
-                <span className="font-semibold text-white">{loginSession.coachName}</span>
-              </div>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold hover:bg-white/10"
+            <div className="min-w-[240px]">
+              <label className="mb-2 block text-sm font-medium text-white/80">Coach</label>
+              <select
+                value={selectedCoachId}
+                onChange={(e) => setSelectedCoachId(Number(e.target.value))}
+                disabled={!isAdmin}
+                className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Log Out
-              </button>
+                {coachConfigs.map((coach) => (
+                  <option key={coach.id} value={coach.id}>
+                    {coach.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            {isAdmin ? (
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  Select coach
-                </label>
-                <select
-                  value={selectedCoachId}
-                  onChange={(e) => {
-                    setSelectedCoachId(Number(e.target.value));
-                    setSubmitMessage("");
-                  }}
-                  className="w-full min-w-[240px] rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
-                >
-                  {coachConfigs.map((coach) => (
-                    <option key={coach.id} value={coach.id}>
-                      {coach.name}
-                    </option>
-                  ))}
-                </select>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div
+              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass}`}
+            >
+              {isLoadingTeam
+                ? "Loading saved team..."
+                : isSubmitted
+                  ? "Submitted Final Team"
+                  : "Draft in Progress"}
+            </div>
+
+            {isSubmitted ? (
+              <div className="text-xs text-emerald-200/90">
+                This final team is locked until it is unlocked for changes.
               </div>
             ) : (
-              <div />
+              <div className="text-xs text-white/60">
+                This team can still be edited before final submission.
+              </div>
             )}
 
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={handleResetCoachTeam}
-                disabled={isSavingTeam || isLoadingTeam || isSubmitted}
-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Reset Team
-              </button>
-
-              {isSubmitted ? (
-                <button
-                  type="button"
-                  onClick={unlockTeam}
-                  disabled={isSavingTeam || isLoadingTeam}
-                  className="rounded-xl border border-emerald-500/30 bg-emerald-500/15 px-4 py-3 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Unlock for Changes
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      selectedCoach
-                        ? saveTeam({
-                            coach: selectedCoach,
-                            team: teamState,
-                            isSubmitting: false,
-                            source: "manual",
-                          })
-                        : undefined
-                    }
-                    disabled={isSavingTeam || isLoadingTeam}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Save Team
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      selectedCoach
-                        ? saveTeam({
-                            coach: selectedCoach,
-                            team: teamState,
-                            isSubmitting: true,
-                            source: "manual",
-                          })
-                        : undefined
-                    }
-                    disabled={isSavingTeam || isLoadingTeam || isSubmitted}
-                    className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Submit Final Team
-                  </button>
-                </>
-              )}
+            <div
+              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${saveIndicatorClass}`}
+            >
+              {saveIndicatorText}
             </div>
           </div>
 
-          {selectedCoach ? (
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <div
-                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass}`}
+          <div className="mt-3 text-xs text-white/50">
+            <div>Last saved: {formatTimestamp(coachMeta.updatedAt)}</div>
+            <div>Submitted at: {formatTimestamp(coachMeta.submittedAt)}</div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            {!isSubmitted && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    selectedCoach
+                      ? void saveTeam({
+                          coach: selectedCoach,
+                          team: teamState,
+                          isSubmitting: false,
+                          source: "manual",
+                        })
+                      : undefined
+                  }
+                  disabled={isSavingTeam || isLoadingTeam}
+                  className="rounded-xl border border-white/10 bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Save Team
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleResetCoachTeam()}
+                  disabled={isSavingTeam || isLoadingTeam}
+                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Reset Team
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    selectedCoach
+                      ? void saveTeam({
+                          coach: selectedCoach,
+                          team: teamState,
+                          isSubmitting: true,
+                          source: "manual",
+                        })
+                      : undefined
+                  }
+                  disabled={isSavingTeam || isLoadingTeam || isSubmitted}
+                  className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Submit Final Team
+                </button>
+              </>
+            )}
+
+            {isAdmin && isSubmitted && (
+              <button
+                type="button"
+                onClick={() => void unlockTeam()}
+                disabled={isSavingTeam || isLoadingTeam}
+                className="rounded-xl border border-sky-500/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {isLoadingTeam
-                  ? "Loading saved team..."
-                  : isSubmitted
-                    ? "Submitted Final Team"
-                    : "Draft in Progress"}
-              </div>
-
-              {isSubmitted ? (
-                <div className="text-xs text-emerald-200/90">
-                  This final team is locked until it is unlocked for changes.
-                </div>
-              ) : (
-                <div className="text-xs text-white/60">
-                  This team can still be edited before final submission.
-                </div>
-              )}
-
-              <div
-                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${saveIndicatorClass}`}
-              >
-                {saveIndicatorText}
-              </div>
-            </div>
-          ) : null}
-
-          {selectedCoach ? (
-            <div className="mt-3 text-xs text-white/50">
-              <div>Last saved: {formatTimestamp(coachMeta.updatedAt)}</div>
-              <div>Submitted at: {formatTimestamp(coachMeta.submittedAt)}</div>
-            </div>
-          ) : null}
+                Unlock Team
+              </button>
+            )}
+          </div>
 
           {submitMessage ? (
             <div
@@ -1646,7 +1804,7 @@ export default function SelectTeamPage() {
               {submitMessage}
             </div>
           ) : null}
-        </div>
+        </section>
 
         <section
           className={`mb-6 rounded-2xl border p-6 ${
@@ -1680,7 +1838,7 @@ export default function SelectTeamPage() {
                 key={row.position}
                 className="rounded-2xl border border-white/10 bg-black/20 p-4"
               >
-                <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="mb-3 flex items-center justify-between">
                   <div className="text-lg font-bold">{row.position}</div>
                   <div
                     className={`rounded-full border px-3 py-1 text-xs font-semibold ${row.statusClass}`}
@@ -1691,318 +1849,252 @@ export default function SelectTeamPage() {
 
                 <div className="space-y-2 text-sm text-white/80">
                   <div>
-                    On-Field:{" "}
-                    <span className="font-semibold text-white">
-                      {row.onFieldSelected} / {row.onFieldRequired}
-                    </span>
+                    On-field: {row.onFieldSelected} / {row.onFieldRequired}
                   </div>
                   <div>
-                    Emergencies:{" "}
-                    <span className="font-semibold text-white">
-                      {row.emergencySelected} / {row.emergencyAllowed}
-                    </span>
+                    Emergencies: {row.emergencySelected} / {row.emergencyAllowed}
                   </div>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-              <h3 className="mb-2 text-lg font-semibold">Duplicate Check</h3>
-              <div
-                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                  duplicateCheck.hasDuplicates
-                    ? "border-red-500/30 bg-red-500/15 text-red-200"
-                    : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-                }`}
-              >
-                {duplicateCheck.hasDuplicates ? "Duplicates Found" : "No Duplicates Found"}
-              </div>
-              <div className="mt-3 text-sm text-white/75">
-                Total selections:{" "}
-                <span className="font-semibold text-white">{duplicateCheck.totalSelected}</span>
-              </div>
-              <div className="text-sm text-white/75">
-                Unique selections:{" "}
-                <span className="font-semibold text-white">{duplicateCheck.uniqueSelected}</span>
-              </div>
+          {validationResult.errors.length > 0 && (
+            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+              <div className="mb-2 text-sm font-semibold text-amber-200">Issues to fix</div>
+              <ul className="list-disc space-y-1 pl-5 text-sm text-amber-100/90">
+                {validationResult.errors.map((error, index) => (
+                  <li key={`${error}-${index}`}>{error}</li>
+                ))}
+              </ul>
             </div>
+          )}
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-              <h3 className="mb-2 text-lg font-semibold">Overall Review</h3>
-              <div
-                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                  readyToSubmit
-                    ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-                    : "border-amber-500/30 bg-amber-500/15 text-amber-200"
-                }`}
-              >
-                {readyToSubmit ? "Team is complete" : "Team still needs attention"}
-              </div>
-
-              {readyToSubmit ? (
-                <p className="mt-3 text-sm text-emerald-100/90">
-                  All on-field slots are filled correctly, emergencies are within limits, and no
-                  duplicates were detected.
-                </p>
-              ) : (
-                <div className="mt-3 space-y-1 text-sm text-amber-100/90">
-                  {validationResult.errors.map((error, index) => (
-                    <div key={index}>• {error}</div>
-                  ))}
-                </div>
-              )}
+          {duplicateCheck.hasDuplicates && (
+            <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
+              Duplicate player detected. Total selected: {duplicateCheck.totalSelected}. Unique
+              players: {duplicateCheck.uniqueSelected}.
             </div>
-          </div>
+          )}
         </section>
 
-        <div className="mb-6 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-          {POSITIONS.map((position) => (
-            <div
-              key={position}
-              className={`rounded-2xl border p-4 ${
-                isSubmitted
-                  ? "border-emerald-500/20 bg-emerald-500/5"
-                  : "border-white/10 bg-white/5"
-              }`}
-            >
-              <div className="text-lg font-bold">{position}</div>
-              <div className="mt-2 space-y-1 text-sm text-white/70">
-                <div>Pool: {coachPool[position].length}</div>
-                <div>
-                  On-field: {teamState[position].onField.length} / {selectedCoach?.slots[position]}
-                </div>
-                <div>
-                  Emergencies: {teamState[position].emergencies.length} /{" "}
-                  {selectedCoach?.emergencyLimits[position]}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="grid gap-6">
+        <section className="grid gap-6">
           {POSITIONS.map((position) => {
-            const availablePlayers = availablePlayersForPosition(position);
+            const availablePlayers = coachPool[position].filter(
+              (player) => !isPlayerAlreadySelected(teamState, player.name)
+            );
 
             return (
-              <section key={position} className={sectionClass}>
-                <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <section
+                key={position}
+                className="rounded-2xl border border-white/10 bg-white/5 p-6"
+              >
+                <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                   <div>
-                    <h2 className="text-2xl font-bold">{position}</h2>
-                    <p className="text-sm text-white/70">
-                      Available only from {selectedCoach?.name}&apos;s player pool.
+                    <h3 className="text-2xl font-bold">{position}</h3>
+                    <p className="mt-1 text-sm text-white/70">
+                      On-field: {selectedCoach?.slots[position] ?? 0} • Emergencies:{" "}
+                      {selectedCoach?.emergencyLimits[position] ?? 0}
                     </p>
                   </div>
-                  {isSubmitted ? (
-                    <div className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200">
-                      Final Team Locked
-                    </div>
-                  ) : null}
+
+                  <div className="text-sm text-white/60">
+                    Available in pool: {coachPool[position].length}
+                  </div>
                 </div>
 
-                <div className="grid gap-5 xl:grid-cols-3">
-                  <div className={panelClass}>
-                    <h3 className="mb-3 text-lg font-semibold">Available Players</h3>
+                <div className="grid gap-4 xl:grid-cols-3">
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="mb-3 text-sm font-bold uppercase tracking-wide text-violet-200">
+                      On-Field
+                    </div>
 
                     <div className="space-y-2">
+                      {teamState[position].onField.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-sm text-white/40">
+                          No players selected
+                        </div>
+                      ) : (
+                        teamState[position].onField.map((player, index) => (
+                          <div
+                            key={`${position}-on-${player}-${index}`}
+                            className="rounded-xl border border-white/10 bg-white/5 p-3"
+                          >
+                            <div className="font-semibold">{player}</div>
+                            <div className="text-xs text-white/50">{getPlayerClub(player)}</div>
+
+                            {!isSubmitted && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleMovePlayer(position, "onField", "emergencies", player)
+                                  }
+                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10"
+                                >
+                                  Move to Emergencies
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleRemovePlayer(position, "onField", player)
+                                  }
+                                  className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {!isSubmitted &&
+                    selectedCoach &&
+                    teamState[position].onField.length < selectedCoach.slots[position] ? (
+                      <div className="mt-4">
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-white/60">
+                          Add to On-Field
+                        </label>
+                        <select
+                          defaultValue=""
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (!value) return;
+                            handleAddPlayer(position, "onField", value);
+                            e.target.value = "";
+                          }}
+                          className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-sm text-white outline-none"
+                        >
+                          <option value="">Select player</option>
+                          {availablePlayers.map((player) => (
+                            <option key={`${position}-available-on-${player.name}`} value={player.name}>
+                              {player.name} ({player.club})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="mb-3 text-sm font-bold uppercase tracking-wide text-amber-200">
+                      Emergencies
+                    </div>
+
+                    <div className="space-y-2">
+                      {teamState[position].emergencies.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-sm text-white/40">
+                          No emergencies selected
+                        </div>
+                      ) : (
+                        teamState[position].emergencies.map((player, index) => (
+                          <div
+                            key={`${position}-em-${player}-${index}`}
+                            className="rounded-xl border border-white/10 bg-white/5 p-3"
+                          >
+                            <div className="font-semibold">
+                              {index + 1}. {player}
+                            </div>
+                            <div className="text-xs text-white/50">{getPlayerClub(player)}</div>
+
+                            {!isSubmitted && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleMovePlayer(position, "emergencies", "onField", player)
+                                  }
+                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10"
+                                >
+                                  Move to On-Field
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveEmergencyUp(position, index)}
+                                  disabled={index === 0}
+                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  Move Up
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveEmergencyDown(position, index)}
+                                  disabled={index === teamState[position].emergencies.length - 1}
+                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  Move Down
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleRemovePlayer(position, "emergencies", player)
+                                  }
+                                  className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {!isSubmitted &&
+                    selectedCoach &&
+                    teamState[position].emergencies.length <
+                      selectedCoach.emergencyLimits[position] ? (
+                      <div className="mt-4">
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-white/60">
+                          Add to Emergencies
+                        </label>
+                        <select
+                          defaultValue=""
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (!value) return;
+                            handleAddPlayer(position, "emergencies", value);
+                            e.target.value = "";
+                          }}
+                          className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-sm text-white outline-none"
+                        >
+                          <option value="">Select player</option>
+                          {availablePlayers.map((player) => (
+                            <option key={`${position}-available-em-${player.name}`} value={player.name}>
+                              {player.name} ({player.club})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="mb-3 text-sm font-bold uppercase tracking-wide text-white/80">
+                      Available Players
+                    </div>
+
+                    <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
                       {availablePlayers.length === 0 ? (
-                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/50">
-                          No more players available for this position.
+                        <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-sm text-white/40">
+                          No remaining players available in this position
                         </div>
                       ) : (
                         availablePlayers.map((player) => (
                           <div
                             key={`${position}-available-${player.name}`}
-                            className="rounded-xl border border-white/10 bg-white/5 p-3"
+                            className="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="font-semibold text-white">{player.name}</div>
-                                <div className="text-xs text-white/50">
-                                  {player.club} • #{player.number}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleAddPlayer(position, "onField", player.name)}
-                                  disabled={
-                                    isEditingLocked ||
-                                    teamState[position].onField.length >=
-                                      selectedCoach.slots[position]
-                                  }
-                                  className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-100 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Add On-Field
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleAddPlayer(position, "emergencies", player.name)
-                                  }
-                                  disabled={
-                                    isEditingLocked ||
-                                    selectedCoach.emergencyLimits[position] <= 0 ||
-                                    teamState[position].emergencies.length >=
-                                      selectedCoach.emergencyLimits[position]
-                                  }
-                                  className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Add Emergency
-                                </button>
-                              </div>
+                            <div className="font-semibold">
+                              {player.number}. {player.name}
                             </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className={panelClass}>
-                    <h3 className="mb-3 text-lg font-semibold">
-                      On-Field ({teamState[position].onField.length} /{" "}
-                      {selectedCoach.slots[position]})
-                    </h3>
-
-                    <div className="space-y-2">
-                      {teamState[position].onField.length === 0 ? (
-                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/50">
-                          No on-field players selected.
-                        </div>
-                      ) : (
-                        teamState[position].onField.map((playerName, index) => (
-                          <div
-                            key={`${position}-onfield-${playerName}-${index}`}
-                            className="rounded-xl border border-white/10 bg-white/5 p-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="font-semibold text-white">
-                                  {position} {index + 1} • {playerName}
-                                </div>
-                                <div className="text-xs text-white/50">
-                                  {getPlayerClub(playerName)}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleMovePlayer(
-                                      position,
-                                      "onField",
-                                      "emergencies",
-                                      playerName
-                                    )
-                                  }
-                                  disabled={
-                                    isEditingLocked ||
-                                    selectedCoach.emergencyLimits[position] <= 0 ||
-                                    teamState[position].emergencies.length >=
-                                      selectedCoach.emergencyLimits[position]
-                                  }
-                                  className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Move to Emergency
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleRemovePlayer(position, "onField", playerName)
-                                  }
-                                  disabled={isEditingLocked}
-                                  className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-100 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className={panelClass}>
-                    <h3 className="mb-3 text-lg font-semibold">
-                      Emergencies ({teamState[position].emergencies.length} /{" "}
-                      {selectedCoach.emergencyLimits[position]})
-                    </h3>
-
-                    <div className="space-y-2">
-                      {teamState[position].emergencies.length === 0 ? (
-                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/50">
-                          No emergency players selected.
-                        </div>
-                      ) : (
-                        teamState[position].emergencies.map((playerName, index) => (
-                          <div
-                            key={`${position}-emergency-${playerName}-${index}`}
-                            className="rounded-xl border border-white/10 bg-white/5 p-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="font-semibold text-white">
-                                  Emergency {index + 1} • {playerName}
-                                </div>
-                                <div className="text-xs text-white/50">
-                                  {getPlayerClub(playerName)}
-                                </div>
-                              </div>
-
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveEmergencyUp(position, index)}
-                                  disabled={isEditingLocked || index === 0}
-                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Up
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveEmergencyDown(position, index)}
-                                  disabled={
-                                    isEditingLocked ||
-                                    index >= teamState[position].emergencies.length - 1
-                                  }
-                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Down
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleMovePlayer(
-                                      position,
-                                      "emergencies",
-                                      "onField",
-                                      playerName
-                                    )
-                                  }
-                                  disabled={
-                                    isEditingLocked ||
-                                    teamState[position].onField.length >=
-                                      selectedCoach.slots[position]
-                                  }
-                                  className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-100 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Move to On-Field
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleRemovePlayer(position, "emergencies", playerName)
-                                  }
-                                  disabled={isEditingLocked}
-                                  className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-100 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            </div>
+                            <div className="text-xs text-white/50">{player.club}</div>
                           </div>
                         ))
                       )}
@@ -2012,7 +2104,7 @@ export default function SelectTeamPage() {
               </section>
             );
           })}
-        </div>
+        </section>
       </div>
     </main>
   );
