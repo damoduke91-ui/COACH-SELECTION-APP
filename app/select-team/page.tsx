@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import * as coachConfigModule from "../../lib/coachConfig";
 import {
@@ -357,6 +358,7 @@ function safeSheetName(input: string): string {
 }
 
 export default function SelectTeamPage() {
+  const router = useRouter();
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
@@ -537,6 +539,7 @@ export default function SelectTeamPage() {
           setLoginSession(null);
           resetSessionScopedState();
           setIsAuthenticating(false);
+          router.replace("/login");
           return;
         }
 
@@ -555,6 +558,7 @@ export default function SelectTeamPage() {
           }
         } else {
           setLoginSession(null);
+          router.replace("/login");
         }
 
         setIsAuthenticating(false);
@@ -565,7 +569,13 @@ export default function SelectTeamPage() {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [loadProfileForUser, resetSessionScopedState]);
+  }, [loadProfileForUser, resetSessionScopedState, router]);
+
+  useEffect(() => {
+    if (!isAuthenticating && !loginSession) {
+      router.replace("/login");
+    }
+  }, [isAuthenticating, loginSession, router]);
 
   useEffect(() => {
     if (!loginSession) return;
@@ -860,7 +870,7 @@ export default function SelectTeamPage() {
     setShowPassword(false);
     setLoginError("");
     resetSessionScopedState();
-    setIsAuthenticating(false);
+    router.replace("/login");
   }
 
   function handleAddPlayer(
@@ -1030,7 +1040,9 @@ export default function SelectTeamPage() {
       }
 
       if (!isSubmitting && (submittedCoachIds[coach.id] ?? false)) {
-        setSubmitMessage(`${coach.name} is locked because the final team has already been submitted.`);
+        setSubmitMessage(
+          `${coach.name} is locked because the final team has already been submitted.`
+        );
         return;
       }
 
@@ -1523,71 +1535,7 @@ export default function SelectTeamPage() {
   }
 
   if (!loginSession) {
-    return (
-      <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
-        <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
-          <h1 className="text-3xl font-bold">Coach Team Login</h1>
-          <p className="mt-2 text-sm text-white/70">
-            Sign in with your Supabase Auth email and password.
-          </p>
-
-          <form onSubmit={handleLogin} className="mt-6 space-y-4">
-            <div>
-              <label className="mb-2 block text-sm font-medium text-white/80">Email</label>
-              <input
-                type="email"
-                value={loginEmail}
-                onChange={(e) => {
-                  setLoginEmail(e.target.value);
-                  setLoginError("");
-                }}
-                className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
-                placeholder="Enter email"
-                autoComplete="email"
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-white/80">Password</label>
-              <div className="flex gap-2">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={loginPassword}
-                  onChange={(e) => {
-                    setLoginPassword(e.target.value);
-                    setLoginError("");
-                  }}
-                  className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
-                  placeholder="Enter password"
-                  autoComplete="current-password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
-              </div>
-            </div>
-
-            {loginError ? (
-              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                {loginError}
-              </div>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={isAuthenticating}
-              className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {isAuthenticating ? "Signing In..." : "Log In"}
-            </button>
-          </form>
-        </div>
-      </main>
-    );
+    return null;
   }
 
   return (
