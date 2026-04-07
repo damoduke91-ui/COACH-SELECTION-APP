@@ -1220,6 +1220,71 @@ export default function SelectTeamPage() {
     setIsSavingTeam(false);
   }
 
+  async function handleResetAllTeams() {
+    if (!loginSession || !isAdmin) {
+      setSubmitMessage("Only admin can reset all teams.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Reset ALL coach teams?\n\nThis will clear all selections, unlock all teams, and remove all submitted statuses."
+    );
+
+    if (!confirmed) return;
+
+    setIsSavingTeam(true);
+    setSubmitMessage("Resetting all teams...");
+
+    const nowIso = new Date().toISOString();
+    const resetRows = coachConfigs.map((coach) => ({
+      coach_id: coach.id,
+      coach_name: coach.name,
+      team_data: emptyTeamState(),
+      is_submitted: false,
+      submitted_at: null,
+      updated_at: nowIso,
+    }));
+
+    const { error } = await supabase
+      .from("coach_team_selections")
+      .upsert(resetRows, { onConflict: "coach_id" });
+
+    if (error) {
+      setSubmitMessage(`Reset all teams failed: ${error.message}`);
+      setIsSavingTeam(false);
+      return;
+    }
+
+    const resetTeams = createTeamsByCoach(coachConfigs);
+    const resetSubmitted: Record<number, boolean> = {};
+    const resetMeta: Record<number, CoachMeta> = {};
+    const resetLoaded: Record<number, boolean> = {};
+    const resetDirty: Record<number, boolean> = {};
+    const resetIndicator: Record<number, SaveIndicatorState> = {};
+
+    for (const coach of coachConfigs) {
+      resetSubmitted[coach.id] = false;
+      resetMeta[coach.id] = {
+        updatedAt: nowIso,
+        submittedAt: null,
+      };
+      resetLoaded[coach.id] = true;
+      resetDirty[coach.id] = false;
+      resetIndicator[coach.id] = "saved";
+      changeVersionByCoachIdRef.current[coach.id] = 0;
+    }
+
+    setTeamsByCoach(resetTeams);
+    setSubmittedCoachIds(resetSubmitted);
+    setCoachMetaById(resetMeta);
+    setLoadedCoachIds(resetLoaded);
+    setDirtyCoachIds(resetDirty);
+    setSaveIndicatorByCoachId(resetIndicator);
+
+    setSubmitMessage("All coach teams have been reset.");
+    setIsSavingTeam(false);
+  }
+
   useEffect(() => {
     if (autoSaveTimeoutRef.current) {
       clearTimeout(autoSaveTimeoutRef.current);
@@ -1570,14 +1635,25 @@ export default function SelectTeamPage() {
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleExportTeamsXlsx}
-                disabled={isExportingTeams || isLoadingTeam}
-                className="rounded-xl border border-sky-500/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {isExportingTeams ? "Exporting..." : "Export Teams (XLSX)"}
-              </button>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => void handleResetAllTeams()}
+                  disabled={isSavingTeam || isLoadingTeam || isExportingTeams}
+                  className="rounded-xl border border-red-500/30 bg-red-500/15 px-4 py-3 text-sm font-semibold text-red-100 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isSavingTeam ? "Resetting..." : "Reset All Teams"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportTeamsXlsx}
+                  disabled={isExportingTeams || isLoadingTeam || isSavingTeam}
+                  className="rounded-xl border border-sky-500/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isExportingTeams ? "Exporting..." : "Export Teams (XLSX)"}
+                </button>
+              </div>
             </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
