@@ -1,4 +1,3 @@
-// test preview deployment
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -10,7 +9,7 @@ import {
   type PositionKey,
   getPlayersForCoach,
 } from "../../lib/playersByCoach";
-import { supabase } from "../../lib/supabase";
+import { APP_ENV, supabase } from "../../lib/supabase";
 
 type PositionState = {
   onField: string[];
@@ -34,6 +33,7 @@ type SavedTeamRow = {
   is_submitted: boolean;
   submitted_at: string | null;
   updated_at: string;
+  environment: "production" | "preview";
 };
 
 type CoachMeta = {
@@ -448,6 +448,7 @@ export default function SelectTeamPage() {
         .from("profiles")
         .select("id, role, coach_id, coach_name")
         .eq("id", userId)
+        .eq("environment", APP_ENV)
         .single();
 
       if (error) {
@@ -508,10 +509,7 @@ export default function SelectTeamPage() {
         return;
       }
 
-      const nextSession = await loadProfileForUser(
-        session.user.id,
-        session.user.email ?? ""
-      );
+      const nextSession = await loadProfileForUser(session.user.id, session.user.email ?? "");
 
       if (!isMounted) return;
 
@@ -544,10 +542,7 @@ export default function SelectTeamPage() {
           return;
         }
 
-        const nextSession = await loadProfileForUser(
-          session.user.id,
-          session.user.email ?? ""
-        );
+        const nextSession = await loadProfileForUser(session.user.id, session.user.email ?? "");
 
         if (!isMounted) return;
 
@@ -596,8 +591,9 @@ export default function SelectTeamPage() {
 
       const { data, error } = await supabase
         .from("coach_team_selections")
-        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at")
+        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
         .eq("coach_id", selectedCoach.id)
+        .eq("environment", APP_ENV)
         .maybeSingle();
 
       if (error) {
@@ -661,7 +657,8 @@ export default function SelectTeamPage() {
 
       const { data, error } = await supabase
         .from("coach_team_selections")
-        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at");
+        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
+        .eq("environment", APP_ENV);
 
       if (error) {
         setSubmitMessage(`Admin summary load failed: ${error.message}`);
@@ -1086,6 +1083,7 @@ export default function SelectTeamPage() {
         coach_id: coach.id,
         coach_name: coach.name,
         team_data: team,
+        environment: APP_ENV,
         is_submitted: isSubmitting ? true : alreadySubmitted,
         submitted_at: isSubmitting ? nowIso : existingMeta?.submittedAt ?? null,
         updated_at: nowIso,
@@ -1093,7 +1091,7 @@ export default function SelectTeamPage() {
 
       const { error } = await supabase
         .from("coach_team_selections")
-        .upsert(payload, { onConflict: "coach_id" });
+        .upsert(payload, { onConflict: "coach_id,environment" });
 
       if (error) {
         setSubmitMessage(
@@ -1170,6 +1168,7 @@ export default function SelectTeamPage() {
       coach_id: selectedCoach.id,
       coach_name: selectedCoach.name,
       team_data: teamState,
+      environment: APP_ENV,
       is_submitted: false,
       submitted_at: null,
       updated_at: nowIso,
@@ -1177,7 +1176,7 @@ export default function SelectTeamPage() {
 
     const { error } = await supabase
       .from("coach_team_selections")
-      .upsert(payload, { onConflict: "coach_id" });
+      .upsert(payload, { onConflict: "coach_id,environment" });
 
     if (error) {
       setSubmitMessage(`Unlock failed: ${error.message}`);
@@ -1241,6 +1240,7 @@ export default function SelectTeamPage() {
       coach_id: coach.id,
       coach_name: coach.name,
       team_data: emptyTeamState(),
+      environment: APP_ENV,
       is_submitted: false,
       submitted_at: null,
       updated_at: nowIso,
@@ -1248,7 +1248,7 @@ export default function SelectTeamPage() {
 
     const { error } = await supabase
       .from("coach_team_selections")
-      .upsert(resetRows, { onConflict: "coach_id" });
+      .upsert(resetRows, { onConflict: "coach_id,environment" });
 
     if (error) {
       setSubmitMessage(`Reset all teams failed: ${error.message}`);
@@ -1393,7 +1393,8 @@ export default function SelectTeamPage() {
     try {
       const { data, error } = await supabase
         .from("coach_team_selections")
-        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at")
+        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
+        .eq("environment", APP_ENV)
         .order("coach_id", { ascending: true });
 
       if (error) {
@@ -1449,6 +1450,14 @@ export default function SelectTeamPage() {
           },
           {
             "Player No.": "",
+            Position: "Environment",
+            Club: "",
+            "Player Name": "",
+            Selected: APP_ENV,
+            "Selection Order": "",
+          },
+          {
+            "Player No.": "",
             Position: "Status",
             Club: "",
             "Player Name": "",
@@ -1499,7 +1508,7 @@ export default function SelectTeamPage() {
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      XLSX.writeFile(workbook, `coach-team-selections-${timestamp}.xlsx`);
+      XLSX.writeFile(workbook, `coach-team-selections-${APP_ENV}-${timestamp}.xlsx`);
       setSubmitMessage("XLSX export complete.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown export error.";
@@ -1593,6 +1602,9 @@ export default function SelectTeamPage() {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
         <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
+          <div className="mb-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white/70">
+            {APP_ENV}
+          </div>
           <h1 className="text-3xl font-bold">Coach Team Login</h1>
           <p className="mt-2 text-sm text-white/70">Checking your session...</p>
         </div>
@@ -1610,6 +1622,18 @@ export default function SelectTeamPage() {
         <section className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <div
+                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+                    APP_ENV === "preview"
+                      ? "border-amber-500/30 bg-amber-500/15 text-amber-200"
+                      : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
+                  }`}
+                >
+                  {APP_ENV}
+                </div>
+              </div>
+
               <h1 className="text-3xl font-bold">Coach Team Selection</h1>
               <p className="mt-1 text-sm text-white/70">
                 Signed in as {loginSession.email} • {isAdmin ? "Admin" : loginSession.coachName}
@@ -1654,6 +1678,12 @@ export default function SelectTeamPage() {
                 >
                   {isExportingTeams ? "Exporting..." : "Export Teams (XLSX)"}
                 </button>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-100">
+                Current environment: {APP_ENV}
               </div>
             </div>
 
@@ -1794,6 +1824,16 @@ export default function SelectTeamPage() {
                   : "Draft in Progress"}
             </div>
 
+            <div
+              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                APP_ENV === "preview"
+                  ? "border-amber-500/30 bg-amber-500/15 text-amber-200"
+                  : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
+              }`}
+            >
+              Environment: {APP_ENV}
+            </div>
+
             {isSubmitted ? (
               <div className="text-xs text-emerald-200/90">
                 This final team is locked until it is unlocked for changes.
@@ -1822,9 +1862,7 @@ export default function SelectTeamPage() {
 
           {canUnlockSelectedCoach ? (
             <div className="mt-4 rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
-              <div className="mb-2 text-sm font-semibold text-sky-100">
-                Unlock available
-              </div>
+              <div className="mb-2 text-sm font-semibold text-sky-100">Unlock available</div>
               <div className="text-sm text-sky-100/80">
                 Unlock this submitted team to restore Save Team, Reset Team, and Submit Final Team.
               </div>
@@ -1993,7 +2031,7 @@ export default function SelectTeamPage() {
                   <div>
                     <h3 className="text-2xl font-bold">{position}</h3>
                     <p className="mt-1 text-sm text-white/70">
-                      On-field: {selectedCoach?.slots[position] ?? 0} • Emergencies:{" "}
+                      On-field: {selectedCoach?.slots[position] ?? 0} • Emergencies: {" "}
                       {selectedCoach?.emergencyLimits[position] ?? 0}
                     </p>
                   </div>
@@ -2037,9 +2075,7 @@ export default function SelectTeamPage() {
 
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    handleRemovePlayer(position, "onField", player)
-                                  }
+                                  onClick={() => handleRemovePlayer(position, "onField", player)}
                                   className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15"
                                 >
                                   Remove
@@ -2070,7 +2106,10 @@ export default function SelectTeamPage() {
                         >
                           <option value="">Select player</option>
                           {availablePlayers.map((player) => (
-                            <option key={`${position}-available-on-${player.name}`} value={player.name}>
+                            <option
+                              key={`${position}-available-on-${player.name}`}
+                              value={player.name}
+                            >
                               {player.name} ({player.club})
                             </option>
                           ))}
@@ -2132,9 +2171,7 @@ export default function SelectTeamPage() {
 
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    handleRemovePlayer(position, "emergencies", player)
-                                  }
+                                  onClick={() => handleRemovePlayer(position, "emergencies", player)}
                                   className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15"
                                 >
                                   Remove
@@ -2166,7 +2203,10 @@ export default function SelectTeamPage() {
                         >
                           <option value="">Select player</option>
                           {availablePlayers.map((player) => (
-                            <option key={`${position}-available-em-${player.name}`} value={player.name}>
+                            <option
+                              key={`${position}-available-em-${player.name}`}
+                              value={player.name}
+                            >
                               {player.name} ({player.club})
                             </option>
                           ))}

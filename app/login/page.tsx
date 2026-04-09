@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { supabase } from "../../lib/supabase";
+import { APP_ENV, supabase } from "../../lib/supabase";
 
 type UserProfileRow = {
   id: string;
@@ -50,6 +50,7 @@ export default function LoginPage() {
         .from("profiles")
         .select("id, role, coach_id, coach_name")
         .eq("id", session.user.id)
+        .eq("environment", APP_ENV)
         .single();
 
       if (!isMounted) return;
@@ -117,6 +118,7 @@ export default function LoginPage() {
       .from("profiles")
       .select("id, role, coach_id, coach_name")
       .eq("id", user.id)
+      .eq("environment", APP_ENV)
       .single();
 
     if (profileError) {
@@ -137,10 +139,24 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
       <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
-        <h1 className="text-3xl font-bold">Coach Team Login</h1>
-        <p className="mt-2 text-sm text-white/70">
-          Sign in with your Supabase Auth email and password.
-        </p>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold">Coach Team Login</h1>
+            <p className="mt-2 text-sm text-white/70">
+              Sign in with your Supabase Auth email and password.
+            </p>
+          </div>
+
+          <div
+            className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+              APP_ENV === "preview"
+                ? "border-amber-500/30 bg-amber-500/15 text-amber-200"
+                : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
+            }`}
+          >
+            {APP_ENV}
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>

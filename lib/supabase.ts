@@ -12,3 +12,6 @@ if (!supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+export const APP_ENV =
+  process.env.NEXT_PUBLIC_APP_ENV === "preview" ? "preview" : "production";
