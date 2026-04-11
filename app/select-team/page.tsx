@@ -75,6 +75,17 @@ type UserProfileRow = {
   coach_name: string | null;
 };
 
+type AppSettingsRow = {
+  environment: "production" | "preview";
+  team_lockout?: boolean | null;
+  updated_at?: string | null;
+  lockout_enabled?: boolean | null;
+  lockout_day?: string | null;
+  lockout_time?: string | null;
+  lockout_timezone?: string | null;
+  lockout_at?: string | null;
+};
+
 const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
 
 const DEFAULT_ON_FIELD_SLOTS: Record<PositionKey, number> = {
@@ -147,6 +158,231 @@ const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
 ];
 
 const AUTO_SAVE_DEBOUNCE_MS = 10000;
+const LOCKOUT_TICK_MS = 30000;
+const DEFAULT_LOCKOUT_DAY = "Thursday";
+const DEFAULT_LOCKOUT_TIME = "19:20";
+const DEFAULT_LOCKOUT_TIMEZONE = "Australia/Melbourne";
+const WEEKDAY_OPTIONS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
+type WeekdayName = (typeof WEEKDAY_OPTIONS)[number];
+
+function isValidTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normaliseWeekday(value: string | null | undefined): WeekdayName {
+  const match = WEEKDAY_OPTIONS.find(
+    (weekday) => weekday.toLowerCase() === String(value ?? "").trim().toLowerCase()
+  );
+
+  return match ?? DEFAULT_LOCKOUT_DAY;
+}
+
+function normaliseTimeValue(value: string | null | undefined): string {
+  const raw = String(value ?? "").trim();
+
+  if (!raw) return DEFAULT_LOCKOUT_TIME;
+
+  const match = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+
+  if (!match) return DEFAULT_LOCKOUT_TIME;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+
+  if (!Number.isInteger(hours) || hours < 0 || hours > 23) return DEFAULT_LOCKOUT_TIME;
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) return DEFAULT_LOCKOUT_TIME;
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string): number {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    timeZoneName: "shortOffset",
+    hour: "2-digit",
+  });
+
+  const parts = formatter.formatToParts(date);
+  const offsetValue = parts.find((part) => part.type === "timeZoneName")?.value ?? "GMT+0";
+  const match = offsetValue.match(/^GMT([+-])(\d{1,2})(?::?(\d{2}))?$/i);
+
+  if (!match) {
+    return 0;
+  }
+
+  const sign = match[1] === "-" ? -1 : 1;
+  const hours = Number(match[2] ?? "0");
+  const minutes = Number(match[3] ?? "0");
+
+  return sign * (hours * 60 + minutes);
+}
+
+function getTimeZoneNowParts(timeZone: string) {
+  const formatter = new Intl.DateTimeFormat("en-AU", {
+    timeZone,
+    weekday: "long",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(new Date());
+  const values: Record<string, string> = {};
+
+  for (const part of parts) {
+    if (part.type !== "literal") {
+      values[part.type] = part.value;
+    }
+  }
+
+  return {
+    weekday: normaliseWeekday(values.weekday),
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    hour: Number(values.hour),
+    minute: Number(values.minute),
+    second: Number(values.second),
+  };
+}
+
+function buildLockoutAtIso(day: string, time: string, timeZone: string): string {
+  const weekday = normaliseWeekday(day);
+  const [hourText, minuteText] = normaliseTimeValue(time).split(":");
+  const targetHour = Number(hourText);
+  const targetMinute = Number(minuteText);
+
+  const nowParts = getTimeZoneNowParts(timeZone);
+  const currentIndex = WEEKDAY_OPTIONS.indexOf(nowParts.weekday);
+  const targetIndex = WEEKDAY_OPTIONS.indexOf(weekday);
+
+  let daysAhead = (targetIndex - currentIndex + 7) % 7;
+
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute;
+  const targetMinutes = targetHour * 60 + targetMinute;
+
+  if (daysAhead === 0 && targetMinutes <= currentMinutes) {
+    daysAhead = 7;
+  }
+
+  const roughUtc = new Date(
+    Date.UTC(
+      nowParts.year,
+      nowParts.month - 1,
+      nowParts.day + daysAhead,
+      targetHour,
+      targetMinute,
+      0,
+      0
+    )
+  );
+
+  let offsetMinutes = getTimeZoneOffsetMinutes(roughUtc, timeZone);
+  let finalUtcMs =
+    Date.UTC(
+      nowParts.year,
+      nowParts.month - 1,
+      nowParts.day + daysAhead,
+      targetHour,
+      targetMinute,
+      0,
+      0
+    ) -
+    offsetMinutes * 60 * 1000;
+
+  const adjustedDate = new Date(finalUtcMs);
+  const adjustedOffsetMinutes = getTimeZoneOffsetMinutes(adjustedDate, timeZone);
+
+  if (adjustedOffsetMinutes !== offsetMinutes) {
+    offsetMinutes = adjustedOffsetMinutes;
+    finalUtcMs =
+      Date.UTC(
+        nowParts.year,
+        nowParts.month - 1,
+        nowParts.day + daysAhead,
+        targetHour,
+        targetMinute,
+        0,
+        0
+      ) -
+      offsetMinutes * 60 * 1000;
+  }
+
+  return new Date(finalUtcMs).toISOString();
+}
+
+function isScheduledLockoutActive(settings: {
+  enabled: boolean;
+  lockoutAt: string | null;
+}): boolean {
+  if (!settings.enabled) return false;
+  if (!settings.lockoutAt) return false;
+
+  const lockoutDate = new Date(settings.lockoutAt);
+
+  if (Number.isNaN(lockoutDate.getTime())) return false;
+
+  return Date.now() >= lockoutDate.getTime();
+}
+
+function formatScheduleSummary(options: {
+  enabled: boolean;
+  lockoutDay: string;
+  lockoutTime: string;
+  lockoutTimezone: string;
+  lockoutAt: string | null;
+}): string {
+  if (!options.enabled) {
+    return "Schedule OFF";
+  }
+
+  const base = `${normaliseWeekday(options.lockoutDay)} at ${normaliseTimeValue(
+    options.lockoutTime
+  )} (${options.lockoutTimezone || DEFAULT_LOCKOUT_TIMEZONE})`;
+
+  if (!options.lockoutAt) {
+    return `Schedule ON • ${base}`;
+  }
+
+  return `Schedule ON • ${base} • Next lockout: ${formatTimestamp(options.lockoutAt)}`;
+}
+
+function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
+  const row = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+
+  return {
+    environment: APP_ENV,
+    team_lockout: Boolean(row.team_lockout),
+    updated_at: typeof row.updated_at === "string" ? row.updated_at : null,
+    lockout_enabled:
+      typeof row.lockout_enabled === "boolean" ? row.lockout_enabled : Boolean(row.lockout_at),
+    lockout_day: typeof row.lockout_day === "string" ? row.lockout_day : DEFAULT_LOCKOUT_DAY,
+    lockout_time: typeof row.lockout_time === "string" ? row.lockout_time : DEFAULT_LOCKOUT_TIME,
+    lockout_timezone:
+      typeof row.lockout_timezone === "string" && row.lockout_timezone.trim()
+        ? row.lockout_timezone
+        : DEFAULT_LOCKOUT_TIMEZONE,
+    lockout_at: typeof row.lockout_at === "string" ? row.lockout_at : null,
+  };
+}
 
 function emptyTeamState(): TeamState {
   return {
@@ -358,19 +594,19 @@ function safeSheetName(input: string): string {
   return input.replace(/[\\/?*[\]:]/g, "").slice(0, 31) || "Coach";
 }
 
-async function loadTeamLockout(): Promise<boolean> {
+async function loadAppSettings(): Promise<AppSettingsRow> {
   const { data, error } = await supabase
     .from("app_settings")
-    .select("team_lockout")
+    .select("*")
     .eq("environment", APP_ENV)
     .maybeSingle();
 
   if (error) {
-    console.error("Failed to load team lockout:", error.message);
-    return false;
+    console.error("Failed to load app settings:", error.message);
+    return normaliseAppSettingsRow(null);
   }
 
-  return Boolean((data as { team_lockout?: boolean } | null)?.team_lockout);
+  return normaliseAppSettingsRow(data);
 }
 
 export default function SelectTeamPage() {
@@ -392,8 +628,17 @@ export default function SelectTeamPage() {
   const [isLoadingTeam, setIsLoadingTeam] = useState(false);
   const [isSavingTeam, setIsSavingTeam] = useState(false);
   const [isExportingTeams, setIsExportingTeams] = useState(false);
-  const [isTeamLocked, setIsTeamLocked] = useState(false);
+  const [manualTeamLockout, setManualTeamLockout] = useState(false);
+  const [lockoutScheduleEnabled, setLockoutScheduleEnabled] = useState(false);
+  const [lockoutScheduleDay, setLockoutScheduleDay] = useState<WeekdayName>(DEFAULT_LOCKOUT_DAY);
+  const [lockoutScheduleTime, setLockoutScheduleTime] = useState(DEFAULT_LOCKOUT_TIME);
+  const [lockoutScheduleTimezone, setLockoutScheduleTimezone] = useState(
+    DEFAULT_LOCKOUT_TIMEZONE
+  );
+  const [lockoutScheduleAt, setLockoutScheduleAt] = useState<string | null>(null);
   const [isTogglingLockout, setIsTogglingLockout] = useState(false);
+  const [isSavingLockoutSchedule, setIsSavingLockoutSchedule] = useState(false);
+  const [lockoutClockTick, setLockoutClockTick] = useState(() => Date.now());
   const [loadedCoachIds, setLoadedCoachIds] = useState<Record<number, boolean>>({});
   const [submittedCoachIds, setSubmittedCoachIds] = useState<Record<number, boolean>>({});
   const [coachMetaById, setCoachMetaById] = useState<Record<number, CoachMeta>>({});
@@ -405,6 +650,29 @@ export default function SelectTeamPage() {
   const changeVersionByCoachIdRef = useRef<Record<number, number>>({});
 
   const isAdmin = loginSession?.role === "admin";
+
+  const scheduledTeamLockoutActive = useMemo(
+    () =>
+      isScheduledLockoutActive({
+        enabled: lockoutScheduleEnabled,
+        lockoutAt: lockoutScheduleAt,
+      }),
+    [lockoutClockTick, lockoutScheduleAt, lockoutScheduleEnabled]
+  );
+
+  const isTeamLocked = manualTeamLockout || scheduledTeamLockoutActive;
+  const lockoutModeText = manualTeamLockout
+    ? "Manual"
+    : scheduledTeamLockoutActive
+      ? "Scheduled"
+      : "Off";
+  const lockoutScheduleSummary = formatScheduleSummary({
+    enabled: lockoutScheduleEnabled,
+    lockoutDay: lockoutScheduleDay,
+    lockoutTime: lockoutScheduleTime,
+    lockoutTimezone: lockoutScheduleTimezone,
+    lockoutAt: lockoutScheduleAt,
+  });
 
   const selectedCoach =
     coachConfigs.find((coach) => coach.id === selectedCoachId) ?? coachConfigs[0];
@@ -600,25 +868,68 @@ export default function SelectTeamPage() {
     }
   }, [loginSession]);
 
-  const refreshTeamLockout = useCallback(async () => {
-    const locked = await loadTeamLockout();
-    setIsTeamLocked(locked);
+  const applyAppSettings = useCallback((row: AppSettingsRow) => {
+    setManualTeamLockout(Boolean(row.team_lockout));
+    setLockoutScheduleEnabled(Boolean(row.lockout_enabled));
+    setLockoutScheduleDay(normaliseWeekday(row.lockout_day));
+    setLockoutScheduleTime(normaliseTimeValue(row.lockout_time));
+    setLockoutScheduleTimezone(row.lockout_timezone || DEFAULT_LOCKOUT_TIMEZONE);
+    setLockoutScheduleAt(row.lockout_at ?? null);
   }, []);
+
+  const refreshAppSettings = useCallback(async () => {
+    const settings = await loadAppSettings();
+    applyAppSettings(settings);
+    setLockoutClockTick(Date.now());
+  }, [applyAppSettings]);
 
   useEffect(() => {
     let isMounted = true;
 
-    async function initialLoadTeamLockout() {
-      const locked = await loadTeamLockout();
+    async function initialLoadAppSettings() {
+      const settings = await loadAppSettings();
 
       if (!isMounted) return;
-      setIsTeamLocked(locked);
+      applyAppSettings(settings);
+      setLockoutClockTick(Date.now());
     }
 
-    void initialLoadTeamLockout();
+    void initialLoadAppSettings();
 
     return () => {
       isMounted = false;
+    };
+  }, [applyAppSettings]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`app-settings-${APP_ENV}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "app_settings",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshAppSettings();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [refreshAppSettings]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setLockoutClockTick(Date.now());
+    }, LOCKOUT_TICK_MS);
+
+    return () => {
+      window.clearInterval(interval);
     };
   }, []);
 
@@ -1338,41 +1649,108 @@ export default function SelectTeamPage() {
       return;
     }
 
-    const nextLockState = !isTeamLocked;
-    const actionLabel = nextLockState ? "turn ON" : "turn OFF";
+    const nextManualLockState = !manualTeamLockout;
+    const actionLabel = nextManualLockState ? "turn ON" : "turn OFF";
     const confirmed = window.confirm(
-      `Are you sure you want to ${actionLabel} team lockout?`
+      `Are you sure you want to ${actionLabel} manual team lockout?`
     );
 
     if (!confirmed) return;
 
     setIsTogglingLockout(true);
     setSubmitMessage(
-      nextLockState ? "Turning team lockout ON..." : "Turning team lockout OFF..."
+      nextManualLockState
+        ? "Turning manual team lockout ON..."
+        : "Turning manual team lockout OFF..."
     );
 
     const { error } = await supabase.from("app_settings").upsert(
       {
         environment: APP_ENV,
-        team_lockout: nextLockState,
+        team_lockout: nextManualLockState,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "environment" }
     );
 
     if (error) {
-      setSubmitMessage(`Team lockout update failed: ${error.message}`);
+      setSubmitMessage(`Manual team lockout update failed: ${error.message}`);
       setIsTogglingLockout(false);
       return;
     }
 
-    await refreshTeamLockout();
+    setManualTeamLockout(nextManualLockState);
+    setLockoutClockTick(Date.now());
     setSubmitMessage(
-      nextLockState
-        ? "Team lockout is now ON. Coaches can view but cannot change teams."
-        : "Team lockout is now OFF. Coaches can edit teams again."
+      nextManualLockState
+        ? "Manual team lockout is now ON. Coaches can view but cannot change teams."
+        : "Manual team lockout is now OFF. Scheduled lockout rules still apply if enabled."
     );
     setIsTogglingLockout(false);
+  }
+
+  async function handleSaveLockoutSchedule() {
+    if (!loginSession || !isAdmin) {
+      setSubmitMessage("Only admin can save the lockout schedule.");
+      return;
+    }
+
+    const normalisedDay = normaliseWeekday(lockoutScheduleDay);
+    const normalisedTime = normaliseTimeValue(lockoutScheduleTime);
+    const requestedTimezone = lockoutScheduleTimezone.trim() || DEFAULT_LOCKOUT_TIMEZONE;
+
+    if (!isValidTimeZone(requestedTimezone)) {
+      setSubmitMessage(
+        `Lockout schedule save failed: "${requestedTimezone}" is not a valid timezone.`
+      );
+      return;
+    }
+
+    const normalisedTimezone = requestedTimezone;
+    const nextLockoutAt = lockoutScheduleEnabled
+      ? buildLockoutAtIso(normalisedDay, normalisedTime, normalisedTimezone)
+      : null;
+
+    setIsSavingLockoutSchedule(true);
+    setSubmitMessage(
+      lockoutScheduleEnabled ? "Saving lockout schedule..." : "Clearing lockout schedule..."
+    );
+
+    const schedulePayload = {
+      environment: APP_ENV,
+      team_lockout: manualTeamLockout,
+      lockout_enabled: lockoutScheduleEnabled,
+      lockout_day: normalisedDay,
+      lockout_time: `${normalisedTime}:00`,
+      lockout_timezone: normalisedTimezone,
+      lockout_at: nextLockoutAt,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from("app_settings")
+      .upsert(schedulePayload, { onConflict: "environment" });
+
+    if (error) {
+      setSubmitMessage(
+        `Lockout schedule save failed: ${error.message}. You may need to add the schedule columns to app_settings before this can be saved.`
+      );
+      setIsSavingLockoutSchedule(false);
+      return;
+    }
+
+    setLockoutScheduleDay(normalisedDay);
+    setLockoutScheduleTime(normalisedTime);
+    setLockoutScheduleTimezone(normalisedTimezone);
+    setLockoutScheduleAt(nextLockoutAt);
+    setLockoutClockTick(Date.now());
+
+    setSubmitMessage(
+      lockoutScheduleEnabled
+        ? `Lockout schedule saved for ${normalisedDay} at ${normalisedTime} (${normalisedTimezone}).`
+        : "Lockout schedule has been turned off."
+    );
+    setIsSavingLockoutSchedule(false);
   }
 
   useEffect(() => {
@@ -1757,24 +2135,36 @@ export default function SelectTeamPage() {
                 <button
                   type="button"
                   onClick={() => void handleToggleTeamLockout()}
-                  disabled={isTogglingLockout || isLoadingTeam || isSavingTeam || isExportingTeams}
+                  disabled={
+                    isTogglingLockout ||
+                    isLoadingTeam ||
+                    isSavingTeam ||
+                    isExportingTeams ||
+                    isSavingLockoutSchedule
+                  }
                   className={`rounded-xl border px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
-                    isTeamLocked
+                    manualTeamLockout
                       ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20"
                       : "border-amber-500/30 bg-amber-500/15 text-amber-100 hover:bg-amber-500/20"
                   }`}
                 >
                   {isTogglingLockout
-                    ? "Updating Lockout..."
-                    : isTeamLocked
-                      ? "Turn Lockout Off"
-                      : "Turn Lockout On"}
+                    ? "Updating Manual Lockout..."
+                    : manualTeamLockout
+                      ? "Turn Manual Lockout Off"
+                      : "Turn Manual Lockout On"}
                 </button>
 
                 <button
                   type="button"
                   onClick={() => void handleResetAllTeams()}
-                  disabled={isSavingTeam || isLoadingTeam || isExportingTeams || isTogglingLockout}
+                  disabled={
+                    isSavingTeam ||
+                    isLoadingTeam ||
+                    isExportingTeams ||
+                    isTogglingLockout ||
+                    isSavingLockoutSchedule
+                  }
                   className="rounded-xl border border-red-500/30 bg-red-500/15 px-4 py-3 text-sm font-semibold text-red-100 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isSavingTeam ? "Resetting..." : "Reset All Teams"}
@@ -1783,7 +2173,13 @@ export default function SelectTeamPage() {
                 <button
                   type="button"
                   onClick={handleExportTeamsXlsx}
-                  disabled={isExportingTeams || isLoadingTeam || isSavingTeam || isTogglingLockout}
+                  disabled={
+                    isExportingTeams ||
+                    isLoadingTeam ||
+                    isSavingTeam ||
+                    isTogglingLockout ||
+                    isSavingLockoutSchedule
+                  }
                   className="rounded-xl border border-sky-500/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isExportingTeams ? "Exporting..." : "Export Teams (XLSX)"}
@@ -1791,9 +2187,152 @@ export default function SelectTeamPage() {
               </div>
             </div>
 
-            <div className="mb-4">
+            <div className="mb-4 flex flex-wrap gap-3">
               <div className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-100">
                 Current environment: {APP_ENV}
+              </div>
+              <div
+                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                  isTeamLocked
+                    ? "border-red-500/30 bg-red-500/15 text-red-100"
+                    : "border-emerald-500/30 bg-emerald-500/15 text-emerald-100"
+                }`}
+              >
+                Effective lockout: {isTeamLocked ? "ON" : "OFF"} ({lockoutModeText})
+              </div>
+              <div
+                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                  manualTeamLockout
+                    ? "border-amber-500/30 bg-amber-500/15 text-amber-100"
+                    : "border-white/10 bg-white/5 text-white/70"
+                }`}
+              >
+                Manual lockout: {manualTeamLockout ? "ON" : "OFF"}
+              </div>
+              <div
+                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                  lockoutScheduleEnabled
+                    ? "border-violet-500/30 bg-violet-500/15 text-violet-100"
+                    : "border-white/10 bg-white/5 text-white/70"
+                }`}
+              >
+                {lockoutScheduleSummary}
+              </div>
+            </div>
+
+            <div className="mb-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-3 text-lg font-semibold">Weekly Lockout Schedule</div>
+                <p className="mb-4 text-sm text-white/65">
+                  Save the next round lockout day and time here. Once the scheduled time arrives,
+                  coach pages will lock without needing a refresh.
+                </p>
+
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <label className="space-y-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                      Schedule Status
+                    </span>
+                    <select
+                      value={lockoutScheduleEnabled ? "on" : "off"}
+                      onChange={(event) => setLockoutScheduleEnabled(event.target.value === "on")}
+                      disabled={isSavingLockoutSchedule || isTogglingLockout}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white outline-none"
+                    >
+                      <option value="off">Off</option>
+                      <option value="on">On</option>
+                    </select>
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                      Day
+                    </span>
+                    <select
+                      value={lockoutScheduleDay}
+                      onChange={(event) =>
+                        setLockoutScheduleDay(normaliseWeekday(event.target.value))
+                      }
+                      disabled={
+                        !lockoutScheduleEnabled ||
+                        isSavingLockoutSchedule ||
+                        isTogglingLockout
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white outline-none disabled:opacity-50"
+                    >
+                      {WEEKDAY_OPTIONS.map((weekday) => (
+                        <option key={weekday} value={weekday}>
+                          {weekday}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                      Time
+                    </span>
+                    <input
+                      type="time"
+                      step={60}
+                      value={lockoutScheduleTime}
+                      onChange={(event) => setLockoutScheduleTime(normaliseTimeValue(event.target.value))}
+                      disabled={
+                        !lockoutScheduleEnabled ||
+                        isSavingLockoutSchedule ||
+                        isTogglingLockout
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white outline-none disabled:opacity-50"
+                    />
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                      Timezone
+                    </span>
+                    <input
+                      type="text"
+                      value={lockoutScheduleTimezone}
+                      onChange={(event) => setLockoutScheduleTimezone(event.target.value)}
+                      disabled={
+                        !lockoutScheduleEnabled ||
+                        isSavingLockoutSchedule ||
+                        isTogglingLockout
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white outline-none disabled:opacity-50"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveLockoutSchedule()}
+                    disabled={isSavingLockoutSchedule || isTogglingLockout || isSavingTeam}
+                    className="rounded-xl border border-violet-500/30 bg-violet-500/15 px-4 py-3 text-sm font-semibold text-violet-100 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isSavingLockoutSchedule ? "Saving Schedule..." : "Save Lockout Schedule"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-3 text-lg font-semibold">Lockout Status</div>
+                <div className="space-y-2 text-sm text-white/75">
+                  <div>Manual lockout: {manualTeamLockout ? "ON" : "OFF"}</div>
+                  <div>Schedule enabled: {lockoutScheduleEnabled ? "ON" : "OFF"}</div>
+                  <div>
+                    Scheduled trigger:{" "}
+                    {lockoutScheduleAt ? formatTimestamp(lockoutScheduleAt) : "Not set"}
+                  </div>
+                  <div>Schedule timezone: {lockoutScheduleTimezone || DEFAULT_LOCKOUT_TIMEZONE}</div>
+                  <div>Effective lockout: {isTeamLocked ? "ON" : "OFF"}</div>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-white/60">
+                  Realtime updates are active for app_settings. When manual lockout or the saved
+                  schedule changes, open coach and admin pages will update automatically.
+                </div>
               </div>
             </div>
 
@@ -1896,23 +2435,25 @@ export default function SelectTeamPage() {
         )}
 
         <section className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               <h2 className="text-2xl font-bold">Team Controls</h2>
               <p className="mt-1 text-sm text-white/70">
                 {isAdmin
-                  ? "Admin can switch between all coaches and manage teams even during lockout."
-                  : "Coach access is locked to your own team. When lockout is active, changes are disabled."}
+                  ? "Admin can view and manage any coach team."
+                  : "Select and submit your team for this round."}
               </p>
             </div>
 
-            <div className="min-w-[240px]">
-              <label className="mb-2 block text-sm font-medium text-white/80">Coach</label>
+            <div className="w-full max-w-xs">
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-white/60">
+                Coach
+              </label>
               <select
                 value={selectedCoachId}
-                onChange={(e) => setSelectedCoachId(Number(e.target.value))}
+                onChange={(event) => setSelectedCoachId(Number(event.target.value))}
                 disabled={!isAdmin}
-                className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {coachConfigs.map((coach) => (
                   <option key={coach.id} value={coach.id}>
@@ -1951,18 +2492,30 @@ export default function SelectTeamPage() {
                   : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
               }`}
             >
-              Team Lockout: {isTeamLocked ? "ON" : "OFF"}
+              Team Lockout: {isTeamLocked ? "ON" : "OFF"} ({lockoutModeText})
+            </div>
+
+            <div
+              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                lockoutScheduleEnabled
+                  ? "border-violet-500/30 bg-violet-500/15 text-violet-200"
+                  : "border-white/10 bg-white/5 text-white/60"
+              }`}
+            >
+              {lockoutScheduleSummary}
             </div>
 
             {isAdmin ? (
               <div className="text-xs text-white/60">
-                Use the admin toggle in the Admin Team Summary section to switch team lockout on or off.
+                Use the admin controls in the Admin Team Summary section to manage manual lockout
+                and the weekly schedule.
               </div>
             ) : null}
 
             {coachLockedByAppSetting ? (
               <div className="text-xs text-red-200/90">
-                Team lockout is active. You can view your team but cannot save, reset, or submit changes.
+                Team lockout is active ({lockoutModeText}). You can view your team but cannot save,
+                reset, or submit changes.
               </div>
             ) : isSubmitted ? (
               <div className="text-xs text-emerald-200/90">
@@ -2083,14 +2636,14 @@ export default function SelectTeamPage() {
         >
           <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
-              <h2 className="text-2xl font-bold">Final Review Panel</h2>
+              <h2 className="text-2xl font-bold">Submission Review</h2>
               <p className="mt-1 text-sm text-white/70">
-                Review the selected coach&apos;s team before final submission.
+                Check position counts before saving or submitting the final team.
               </p>
             </div>
 
             <div
-              className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${
+              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
                 readyToSubmit
                   ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
                   : "border-amber-500/30 bg-amber-500/15 text-amber-200"
@@ -2100,22 +2653,22 @@ export default function SelectTeamPage() {
             </div>
           </div>
 
-          <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {reviewRows.map((row) => (
               <div
                 key={row.position}
-                className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                className="rounded-xl border border-white/10 bg-black/20 p-4"
               >
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="text-lg font-bold">{row.position}</div>
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="text-base font-semibold">{row.position}</div>
                   <div
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${row.statusClass}`}
+                    className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${row.statusClass}`}
                   >
                     {row.statusText}
                   </div>
                 </div>
 
-                <div className="space-y-2 text-sm text-white/80">
+                <div className="space-y-1 text-sm text-white/75">
                   <div>
                     On-field: {row.onFieldSelected} / {row.onFieldRequired}
                   </div>
@@ -2125,255 +2678,305 @@ export default function SelectTeamPage() {
                 </div>
               </div>
             ))}
+
+            <div
+              className={`rounded-xl border p-4 ${
+                duplicateCheck.hasDuplicates
+                  ? "border-red-500/20 bg-red-500/5"
+                  : "border-emerald-500/20 bg-emerald-500/5"
+              }`}
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-base font-semibold">Duplicate Check</div>
+                <div
+                  className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${
+                    duplicateCheck.hasDuplicates
+                      ? "border-red-500/30 bg-red-500/15 text-red-200"
+                      : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
+                  }`}
+                >
+                  {duplicateCheck.hasDuplicates ? "Duplicates Found" : "All Unique"}
+                </div>
+              </div>
+
+              <div className="space-y-1 text-sm text-white/75">
+                <div>Total selected: {duplicateCheck.totalSelected}</div>
+                <div>Unique selected: {duplicateCheck.uniqueSelected}</div>
+              </div>
+            </div>
           </div>
 
-          {validationResult.errors.length > 0 && (
-            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
-              <div className="mb-2 text-sm font-semibold text-amber-200">Issues to fix</div>
+          {!readyToSubmit && validationResult.errors.length > 0 ? (
+            <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4">
+              <div className="mb-2 text-sm font-semibold text-amber-100">Fix these before submitting</div>
               <ul className="list-disc space-y-1 pl-5 text-sm text-amber-100/90">
-                {validationResult.errors.map((error, index) => (
-                  <li key={`${error}-${index}`}>{error}</li>
+                {validationResult.errors.map((error) => (
+                  <li key={error}>{error}</li>
                 ))}
               </ul>
             </div>
-          )}
-
-          {duplicateCheck.hasDuplicates && (
-            <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
-              Duplicate player detected. Total selected: {duplicateCheck.totalSelected}. Unique
-              players: {duplicateCheck.uniqueSelected}.
-            </div>
-          )}
+          ) : null}
         </section>
 
-        <section className="grid gap-6">
-          {POSITIONS.map((position) => {
-            const availablePlayers = coachPool[position].filter(
-              (player) => !isPlayerAlreadySelected(teamState, player.name)
-            );
+        <section className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold">Available Players</h2>
+            <p className="mt-1 text-sm text-white/70">
+              Select on-field players and emergencies for each position.
+            </p>
+          </div>
 
-            return (
-              <section
-                key={position}
-                className="rounded-2xl border border-white/10 bg-white/5 p-6"
-              >
-                <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-                  <div>
-                    <h3 className="text-2xl font-bold">{position}</h3>
-                    <p className="mt-1 text-sm text-white/70">
-                      On-field: {selectedCoach?.slots[position] ?? 0} • Emergencies: {" "}
-                      {selectedCoach?.emergencyLimits[position] ?? 0}
-                    </p>
-                  </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            {POSITIONS.map((position) => {
+              const pool = coachPool[position];
+              const onFieldSelected = teamState[position].onField;
+              const emergenciesSelected = teamState[position].emergencies;
+              const onFieldLimit = selectedCoach?.slots[position] ?? 0;
+              const emergencyLimit = selectedCoach?.emergencyLimits[position] ?? 0;
 
-                  <div className="text-sm text-white/60">
-                    Available in pool: {coachPool[position].length}
-                  </div>
-                </div>
+              const availablePlayers = pool.filter(
+                (player) => !isPlayerAlreadySelected(teamState, player.name)
+              );
 
-                <div className="grid gap-4 xl:grid-cols-3">
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <div className="mb-3 text-sm font-bold uppercase tracking-wide text-violet-200">
-                      On-Field
+              return (
+                <div
+                  key={position}
+                  className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                >
+                  <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h3 className="text-xl font-bold">{position}</h3>
+                      <div className="text-xs text-white/50">
+                        On-field {onFieldSelected.length}/{onFieldLimit}
+                        {" • "}
+                        Emergencies {emergenciesSelected.length}/{emergencyLimit}
+                      </div>
                     </div>
+                  </div>
 
-                    <div className="space-y-2">
-                      {teamState[position].onField.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-sm text-white/40">
-                          No players selected
-                        </div>
-                      ) : (
-                        teamState[position].onField.map((player, index) => (
-                          <div
-                            key={`${position}-on-${player}-${index}`}
-                            className="rounded-xl border border-white/10 bg-white/5 p-3"
-                          >
-                            <div className="font-semibold">{player}</div>
-                            <div className="text-xs text-white/50">{getPlayerClub(player)}</div>
-
-                            {canEditSelectedCoach && (
-                              <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3">
+                      <div className="mb-2 text-sm font-semibold text-violet-100">On-Field</div>
+                      <div className="space-y-2">
+                        {onFieldSelected.length === 0 ? (
+                          <div className="text-xs text-white/40">No players selected</div>
+                        ) : (
+                          onFieldSelected.map((playerName, index) => (
+                            <div
+                              key={`${position}-on-${playerName}-${index}`}
+                              className="rounded-lg border border-violet-500/20 bg-black/20 p-2"
+                            >
+                              <div className="text-sm font-medium text-white">{playerName}</div>
+                              <div className="mt-2 flex flex-wrap gap-2">
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    handleMovePlayer(position, "onField", "emergencies", player)
-                                  }
-                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10"
-                                >
-                                  Move to Emergencies
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemovePlayer(position, "onField", player)}
-                                  className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15"
+                                  onClick={() => handleRemovePlayer(position, "onField", playerName)}
+                                  disabled={!canEditSelectedCoach}
+                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   Remove
                                 </button>
+                                {emergencyLimit > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleMovePlayer(position, "onField", "emergencies", playerName)
+                                    }
+                                    disabled={!canEditSelectedCoach}
+                                    className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[11px] font-semibold text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Move to Emergency
+                                  </button>
+                                ) : null}
                               </div>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    {canEditSelectedCoach &&
-                    selectedCoach &&
-                    teamState[position].onField.length < selectedCoach.slots[position] ? (
-                      <div className="mt-4">
-                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-white/60">
-                          Add to On-Field
-                        </label>
-                        <select
-                          defaultValue=""
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            if (!value) return;
-                            handleAddPlayer(position, "onField", value);
-                            e.target.value = "";
-                          }}
-                          className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-sm text-white outline-none"
-                        >
-                          <option value="">Select player</option>
-                          {availablePlayers.map((player) => (
-                            <option
-                              key={`${position}-available-on-${player.name}`}
-                              value={player.name}
-                            >
-                              {player.name} ({player.club})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <div className="mb-3 text-sm font-bold uppercase tracking-wide text-amber-200">
-                      Emergencies
-                    </div>
-
-                    <div className="space-y-2">
-                      {teamState[position].emergencies.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-sm text-white/40">
-                          No emergencies selected
-                        </div>
-                      ) : (
-                        teamState[position].emergencies.map((player, index) => (
-                          <div
-                            key={`${position}-em-${player}-${index}`}
-                            className="rounded-xl border border-white/10 bg-white/5 p-3"
-                          >
-                            <div className="font-semibold">
-                              {index + 1}. {player}
                             </div>
-                            <div className="text-xs text-white/50">{getPlayerClub(player)}</div>
+                          ))
+                        )}
+                      </div>
+                    </div>
 
-                            {canEditSelectedCoach && (
-                              <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+                      <div className="mb-2 text-sm font-semibold text-amber-100">Emergencies</div>
+                      <div className="space-y-2">
+                        {emergenciesSelected.length === 0 ? (
+                          <div className="text-xs text-white/40">No emergencies selected</div>
+                        ) : (
+                          emergenciesSelected.map((playerName, index) => (
+                            <div
+                              key={`${position}-em-${playerName}-${index}`}
+                              className="rounded-lg border border-amber-500/20 bg-black/20 p-2"
+                            >
+                              <div className="text-sm font-medium text-white">
+                                {index + 1}. {playerName}
+                              </div>
+                              <div className="mt-2 flex flex-wrap gap-2">
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    handleMovePlayer(position, "emergencies", "onField", player)
+                                    handleMoveEmergencyUp(position, index)
                                   }
-                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10"
-                                >
-                                  Move to On-Field
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveEmergencyUp(position, index)}
-                                  disabled={index === 0}
-                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                  disabled={!canEditSelectedCoach || index === 0}
+                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   Move Up
                                 </button>
 
                                 <button
                                   type="button"
-                                  onClick={() => handleMoveEmergencyDown(position, index)}
-                                  disabled={index === teamState[position].emergencies.length - 1}
-                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                  onClick={() =>
+                                    handleMoveEmergencyDown(position, index)
+                                  }
+                                  disabled={
+                                    !canEditSelectedCoach ||
+                                    index === emergenciesSelected.length - 1
+                                  }
+                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   Move Down
                                 </button>
 
                                 <button
                                   type="button"
-                                  onClick={() => handleRemovePlayer(position, "emergencies", player)}
-                                  className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15"
+                                  onClick={() =>
+                                    handleRemovePlayer(position, "emergencies", playerName)
+                                  }
+                                  disabled={!canEditSelectedCoach}
+                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   Remove
                                 </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleMovePlayer(position, "emergencies", "onField", playerName)
+                                  }
+                                  disabled={!canEditSelectedCoach}
+                                  className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-[11px] font-semibold text-violet-100 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  Move to On-Field
+                                </button>
                               </div>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    {canEditSelectedCoach &&
-                    selectedCoach &&
-                    teamState[position].emergencies.length <
-                      selectedCoach.emergencyLimits[position] ? (
-                      <div className="mt-4">
-                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-white/60">
-                          Add to Emergencies
-                        </label>
-                        <select
-                          defaultValue=""
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            if (!value) return;
-                            handleAddPlayer(position, "emergencies", value);
-                            e.target.value = "";
-                          }}
-                          className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-sm text-white outline-none"
-                        >
-                          <option value="">Select player</option>
-                          {availablePlayers.map((player) => (
-                            <option
-                              key={`${position}-available-em-${player.name}`}
-                              value={player.name}
-                            >
-                              {player.name} ({player.club})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <div className="mb-3 text-sm font-bold uppercase tracking-wide text-white/80">
-                      Available Players
-                    </div>
-
-                    <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
-                      {availablePlayers.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-sm text-white/40">
-                          No remaining players available in this position
-                        </div>
-                      ) : (
-                        availablePlayers.map((player) => (
-                          <div
-                            key={`${position}-available-${player.name}`}
-                            className="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
-                          >
-                            <div className="font-semibold">
-                              {player.number}. {player.name}
                             </div>
-                            <div className="text-xs text-white/50">{player.club}</div>
-                          </div>
-                        ))
-                      )}
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                      <div className="mb-2 text-sm font-semibold text-white">Available Players</div>
+                      <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
+                        {availablePlayers.length === 0 ? (
+                          <div className="text-xs text-white/40">No available players</div>
+                        ) : (
+                          availablePlayers.map((player) => (
+                            <div
+                              key={`${position}-available-${player.name}`}
+                              className="rounded-lg border border-white/10 bg-black/20 p-2"
+                            >
+                              <div className="text-sm font-medium text-white">{player.name}</div>
+                              <div className="text-xs text-white/50">
+                                #{player.number} • {player.club}
+                              </div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleAddPlayer(position, "onField", player.name)
+                                  }
+                                  disabled={!canEditSelectedCoach || onFieldSelected.length >= onFieldLimit}
+                                  className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-[11px] font-semibold text-violet-100 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  Add On-Field
+                                </button>
+
+                                {emergencyLimit > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleAddPlayer(position, "emergencies", player.name)
+                                    }
+                                    disabled={
+                                      !canEditSelectedCoach ||
+                                      emergenciesSelected.length >= emergencyLimit
+                                    }
+                                    className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[11px] font-semibold text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Add Emergency
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </section>
-            );
-          })}
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold">Selected Team Snapshot</h2>
+            <p className="mt-1 text-sm text-white/70">
+              Quick view of your current saved selections by position.
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {POSITIONS.map((position) => (
+              <div
+                key={`snapshot-${position}`}
+                className="rounded-xl border border-white/10 bg-black/20 p-4"
+              >
+                <div className="mb-2 text-lg font-semibold">{position}</div>
+
+                <div className="mb-3">
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-200">
+                    On-Field
+                  </div>
+                  {teamState[position].onField.length === 0 ? (
+                    <div className="text-xs text-white/40">None selected</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {teamState[position].onField.map((playerName, index) => (
+                        <div
+                          key={`snapshot-on-${position}-${playerName}-${index}`}
+                          className="rounded-lg bg-black/20 px-2 py-1 text-xs text-white/85"
+                        >
+                          {playerName} {getPlayerClub(playerName) ? `• ${getPlayerClub(playerName)}` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-200">
+                    Emergencies
+                  </div>
+                  {teamState[position].emergencies.length === 0 ? (
+                    <div className="text-xs text-white/40">None selected</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {teamState[position].emergencies.map((playerName, index) => (
+                        <div
+                          key={`snapshot-em-${position}-${playerName}-${index}`}
+                          className="rounded-lg bg-black/20 px-2 py-1 text-xs text-white/85"
+                        >
+                          {index + 1}. {playerName}{" "}
+                          {getPlayerClub(playerName) ? `• ${getPlayerClub(playerName)}` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
       </div>
     </main>
