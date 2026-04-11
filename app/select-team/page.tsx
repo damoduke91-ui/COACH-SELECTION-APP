@@ -9,7 +9,7 @@ import {
   type PositionKey,
   getPlayersForCoach,
 } from "../../lib/playersByCoach";
-import { supabase } from "../../lib/supabase";
+import { APP_ENV, supabase } from "../../lib/supabase";
 
 type PositionState = {
   onField: string[];
@@ -33,6 +33,7 @@ type SavedTeamRow = {
   is_submitted: boolean;
   submitted_at: string | null;
   updated_at: string;
+  environment: "production" | "preview";
 };
 
 type CoachMeta = {
@@ -357,6 +358,21 @@ function safeSheetName(input: string): string {
   return input.replace(/[\\/?*[\]:]/g, "").slice(0, 31) || "Coach";
 }
 
+async function loadTeamLockout(): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("app_settings")
+    .select("team_lockout")
+    .eq("environment", APP_ENV)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load team lockout:", error.message);
+    return false;
+  }
+
+  return Boolean((data as { team_lockout?: boolean } | null)?.team_lockout);
+}
+
 export default function SelectTeamPage() {
   const router = useRouter();
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
@@ -376,6 +392,8 @@ export default function SelectTeamPage() {
   const [isLoadingTeam, setIsLoadingTeam] = useState(false);
   const [isSavingTeam, setIsSavingTeam] = useState(false);
   const [isExportingTeams, setIsExportingTeams] = useState(false);
+  const [isTeamLocked, setIsTeamLocked] = useState(false);
+  const [isTogglingLockout, setIsTogglingLockout] = useState(false);
   const [loadedCoachIds, setLoadedCoachIds] = useState<Record<number, boolean>>({});
   const [submittedCoachIds, setSubmittedCoachIds] = useState<Record<number, boolean>>({});
   const [coachMetaById, setCoachMetaById] = useState<Record<number, CoachMeta>>({});
@@ -403,7 +421,8 @@ export default function SelectTeamPage() {
       loginSession &&
       !isLoadingTeam &&
       canViewSelectedCoach &&
-      !Boolean(submittedCoachIds[selectedCoach.id])
+      !Boolean(submittedCoachIds[selectedCoach.id]) &&
+      (isAdmin || !isTeamLocked)
   );
 
   const canUnlockSelectedCoach = Boolean(
@@ -411,7 +430,8 @@ export default function SelectTeamPage() {
       loginSession &&
       !isLoadingTeam &&
       canViewSelectedCoach &&
-      Boolean(submittedCoachIds[selectedCoach.id])
+      Boolean(submittedCoachIds[selectedCoach.id]) &&
+      (isAdmin || !isTeamLocked)
   );
 
   const playerLookup = useMemo(() => {
@@ -447,6 +467,7 @@ export default function SelectTeamPage() {
         .from("profiles")
         .select("id, role, coach_id, coach_name")
         .eq("id", userId)
+        .eq("environment", APP_ENV)
         .single();
 
       if (error) {
@@ -507,10 +528,7 @@ export default function SelectTeamPage() {
         return;
       }
 
-      const nextSession = await loadProfileForUser(
-        session.user.id,
-        session.user.email ?? ""
-      );
+      const nextSession = await loadProfileForUser(session.user.id, session.user.email ?? "");
 
       if (!isMounted) return;
 
@@ -543,10 +561,7 @@ export default function SelectTeamPage() {
           return;
         }
 
-        const nextSession = await loadProfileForUser(
-          session.user.id,
-          session.user.email ?? ""
-        );
+        const nextSession = await loadProfileForUser(session.user.id, session.user.email ?? "");
 
         if (!isMounted) return;
 
@@ -585,6 +600,28 @@ export default function SelectTeamPage() {
     }
   }, [loginSession]);
 
+  const refreshTeamLockout = useCallback(async () => {
+    const locked = await loadTeamLockout();
+    setIsTeamLocked(locked);
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initialLoadTeamLockout() {
+      const locked = await loadTeamLockout();
+
+      if (!isMounted) return;
+      setIsTeamLocked(locked);
+    }
+
+    void initialLoadTeamLockout();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   useEffect(() => {
     async function loadCoachTeam() {
       if (!selectedCoach) return;
@@ -595,8 +632,9 @@ export default function SelectTeamPage() {
 
       const { data, error } = await supabase
         .from("coach_team_selections")
-        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at")
+        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
         .eq("coach_id", selectedCoach.id)
+        .eq("environment", APP_ENV)
         .maybeSingle();
 
       if (error) {
@@ -660,7 +698,8 @@ export default function SelectTeamPage() {
 
       const { data, error } = await supabase
         .from("coach_team_selections")
-        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at");
+        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
+        .eq("environment", APP_ENV);
 
       if (error) {
         setSubmitMessage(`Admin summary load failed: ${error.message}`);
@@ -1039,6 +1078,11 @@ export default function SelectTeamPage() {
         return;
       }
 
+      if (!isAdmin && isTeamLocked) {
+        setSubmitMessage("Team selection is locked. You can view your team but cannot make changes.");
+        return;
+      }
+
       if (!isSubmitting && (submittedCoachIds[coach.id] ?? false)) {
         setSubmitMessage(
           `${coach.name} is locked because the final team has already been submitted.`
@@ -1085,6 +1129,7 @@ export default function SelectTeamPage() {
         coach_id: coach.id,
         coach_name: coach.name,
         team_data: team,
+        environment: APP_ENV,
         is_submitted: isSubmitting ? true : alreadySubmitted,
         submitted_at: isSubmitting ? nowIso : existingMeta?.submittedAt ?? null,
         updated_at: nowIso,
@@ -1092,7 +1137,7 @@ export default function SelectTeamPage() {
 
       const { error } = await supabase
         .from("coach_team_selections")
-        .upsert(payload, { onConflict: "coach_id" });
+        .upsert(payload, { onConflict: "coach_id,environment" });
 
       if (error) {
         setSubmitMessage(
@@ -1152,7 +1197,7 @@ export default function SelectTeamPage() {
       return;
     }
 
-    const canUnlockThisTeam = isAdmin || loginSession.coachId === selectedCoach.id;
+    const canUnlockThisTeam = isAdmin || (!isTeamLocked && loginSession.coachId === selectedCoach.id);
 
     if (!canUnlockThisTeam) {
       setSubmitMessage("You do not have permission to unlock this team.");
@@ -1169,6 +1214,7 @@ export default function SelectTeamPage() {
       coach_id: selectedCoach.id,
       coach_name: selectedCoach.name,
       team_data: teamState,
+      environment: APP_ENV,
       is_submitted: false,
       submitted_at: null,
       updated_at: nowIso,
@@ -1176,7 +1222,7 @@ export default function SelectTeamPage() {
 
     const { error } = await supabase
       .from("coach_team_selections")
-      .upsert(payload, { onConflict: "coach_id" });
+      .upsert(payload, { onConflict: "coach_id,environment" });
 
     if (error) {
       setSubmitMessage(`Unlock failed: ${error.message}`);
@@ -1240,6 +1286,7 @@ export default function SelectTeamPage() {
       coach_id: coach.id,
       coach_name: coach.name,
       team_data: emptyTeamState(),
+      environment: APP_ENV,
       is_submitted: false,
       submitted_at: null,
       updated_at: nowIso,
@@ -1247,7 +1294,7 @@ export default function SelectTeamPage() {
 
     const { error } = await supabase
       .from("coach_team_selections")
-      .upsert(resetRows, { onConflict: "coach_id" });
+      .upsert(resetRows, { onConflict: "coach_id,environment" });
 
     if (error) {
       setSubmitMessage(`Reset all teams failed: ${error.message}`);
@@ -1285,6 +1332,49 @@ export default function SelectTeamPage() {
     setIsSavingTeam(false);
   }
 
+  async function handleToggleTeamLockout() {
+    if (!loginSession || !isAdmin) {
+      setSubmitMessage("Only admin can change team lockout.");
+      return;
+    }
+
+    const nextLockState = !isTeamLocked;
+    const actionLabel = nextLockState ? "turn ON" : "turn OFF";
+    const confirmed = window.confirm(
+      `Are you sure you want to ${actionLabel} team lockout?`
+    );
+
+    if (!confirmed) return;
+
+    setIsTogglingLockout(true);
+    setSubmitMessage(
+      nextLockState ? "Turning team lockout ON..." : "Turning team lockout OFF..."
+    );
+
+    const { error } = await supabase.from("app_settings").upsert(
+      {
+        environment: APP_ENV,
+        team_lockout: nextLockState,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "environment" }
+    );
+
+    if (error) {
+      setSubmitMessage(`Team lockout update failed: ${error.message}`);
+      setIsTogglingLockout(false);
+      return;
+    }
+
+    await refreshTeamLockout();
+    setSubmitMessage(
+      nextLockState
+        ? "Team lockout is now ON. Coaches can view but cannot change teams."
+        : "Team lockout is now OFF. Coaches can edit teams again."
+    );
+    setIsTogglingLockout(false);
+  }
+
   useEffect(() => {
     if (autoSaveTimeoutRef.current) {
       clearTimeout(autoSaveTimeoutRef.current);
@@ -1296,6 +1386,7 @@ export default function SelectTeamPage() {
     if (!loadedCoachIds[selectedCoach.id]) return;
     if (!dirtyCoachIds[selectedCoach.id]) return;
     if (submittedCoachIds[selectedCoach.id]) return;
+    if (!isAdmin && isTeamLocked) return;
     if (isLoadingTeam) return;
     if (isSavingTeam) return;
 
@@ -1320,8 +1411,10 @@ export default function SelectTeamPage() {
     };
   }, [
     dirtyCoachIds,
+    isAdmin,
     isLoadingTeam,
     isSavingTeam,
+    isTeamLocked,
     loadedCoachIds,
     loginSession,
     saveTeam,
@@ -1392,7 +1485,8 @@ export default function SelectTeamPage() {
     try {
       const { data, error } = await supabase
         .from("coach_team_selections")
-        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at")
+        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
+        .eq("environment", APP_ENV)
         .order("coach_id", { ascending: true });
 
       if (error) {
@@ -1448,6 +1542,14 @@ export default function SelectTeamPage() {
           },
           {
             "Player No.": "",
+            Position: "Environment",
+            Club: "",
+            "Player Name": "",
+            Selected: APP_ENV,
+            "Selection Order": "",
+          },
+          {
+            "Player No.": "",
             Position: "Status",
             Club: "",
             "Player Name": "",
@@ -1498,7 +1600,7 @@ export default function SelectTeamPage() {
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      XLSX.writeFile(workbook, `coach-team-selections-${timestamp}.xlsx`);
+      XLSX.writeFile(workbook, `coach-team-selections-${APP_ENV}-${timestamp}.xlsx`);
       setSubmitMessage("XLSX export complete.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown export error.";
@@ -1562,6 +1664,7 @@ export default function SelectTeamPage() {
 
   const readyToSubmit = validationResult.valid;
   const isSubmitted = selectedCoach ? Boolean(submittedCoachIds[selectedCoach.id]) : false;
+  const coachLockedByAppSetting = Boolean(!isAdmin && isTeamLocked);
   const coachMeta = selectedCoach
     ? coachMetaById[selectedCoach.id] ?? { updatedAt: null, submittedAt: null }
     : { updatedAt: null, submittedAt: null };
@@ -1592,6 +1695,9 @@ export default function SelectTeamPage() {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
         <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
+          <div className="mb-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white/70">
+            {APP_ENV}
+          </div>
           <h1 className="text-3xl font-bold">Coach Team Login</h1>
           <p className="mt-2 text-sm text-white/70">Checking your session...</p>
         </div>
@@ -1609,6 +1715,18 @@ export default function SelectTeamPage() {
         <section className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <div
+                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+                    APP_ENV === "preview"
+                      ? "border-amber-500/30 bg-amber-500/15 text-amber-200"
+                      : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
+                  }`}
+                >
+                  {APP_ENV}
+                </div>
+              </div>
+
               <h1 className="text-3xl font-bold">Coach Team Selection</h1>
               <p className="mt-1 text-sm text-white/70">
                 Signed in as {loginSession.email} • {isAdmin ? "Admin" : loginSession.coachName}
@@ -1638,8 +1756,25 @@ export default function SelectTeamPage() {
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
+                  onClick={() => void handleToggleTeamLockout()}
+                  disabled={isTogglingLockout || isLoadingTeam || isSavingTeam || isExportingTeams}
+                  className={`rounded-xl border px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
+                    isTeamLocked
+                      ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20"
+                      : "border-amber-500/30 bg-amber-500/15 text-amber-100 hover:bg-amber-500/20"
+                  }`}
+                >
+                  {isTogglingLockout
+                    ? "Updating Lockout..."
+                    : isTeamLocked
+                      ? "Turn Lockout Off"
+                      : "Turn Lockout On"}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => void handleResetAllTeams()}
-                  disabled={isSavingTeam || isLoadingTeam || isExportingTeams}
+                  disabled={isSavingTeam || isLoadingTeam || isExportingTeams || isTogglingLockout}
                   className="rounded-xl border border-red-500/30 bg-red-500/15 px-4 py-3 text-sm font-semibold text-red-100 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isSavingTeam ? "Resetting..." : "Reset All Teams"}
@@ -1648,11 +1783,17 @@ export default function SelectTeamPage() {
                 <button
                   type="button"
                   onClick={handleExportTeamsXlsx}
-                  disabled={isExportingTeams || isLoadingTeam || isSavingTeam}
+                  disabled={isExportingTeams || isLoadingTeam || isSavingTeam || isTogglingLockout}
                   className="rounded-xl border border-sky-500/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isExportingTeams ? "Exporting..." : "Export Teams (XLSX)"}
                 </button>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-100">
+                Current environment: {APP_ENV}
               </div>
             </div>
 
@@ -1760,8 +1901,8 @@ export default function SelectTeamPage() {
               <h2 className="text-2xl font-bold">Team Controls</h2>
               <p className="mt-1 text-sm text-white/70">
                 {isAdmin
-                  ? "Admin can switch between all coaches and unlock submitted teams."
-                  : "Coach access is locked to your own team, including unlocking your own submitted team."}
+                  ? "Admin can switch between all coaches and manage teams even during lockout."
+                  : "Coach access is locked to your own team. When lockout is active, changes are disabled."}
               </p>
             </div>
 
@@ -1793,7 +1934,37 @@ export default function SelectTeamPage() {
                   : "Draft in Progress"}
             </div>
 
-            {isSubmitted ? (
+            <div
+              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                APP_ENV === "preview"
+                  ? "border-amber-500/30 bg-amber-500/15 text-amber-200"
+                  : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
+              }`}
+            >
+              Environment: {APP_ENV}
+            </div>
+
+            <div
+              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                isTeamLocked
+                  ? "border-red-500/30 bg-red-500/15 text-red-200"
+                  : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
+              }`}
+            >
+              Team Lockout: {isTeamLocked ? "ON" : "OFF"}
+            </div>
+
+            {isAdmin ? (
+              <div className="text-xs text-white/60">
+                Use the admin toggle in the Admin Team Summary section to switch team lockout on or off.
+              </div>
+            ) : null}
+
+            {coachLockedByAppSetting ? (
+              <div className="text-xs text-red-200/90">
+                Team lockout is active. You can view your team but cannot save, reset, or submit changes.
+              </div>
+            ) : isSubmitted ? (
               <div className="text-xs text-emerald-200/90">
                 This final team is locked until it is unlocked for changes.
               </div>
@@ -1821,9 +1992,7 @@ export default function SelectTeamPage() {
 
           {canUnlockSelectedCoach ? (
             <div className="mt-4 rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
-              <div className="mb-2 text-sm font-semibold text-sky-100">
-                Unlock available
-              </div>
+              <div className="mb-2 text-sm font-semibold text-sky-100">Unlock available</div>
               <div className="text-sm text-sky-100/80">
                 Unlock this submitted team to restore Save Team, Reset Team, and Submit Final Team.
               </div>
@@ -1992,7 +2161,7 @@ export default function SelectTeamPage() {
                   <div>
                     <h3 className="text-2xl font-bold">{position}</h3>
                     <p className="mt-1 text-sm text-white/70">
-                      On-field: {selectedCoach?.slots[position] ?? 0} • Emergencies:{" "}
+                      On-field: {selectedCoach?.slots[position] ?? 0} • Emergencies: {" "}
                       {selectedCoach?.emergencyLimits[position] ?? 0}
                     </p>
                   </div>
@@ -2036,9 +2205,7 @@ export default function SelectTeamPage() {
 
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    handleRemovePlayer(position, "onField", player)
-                                  }
+                                  onClick={() => handleRemovePlayer(position, "onField", player)}
                                   className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15"
                                 >
                                   Remove
@@ -2069,7 +2236,10 @@ export default function SelectTeamPage() {
                         >
                           <option value="">Select player</option>
                           {availablePlayers.map((player) => (
-                            <option key={`${position}-available-on-${player.name}`} value={player.name}>
+                            <option
+                              key={`${position}-available-on-${player.name}`}
+                              value={player.name}
+                            >
                               {player.name} ({player.club})
                             </option>
                           ))}
@@ -2131,9 +2301,7 @@ export default function SelectTeamPage() {
 
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    handleRemovePlayer(position, "emergencies", player)
-                                  }
+                                  onClick={() => handleRemovePlayer(position, "emergencies", player)}
                                   className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15"
                                 >
                                   Remove
@@ -2165,7 +2333,10 @@ export default function SelectTeamPage() {
                         >
                           <option value="">Select player</option>
                           {availablePlayers.map((player) => (
-                            <option key={`${position}-available-em-${player.name}`} value={player.name}>
+                            <option
+                              key={`${position}-available-em-${player.name}`}
+                              value={player.name}
+                            >
                               {player.name} ({player.club})
                             </option>
                           ))}
