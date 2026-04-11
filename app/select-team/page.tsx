@@ -173,6 +173,7 @@ const WEEKDAY_OPTIONS = [
 ] as const;
 
 type WeekdayName = (typeof WEEKDAY_OPTIONS)[number];
+type EffectiveLockoutCause = "none" | "manual" | "scheduled" | "manual_and_scheduled";
 
 function isValidTimeZone(value: string): boolean {
   try {
@@ -341,6 +342,29 @@ function isScheduledLockoutActive(settings: {
   if (Number.isNaN(lockoutDate.getTime())) return false;
 
   return Date.now() >= lockoutDate.getTime();
+}
+
+function getEffectiveLockoutCause(
+  manualLockout: boolean,
+  scheduledLockoutActive: boolean
+): EffectiveLockoutCause {
+  if (manualLockout && scheduledLockoutActive) return "manual_and_scheduled";
+  if (manualLockout) return "manual";
+  if (scheduledLockoutActive) return "scheduled";
+  return "none";
+}
+
+function getEffectiveLockoutText(cause: EffectiveLockoutCause): string {
+  switch (cause) {
+    case "manual":
+      return "Manual";
+    case "scheduled":
+      return "Scheduled";
+    case "manual_and_scheduled":
+      return "Manual + Scheduled";
+    default:
+      return "Off";
+  }
 }
 
 function formatScheduleSummary(options: {
@@ -660,12 +684,13 @@ export default function SelectTeamPage() {
     [lockoutClockTick, lockoutScheduleAt, lockoutScheduleEnabled]
   );
 
-  const isTeamLocked = manualTeamLockout || scheduledTeamLockoutActive;
-  const lockoutModeText = manualTeamLockout
-    ? "Manual"
-    : scheduledTeamLockoutActive
-      ? "Scheduled"
-      : "Off";
+  const effectiveLockoutCause = getEffectiveLockoutCause(
+    manualTeamLockout,
+    scheduledTeamLockoutActive
+  );
+  const isTeamLocked = effectiveLockoutCause !== "none";
+  const lockoutModeText = getEffectiveLockoutText(effectiveLockoutCause);
+
   const lockoutScheduleSummary = formatScheduleSummary({
     enabled: lockoutScheduleEnabled,
     lockoutDay: lockoutScheduleDay,
@@ -1494,6 +1519,7 @@ export default function SelectTeamPage() {
       dirtyCoachIds,
       getCoachChangeVersion,
       isAdmin,
+      isTeamLocked,
       loginSession,
       markCoachAsSaved,
       setCoachDirtyState,
@@ -1681,11 +1707,26 @@ export default function SelectTeamPage() {
 
     setManualTeamLockout(nextManualLockState);
     setLockoutClockTick(Date.now());
-    setSubmitMessage(
-      nextManualLockState
-        ? "Manual team lockout is now ON. Coaches can view but cannot change teams."
-        : "Manual team lockout is now OFF. Scheduled lockout rules still apply if enabled."
+
+    const nextEffectiveCause = getEffectiveLockoutCause(
+      nextManualLockState,
+      scheduledTeamLockoutActive
     );
+
+    if (nextManualLockState) {
+      setSubmitMessage(
+        "Manual team lockout is now ON. Coaches can view but cannot change teams."
+      );
+    } else if (nextEffectiveCause === "scheduled" || nextEffectiveCause === "manual_and_scheduled") {
+      setSubmitMessage(
+        "Manual team lockout is now OFF. Teams are still locked because the scheduled lockout is currently active."
+      );
+    } else {
+      setSubmitMessage(
+        "Manual team lockout is now OFF. Teams are unlocked unless the schedule is turned on and becomes active later."
+      );
+    }
+
     setIsTogglingLockout(false);
   }
 
@@ -1748,7 +1789,7 @@ export default function SelectTeamPage() {
     setSubmitMessage(
       lockoutScheduleEnabled
         ? `Lockout schedule saved for ${normalisedDay} at ${normalisedTime} (${normalisedTimezone}).`
-        : "Lockout schedule has been turned off."
+        : "Lockout schedule has been turned off. If manual lockout is also off, teams are now unlocked."
     );
     setIsSavingLockoutSchedule(false);
   }
@@ -2211,6 +2252,22 @@ export default function SelectTeamPage() {
               </div>
               <div
                 className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                  scheduledTeamLockoutActive
+                    ? "border-violet-500/30 bg-violet-500/15 text-violet-100"
+                    : lockoutScheduleEnabled
+                      ? "border-violet-500/20 bg-violet-500/10 text-violet-200"
+                      : "border-white/10 bg-white/5 text-white/70"
+                }`}
+              >
+                Scheduled lockout:{" "}
+                {scheduledTeamLockoutActive
+                  ? "ACTIVE"
+                  : lockoutScheduleEnabled
+                    ? "WAITING"
+                    : "OFF"}
+              </div>
+              <div
+                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
                   lockoutScheduleEnabled
                     ? "border-violet-500/30 bg-violet-500/15 text-violet-100"
                     : "border-white/10 bg-white/5 text-white/70"
@@ -2322,16 +2379,20 @@ export default function SelectTeamPage() {
                   <div>Manual lockout: {manualTeamLockout ? "ON" : "OFF"}</div>
                   <div>Schedule enabled: {lockoutScheduleEnabled ? "ON" : "OFF"}</div>
                   <div>
+                    Scheduled lockout currently: {scheduledTeamLockoutActive ? "ACTIVE" : "INACTIVE"}
+                  </div>
+                  <div>
                     Scheduled trigger:{" "}
                     {lockoutScheduleAt ? formatTimestamp(lockoutScheduleAt) : "Not set"}
                   </div>
                   <div>Schedule timezone: {lockoutScheduleTimezone || DEFAULT_LOCKOUT_TIMEZONE}</div>
                   <div>Effective lockout: {isTeamLocked ? "ON" : "OFF"}</div>
+                  <div>Effective source: {lockoutModeText}</div>
                 </div>
 
                 <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-white/60">
-                  Realtime updates are active for app_settings. When manual lockout or the saved
-                  schedule changes, open coach and admin pages will update automatically.
+                  Turning manual lockout off does not override an active schedule. If teams are
+                  still locked, set Schedule Status to Off and click Save Lockout Schedule.
                 </div>
               </div>
             </div>
@@ -2507,8 +2568,8 @@ export default function SelectTeamPage() {
 
             {isAdmin ? (
               <div className="text-xs text-white/60">
-                Use the admin controls in the Admin Team Summary section to manage manual lockout
-                and the weekly schedule.
+                Manual lockout and scheduled lockout are separate. Effective lockout shows what is
+                actually locking teams right now.
               </div>
             ) : null}
 
