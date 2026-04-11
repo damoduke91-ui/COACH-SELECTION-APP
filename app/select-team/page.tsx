@@ -86,6 +86,19 @@ type AppSettingsRow = {
   lockout_at?: string | null;
 };
 
+type RoundSubmissionRow = {
+  coach_id: number;
+  coach_name: string;
+  team_data: TeamState;
+  is_submitted: boolean;
+  submitted_at: string | null;
+  updated_at: string | null;
+  environment: "production" | "preview";
+  round_number: number;
+  lockout_at: string;
+  snapshot_created_at: string;
+};
+
 const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
 
 const DEFAULT_ON_FIELD_SLOTS: Record<PositionKey, number> = {
@@ -745,6 +758,9 @@ export default function SelectTeamPage() {
   >({});
   const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const changeVersionByCoachIdRef = useRef<Record<number, number>>({});
+  const lastScheduledLockoutActiveRef = useRef(false);
+  const lastSnapshotLockoutAtRef = useRef<string | null>(null);
+  const snapshotInFlightRef = useRef(false);
 
   const isAdmin = loginSession?.role === "admin";
 
@@ -991,6 +1007,111 @@ export default function SelectTeamPage() {
     setLockoutClockTick(Date.now());
   }, [applyAppSettings]);
 
+  const createScheduledLockoutSnapshot = useCallback(async () => {
+    if (!lockoutScheduleAt) {
+      return;
+    }
+
+    if (snapshotInFlightRef.current) {
+      return;
+    }
+
+    if (lastSnapshotLockoutAtRef.current === lockoutScheduleAt) {
+      return;
+    }
+
+    snapshotInFlightRef.current = true;
+
+    try {
+      const { data: existingSnapshotRows, error: existingSnapshotError } = await supabase
+        .from("round_submissions")
+        .select("round_number")
+        .eq("environment", APP_ENV)
+        .eq("lockout_at", lockoutScheduleAt)
+        .limit(1);
+
+      if (existingSnapshotError) {
+        setSubmitMessage(`Auto snapshot check failed: ${existingSnapshotError.message}`);
+        return;
+      }
+
+      const existingRoundNumber = Number(existingSnapshotRows?.[0]?.round_number ?? 0);
+
+      if (existingSnapshotRows && existingSnapshotRows.length > 0 && existingRoundNumber > 0) {
+        lastSnapshotLockoutAtRef.current = lockoutScheduleAt;
+        return;
+      }
+
+      const { data: latestRoundRows, error: latestRoundError } = await supabase
+        .from("round_submissions")
+        .select("round_number")
+        .eq("environment", APP_ENV)
+        .order("round_number", { ascending: false })
+        .limit(1);
+
+      if (latestRoundError) {
+        setSubmitMessage(`Auto snapshot round lookup failed: ${latestRoundError.message}`);
+        return;
+      }
+
+      const latestRoundNumber = Number(latestRoundRows?.[0]?.round_number ?? 0);
+      const nextRoundNumber =
+        Number.isFinite(latestRoundNumber) && latestRoundNumber > 0
+          ? latestRoundNumber + 1
+          : 1;
+
+      const { data: selectionRows, error: selectionError } = await supabase
+        .from("coach_team_selections")
+        .select(
+          "coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment"
+        )
+        .eq("environment", APP_ENV);
+
+      if (selectionError) {
+        setSubmitMessage(`Auto snapshot load failed: ${selectionError.message}`);
+        return;
+      }
+
+      const selectionMap = new Map<number, SavedTeamRow>();
+
+      for (const row of (selectionRows ?? []) as SavedTeamRow[]) {
+        selectionMap.set(row.coach_id, row);
+      }
+
+      const snapshotCreatedAt = new Date().toISOString();
+      const snapshotRows: RoundSubmissionRow[] = coachConfigs.map((coach) => {
+        const existingRow = selectionMap.get(coach.id);
+
+        return {
+          coach_id: coach.id,
+          coach_name: existingRow?.coach_name ?? coach.name,
+          team_data: sanitiseTeamState(existingRow?.team_data),
+          is_submitted: Boolean(existingRow?.is_submitted),
+          submitted_at: existingRow?.submitted_at ?? null,
+          updated_at: existingRow?.updated_at ?? null,
+          environment: APP_ENV,
+          round_number: nextRoundNumber,
+          lockout_at: lockoutScheduleAt,
+          snapshot_created_at: snapshotCreatedAt,
+        };
+      });
+
+      const { error: insertError } = await supabase
+        .from("round_submissions")
+        .upsert(snapshotRows, { onConflict: "environment,lockout_at,coach_id" });
+
+      if (insertError) {
+        setSubmitMessage(`Auto snapshot save failed: ${insertError.message}`);
+        return;
+      }
+
+      lastSnapshotLockoutAtRef.current = lockoutScheduleAt;
+      setSubmitMessage(`Scheduled lockout snapshot created for round ${nextRoundNumber}.`);
+    } finally {
+      snapshotInFlightRef.current = false;
+    }
+  }, [coachConfigs, lockoutScheduleAt]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -1042,6 +1163,41 @@ export default function SelectTeamPage() {
   }, []);
 
   useEffect(() => {
+    if (!lockoutScheduleEnabled || !lockoutScheduleAt) {
+      lastScheduledLockoutActiveRef.current = false;
+      return;
+    }
+
+    const hasJustBecomeScheduledLocked =
+      scheduledTeamLockoutActive && !lastScheduledLockoutActiveRef.current;
+
+    lastScheduledLockoutActiveRef.current = scheduledTeamLockoutActive;
+
+    if (!hasJustBecomeScheduledLocked) {
+      return;
+    }
+
+    void createScheduledLockoutSnapshot();
+  }, [
+    createScheduledLockoutSnapshot,
+    lockoutScheduleAt,
+    lockoutScheduleEnabled,
+    scheduledTeamLockoutActive,
+  ]);
+
+  useEffect(() => {
+    if (!lockoutScheduleAt || scheduledTeamLockoutActive) {
+      return;
+    }
+
+    if (lastSnapshotLockoutAtRef.current !== lockoutScheduleAt) {
+      return;
+    }
+
+    snapshotInFlightRef.current = false;
+  }, [lockoutScheduleAt, scheduledTeamLockoutActive]);
+
+  useEffect(() => {
     async function loadCoachTeam() {
       if (!selectedCoach) return;
       if (!loginSession) return;
@@ -1051,7 +1207,9 @@ export default function SelectTeamPage() {
 
       const { data, error } = await supabase
         .from("coach_team_selections")
-        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
+        .select(
+          "coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment"
+        )
         .eq("coach_id", selectedCoach.id)
         .eq("environment", APP_ENV)
         .maybeSingle();
@@ -1117,7 +1275,9 @@ export default function SelectTeamPage() {
 
       const { data, error } = await supabase
         .from("coach_team_selections")
-        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
+        .select(
+          "coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment"
+        )
         .eq("environment", APP_ENV);
 
       if (error) {
@@ -1139,21 +1299,21 @@ export default function SelectTeamPage() {
           return next;
         });
 
-        setSubmittedCoachIds((prev) => {
-          const next = { ...prev };
-
-          for (const row of rows) {
-            next[row.coach_id] = Boolean(row.is_submitted);
-          }
-
-          return next;
-        });
-
         setLoadedCoachIds((prev) => {
           const next = { ...prev };
 
           for (const row of rows) {
             next[row.coach_id] = true;
+          }
+
+          return next;
+        });
+
+        setSubmittedCoachIds((prev) => {
+          const next = { ...prev };
+
+          for (const row of rows) {
+            next[row.coach_id] = Boolean(row.is_submitted);
           }
 
           return next;
@@ -1278,90 +1438,91 @@ export default function SelectTeamPage() {
 
     setLoginError("");
     setIsAuthenticating(true);
-    resetSessionScopedState();
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
-      setLoginError(`Login failed: ${error.message}`);
+      setLoginError(error.message);
       setIsAuthenticating(false);
       return;
     }
 
-    const user = data.user;
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
 
-    if (!user) {
-      setLoginError("Login succeeded, but no user was returned.");
+    if (sessionError || !session?.user) {
+      setLoginError(sessionError?.message ?? "Login failed.");
       setIsAuthenticating(false);
       return;
     }
 
-    const session = await loadProfileForUser(user.id, user.email ?? email);
+    const nextSession = await loadProfileForUser(session.user.id, session.user.email ?? "");
 
-    if (!session) {
+    if (!nextSession) {
       await supabase.auth.signOut();
       setIsAuthenticating(false);
       return;
     }
 
-    setLoginSession(session);
+    setLoginSession(nextSession);
+    resetSessionScopedState();
 
-    if (session.role === "coach" && session.coachId) {
-      setSelectedCoachId(session.coachId);
+    if (nextSession.role === "coach" && nextSession.coachId) {
+      setSelectedCoachId(nextSession.coachId);
     }
 
+    setLoginEmail("");
     setLoginPassword("");
-    setShowPassword(false);
-    setSubmitMessage("");
     setIsAuthenticating(false);
+    router.replace("/select-team");
   }
 
   async function handleLogout() {
     setIsAuthenticating(true);
     await supabase.auth.signOut();
-    setLoginSession(null);
-    setLoginEmail("");
-    setLoginPassword("");
-    setShowPassword(false);
-    setLoginError("");
     resetSessionScopedState();
+    setLoginSession(null);
+    setIsAuthenticating(false);
     router.replace("/login");
+  }
+
+  function handleCoachChange(nextCoachId: number) {
+    if (!loginSession) return;
+
+    if (!isAdmin && loginSession.coachId !== nextCoachId) {
+      return;
+    }
+
+    setSelectedCoachId(nextCoachId);
+    setSubmitMessage("");
+  }
+
+  function getAvailablePlayersForPosition(position: PositionKey): CoachPlayerPool[PositionKey] {
+    return coachPool[position].filter((player) => !isPlayerAlreadySelected(teamState, player.name));
   }
 
   function handleAddPlayer(
     position: PositionKey,
-    bucket: "onField" | "emergencies",
+    slotType: keyof PositionState,
     playerName: string
   ) {
     if (!selectedCoach) return;
-    if (!playerName) return;
     if (isSavingTeam) return;
     if (!canEditSelectedCoach) return;
 
-    const limit =
-      bucket === "onField"
-        ? selectedCoach.slots[position]
-        : selectedCoach.emergencyLimits[position];
-
-    if (limit <= 0) return;
-
-    const currentBucket = teamState[position][bucket];
-
-    if (currentBucket.includes(playerName)) return;
-    if (currentBucket.length >= limit) return;
-    if (isPlayerAlreadySelected(teamState, playerName)) return;
-
-    const nextState = structuredClone(teamState) as TeamState;
-    nextState[position][bucket].push(playerName);
+    const nextState = removePlayerFromAllSlots(teamState, playerName);
+    nextState[position][slotType] = [...nextState[position][slotType], playerName];
     updateCoachTeamState(nextState);
   }
 
   function handleRemovePlayer(
     position: PositionKey,
-    bucket: "onField" | "emergencies",
+    slotType: keyof PositionState,
     playerName: string
   ) {
     if (!selectedCoach) return;
@@ -1369,32 +1530,31 @@ export default function SelectTeamPage() {
     if (!canEditSelectedCoach) return;
 
     const nextState = structuredClone(teamState) as TeamState;
-    nextState[position][bucket] = nextState[position][bucket].filter(
+    nextState[position][slotType] = nextState[position][slotType].filter(
       (name) => name !== playerName
     );
     updateCoachTeamState(nextState);
   }
 
-  function handleMovePlayer(
-    position: PositionKey,
-    from: "onField" | "emergencies",
-    to: "onField" | "emergencies",
-    playerName: string
-  ) {
+  function handleMoveOnFieldUp(position: PositionKey, index: number) {
     if (!selectedCoach) return;
-    if (from === to) return;
     if (isSavingTeam) return;
     if (!canEditSelectedCoach) return;
+    if (index <= 0) return;
 
-    const limit =
-      to === "onField"
-        ? selectedCoach.slots[position]
-        : selectedCoach.emergencyLimits[position];
+    const nextState = structuredClone(teamState) as TeamState;
+    nextState[position].onField = moveItem(nextState[position].onField, index, index - 1);
+    updateCoachTeamState(nextState);
+  }
 
-    if (teamState[position][to].length >= limit) return;
+  function handleMoveOnFieldDown(position: PositionKey, index: number) {
+    if (!selectedCoach) return;
+    if (isSavingTeam) return;
+    if (!canEditSelectedCoach) return;
+    if (index >= teamState[position].onField.length - 1) return;
 
-    const nextState = removePlayerFromAllSlots(teamState, playerName);
-    nextState[position][to].push(playerName);
+    const nextState = structuredClone(teamState) as TeamState;
+    nextState[position].onField = moveItem(nextState[position].onField, index, index + 1);
     updateCoachTeamState(nextState);
   }
 
@@ -1923,74 +2083,53 @@ export default function SelectTeamPage() {
   ): ExportPlayerRow[] {
     const rows: ExportPlayerRow[] = [];
     const coachPoolForLookup = poolsByCoach[coachId];
-
-    const selectedLookup = new Map<
-      string,
-      { selectedCode: string; selectionOrder: number | string }
-    >();
+    const selectionOrder: string[] = [];
 
     for (const position of POSITIONS) {
-      team[position].onField.forEach((playerName, index) => {
-        selectedLookup.set(playerName, {
-          selectedCode: "X",
-          selectionOrder: index + 1,
-        });
-      });
-
-      team[position].emergencies.forEach((playerName, index) => {
-        selectedLookup.set(playerName, {
-          selectedCode: `I${index + 1}`,
-          selectionOrder: index + 1,
-        });
-      });
+      selectionOrder.push(...team[position].onField);
+      selectionOrder.push(...team[position].emergencies);
     }
 
-    for (const position of POSITIONS) {
-      for (const player of coachPoolForLookup[position]) {
-        const selectedMeta = selectedLookup.get(player.name);
-
-        rows.push({
-          "Player No.": player.number,
-          Position: position,
-          Club: player.club,
-          "Player Name": player.name,
-          Selected: selectedMeta?.selectedCode ?? "Z",
-          "Selection Order": selectedMeta?.selectionOrder ?? "",
-        });
+    const orderLookup = new Map<string, number>();
+    selectionOrder.forEach((playerName, index) => {
+      if (!orderLookup.has(playerName)) {
+        orderLookup.set(playerName, index + 1);
       }
-    }
-
-    rows.sort((a, b) => {
-      const noA = typeof a["Player No."] === "number" ? a["Player No."] : Number(a["Player No."]);
-      const noB = typeof b["Player No."] === "number" ? b["Player No."] : Number(b["Player No."]);
-      return noA - noB;
     });
+
+    const groupedPlayers = POSITIONS.flatMap((position) =>
+      coachPoolForLookup[position].map((player) => ({
+        position,
+        player,
+      }))
+    );
+
+    for (const { position, player } of groupedPlayers) {
+      const isSelected = selectionOrder.includes(player.name);
+
+      rows.push({
+        "Player No.": player.number,
+        Position: position,
+        Club: player.club,
+        "Player Name": player.name,
+        Selected: isSelected ? "Yes" : "",
+        "Selection Order": isSelected ? orderLookup.get(player.name) ?? "" : "",
+      });
+    }
 
     return rows;
   }
 
   async function handleExportTeamsXlsx() {
-    if (!isAdmin) return;
+    if (!loginSession || !isAdmin) {
+      setSubmitMessage("Only admin can export teams.");
+      return;
+    }
 
     setIsExportingTeams(true);
     setSubmitMessage("Preparing XLSX export...");
 
     try {
-      const { data, error } = await supabase
-        .from("coach_team_selections")
-        .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
-        .eq("environment", APP_ENV)
-        .order("coach_id", { ascending: true });
-
-      if (error) {
-        setSubmitMessage(`Export failed: ${error.message}`);
-        setIsExportingTeams(false);
-        return;
-      }
-
-      const rows = (data ?? []) as SavedTeamRow[];
-      const workbook = XLSX.utils.book_new();
-
       const poolsByCoach: Record<number, CoachPlayerPool> = {};
       for (const coach of coachConfigs) {
         poolsByCoach[coach.id] = getPlayersForCoach({
@@ -1999,602 +2138,368 @@ export default function SelectTeamPage() {
         });
       }
 
+      const workbook = XLSX.utils.book_new();
+
+      const summaryRows = coachConfigs.map((coach) => {
+        const meta = coachMetaById[coach.id];
+        const submitted = submittedCoachIds[coach.id] ?? false;
+        const saveIndicator = saveIndicatorByCoachId[coach.id] ?? "saved";
+        const coachTeam = teamsByCoach[coach.id] ?? emptyTeamState();
+        const selectedCount = getAllSelectedPlayers(coachTeam).length;
+
+        return {
+          Coach: coach.name,
+          "Coach ID": coach.id,
+          Submitted: submitted ? "Yes" : "No",
+          "Last Updated": formatTimestamp(meta?.updatedAt ?? null),
+          "Submitted At": formatTimestamp(meta?.submittedAt ?? null),
+          "Save State": saveIndicator,
+          "Players Selected": selectedCount,
+        };
+      });
+
+      const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+      XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+
       for (const coach of coachConfigs) {
-        const dbRow = rows.find((row) => row.coach_id === coach.id);
-
-        const coachTeam = dbRow?.team_data
-          ? sanitiseTeamState(dbRow.team_data)
-          : teamsByCoach[coach.id] ?? emptyTeamState();
-
-        const exportRows = buildExportRowsForCoach(coach.id, coachTeam, poolsByCoach);
-
-        const summaryRows: ExportPlayerRow[] = [
-          {
-            "Player No.": "",
-            Position: "",
-            Club: "",
-            "Player Name": "",
-            Selected: "",
-            "Selection Order": "",
-          },
-          {
-            "Player No.": "",
-            Position: "Coach",
-            Club: "",
-            "Player Name": "",
-            Selected: coach.name,
-            "Selection Order": "",
-          },
-          {
-            "Player No.": "",
-            Position: "Coach ID",
-            Club: "",
-            "Player Name": "",
-            Selected: String(coach.id),
-            "Selection Order": "",
-          },
-          {
-            "Player No.": "",
-            Position: "Environment",
-            Club: "",
-            "Player Name": "",
-            Selected: APP_ENV,
-            "Selection Order": "",
-          },
-          {
-            "Player No.": "",
-            Position: "Status",
-            Club: "",
-            "Player Name": "",
-            Selected: dbRow?.is_submitted ? "Submitted Final Team" : "Draft in Progress",
-            "Selection Order": "",
-          },
-          {
-            "Player No.": "",
-            Position: "Last Updated",
-            Club: "",
-            "Player Name": "",
-            Selected: formatTimestamp(dbRow?.updated_at ?? null),
-            "Selection Order": "",
-          },
-          {
-            "Player No.": "",
-            Position: "Submitted At",
-            Club: "",
-            "Player Name": "",
-            Selected: formatTimestamp(dbRow?.submitted_at ?? null),
-            "Selection Order": "",
-          },
-        ];
-
-        const worksheetData = [...exportRows, ...summaryRows];
-
-        const worksheet = XLSX.utils.json_to_sheet(worksheetData, {
-          header: [
-            "Player No.",
-            "Position",
-            "Club",
-            "Player Name",
-            "Selected",
-            "Selection Order",
-          ],
-        });
-
-        worksheet["!cols"] = [
-          { wch: 10 },
-          { wch: 10 },
-          { wch: 12 },
-          { wch: 28 },
-          { wch: 16 },
-          { wch: 16 },
-        ];
+        const coachTeam = teamsByCoach[coach.id] ?? emptyTeamState();
+        const rows = buildExportRowsForCoach(coach.id, coachTeam, poolsByCoach);
+        const worksheet = XLSX.utils.json_to_sheet(rows);
 
         XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(coach.name));
       }
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      XLSX.writeFile(workbook, `coach-team-selections-${APP_ENV}-${timestamp}.xlsx`);
-      setSubmitMessage("XLSX export complete.");
+      const now = new Date();
+      const fileName = `coach-team-selections-${APP_ENV}-${now
+        .toISOString()
+        .replace(/[:.]/g, "-")}.xlsx`;
+
+      XLSX.writeFile(workbook, fileName);
+      setSubmitMessage(`XLSX export created: ${fileName}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown export error.";
-      setSubmitMessage(`Export failed: ${message}`);
+      setSubmitMessage(`XLSX export failed: ${message}`);
     } finally {
       setIsExportingTeams(false);
     }
   }
 
-  const validationResult = selectedCoach
-    ? validateTeamState(selectedCoach, teamState)
-    : { valid: false, errors: ["No coach selected."] };
-
-  const duplicateCheck = (() => {
-    const allPlayers = getAllSelectedPlayers(teamState);
-    const uniquePlayers = new Set(allPlayers);
-
-    return {
-      hasDuplicates: allPlayers.length !== uniquePlayers.size,
-      totalSelected: allPlayers.length,
-      uniqueSelected: uniquePlayers.size,
-    };
-  })();
-
-  const reviewRows = (() => {
-    if (!selectedCoach) return [];
-
-    return POSITIONS.map((position) => {
-      const onFieldSelected = teamState[position].onField.length;
-      const onFieldRequired = selectedCoach.slots[position];
-      const emergencySelected = teamState[position].emergencies.length;
-      const emergencyAllowed = selectedCoach.emergencyLimits[position];
-
-      const onFieldReady = onFieldSelected === onFieldRequired;
-      const emergenciesValid = emergencySelected <= emergencyAllowed;
-
-      let statusText = "Ready";
-      let statusClass = "border-emerald-500/30 bg-emerald-500/15 text-emerald-200";
-
-      if (!onFieldReady) {
-        statusText = "Incomplete";
-        statusClass = "border-amber-500/30 bg-amber-500/15 text-amber-200";
-      }
-
-      if (!emergenciesValid) {
-        statusText = "Over Limit";
-        statusClass = "border-red-500/30 bg-red-500/15 text-red-200";
-      }
-
-      return {
-        position,
-        onFieldSelected,
-        onFieldRequired,
-        emergencySelected,
-        emergencyAllowed,
-        statusText,
-        statusClass,
-      };
-    });
-  })();
-
-  const readyToSubmit = validationResult.valid;
-  const isSubmitted = selectedCoach ? Boolean(submittedCoachIds[selectedCoach.id]) : false;
-  const coachLockedByAppSetting = Boolean(!isAdmin && isTeamLocked);
-  const coachMeta = selectedCoach
-    ? coachMetaById[selectedCoach.id] ?? { updatedAt: null, submittedAt: null }
-    : { updatedAt: null, submittedAt: null };
-
-  const currentSaveIndicator = selectedCoach
-    ? saveIndicatorByCoachId[selectedCoach.id] ?? "saved"
-    : "saved";
-
-  const saveIndicatorClass =
-    currentSaveIndicator === "saving"
-      ? "border-sky-500/30 bg-sky-500/15 text-sky-100"
-      : currentSaveIndicator === "unsaved"
-        ? "border-amber-500/30 bg-amber-500/15 text-amber-100"
-        : "border-emerald-500/30 bg-emerald-500/15 text-emerald-100";
-
-  const saveIndicatorText =
-    currentSaveIndicator === "saving"
-      ? "Auto-saving..."
-      : currentSaveIndicator === "unsaved"
-        ? "Unsaved changes"
-        : "All changes saved";
-
-  const statusBadgeClass = isSubmitted
-    ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-    : "border-amber-500/30 bg-amber-500/15 text-amber-200";
-
   if (isAuthenticating) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
-        <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
-          <div className="mb-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white/70">
-            {APP_ENV}
+        <div className="mx-auto max-w-7xl">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
+            <div className="text-2xl font-bold">Loading team selection...</div>
+            <div className="mt-2 text-sm text-white/70">
+              Checking session and loading current environment.
+            </div>
           </div>
-          <h1 className="text-3xl font-bold">Coach Team Login</h1>
-          <p className="mt-2 text-sm text-white/70">Checking your session...</p>
         </div>
       </main>
     );
   }
 
   if (!loginSession) {
-    return null;
-  }
+    return (
+      <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
+        <div className="mx-auto max-w-md">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <h1 className="mb-2 text-3xl font-bold">Coach Team Selection</h1>
+            <p className="mb-6 text-sm text-white/70">
+              Sign in with your Supabase email and password.
+            </p>
 
-  return (
-    <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
-      <div className="mx-auto max-w-7xl">
-        <section className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <div className="mb-3 flex flex-wrap items-center gap-3">
-                <div
-                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${
-                    APP_ENV === "preview"
-                      ? "border-amber-500/30 bg-amber-500/15 text-amber-200"
-                      : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-                  }`}
-                >
-                  {APP_ENV}
-                </div>
-              </div>
-
-              <h1 className="text-3xl font-bold">Coach Team Selection</h1>
-              <p className="mt-1 text-sm text-white/70">
-                Signed in as {loginSession.email} • {isAdmin ? "Admin" : loginSession.coachName}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
-            >
-              Log Out
-            </button>
-          </div>
-        </section>
-
-        {isAdmin && (
-          <section className="mb-6 rounded-2xl border border-sky-500/20 bg-sky-500/5 p-6">
-            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <form className="space-y-4" onSubmit={handleLogin}>
               <div>
-                <h2 className="text-2xl font-bold">Admin Team Summary</h2>
-                <p className="mt-1 text-sm text-white/70">
-                  View all coaches and their current saved selections in one place.
-                </p>
+                <label className="mb-1 block text-sm font-medium text-white/80">Email</label>
+                <input
+                  type="email"
+                  value={loginEmail}
+                  onChange={(event) => setLoginEmail(event.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400"
+                  autoComplete="email"
+                />
               </div>
 
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={() => void handleToggleTeamLockout()}
-                  disabled={
-                    isTogglingLockout ||
-                    isLoadingTeam ||
-                    isSavingTeam ||
-                    isExportingTeams ||
-                    isSavingLockoutSchedule
-                  }
-                  className={`rounded-xl border px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
-                    manualTeamLockout
-                      ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20"
-                      : "border-amber-500/30 bg-amber-500/15 text-amber-100 hover:bg-amber-500/20"
-                  }`}
-                >
-                  {isTogglingLockout
-                    ? "Updating Manual Lockout..."
-                    : manualTeamLockout
-                      ? "Turn Manual Lockout Off"
-                      : "Turn Manual Lockout On"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => void handleResetAllTeams()}
-                  disabled={
-                    isSavingTeam ||
-                    isLoadingTeam ||
-                    isExportingTeams ||
-                    isTogglingLockout ||
-                    isSavingLockoutSchedule
-                  }
-                  className="rounded-xl border border-red-500/30 bg-red-500/15 px-4 py-3 text-sm font-semibold text-red-100 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {isSavingTeam ? "Resetting..." : "Reset All Teams"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleExportTeamsXlsx}
-                  disabled={
-                    isExportingTeams ||
-                    isLoadingTeam ||
-                    isSavingTeam ||
-                    isTogglingLockout ||
-                    isSavingLockoutSchedule
-                  }
-                  className="rounded-xl border border-sky-500/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {isExportingTeams ? "Exporting..." : "Export Teams (XLSX)"}
-                </button>
-              </div>
-            </div>
-
-            <div className="mb-4 flex flex-wrap gap-3">
-              <div className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-100">
-                Current environment: {APP_ENV}
-              </div>
-              <div
-                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                  isTeamLocked
-                    ? "border-red-500/30 bg-red-500/15 text-red-100"
-                    : "border-emerald-500/30 bg-emerald-500/15 text-emerald-100"
-                }`}
-              >
-                Effective lockout: {isTeamLocked ? "ON" : "OFF"} ({lockoutModeText})
-              </div>
-              <div
-                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                  manualTeamLockout
-                    ? "border-amber-500/30 bg-amber-500/15 text-amber-100"
-                    : "border-white/10 bg-white/5 text-white/70"
-                }`}
-              >
-                Manual lockout: {manualTeamLockout ? "ON" : "OFF"}
-              </div>
-              <div
-                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                  scheduledTeamLockoutActive
-                    ? "border-violet-500/30 bg-violet-500/15 text-violet-100"
-                    : lockoutScheduleEnabled
-                      ? "border-violet-500/20 bg-violet-500/10 text-violet-200"
-                      : "border-white/10 bg-white/5 text-white/70"
-                }`}
-              >
-                Scheduled lockout:{" "}
-                {scheduledTeamLockoutActive
-                  ? "ACTIVE"
-                  : lockoutScheduleEnabled
-                    ? "WAITING"
-                    : "OFF"}
-              </div>
-              <div
-                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                  lockoutScheduleEnabled
-                    ? "border-violet-500/30 bg-violet-500/15 text-violet-100"
-                    : "border-white/10 bg-white/5 text-white/70"
-                }`}
-              >
-                {lockoutScheduleSummary}
-              </div>
-            </div>
-
-            <div className="mb-4 rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4">
-              <div className="text-sm font-semibold text-violet-100">Countdown Timer</div>
-              <div className="mt-1 text-2xl font-bold text-white">{countdownLabel}</div>
-            </div>
-
-            <div className="mb-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <div className="mb-3 text-lg font-semibold">Weekly Lockout Schedule</div>
-                <p className="mb-4 text-sm text-white/65">
-                  Save the next round lockout day and time here. Once the scheduled time arrives,
-                  coach pages will lock without needing a refresh.
-                </p>
-
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <label className="space-y-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
-                      Schedule Status
-                    </span>
-                    <select
-                      value={lockoutScheduleEnabled ? "on" : "off"}
-                      onChange={(event) => setLockoutScheduleEnabled(event.target.value === "on")}
-                      disabled={isSavingLockoutSchedule || isTogglingLockout}
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white outline-none"
-                    >
-                      <option value="off">Off</option>
-                      <option value="on">On</option>
-                    </select>
-                  </label>
-
-                  <label className="space-y-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
-                      Day
-                    </span>
-                    <select
-                      value={lockoutScheduleDay}
-                      onChange={(event) =>
-                        setLockoutScheduleDay(normaliseWeekday(event.target.value))
-                      }
-                      disabled={
-                        !lockoutScheduleEnabled ||
-                        isSavingLockoutSchedule ||
-                        isTogglingLockout
-                      }
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white outline-none disabled:opacity-50"
-                    >
-                      {WEEKDAY_OPTIONS.map((weekday) => (
-                        <option key={weekday} value={weekday}>
-                          {weekday}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="space-y-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
-                      Time
-                    </span>
-                    <input
-                      type="time"
-                      step={60}
-                      value={lockoutScheduleTime}
-                      onChange={(event) => setLockoutScheduleTime(normaliseTimeValue(event.target.value))}
-                      disabled={
-                        !lockoutScheduleEnabled ||
-                        isSavingLockoutSchedule ||
-                        isTogglingLockout
-                      }
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white outline-none disabled:opacity-50"
-                    />
-                  </label>
-
-                  <label className="space-y-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
-                      Timezone
-                    </span>
-                    <input
-                      type="text"
-                      value={lockoutScheduleTimezone}
-                      onChange={(event) => setLockoutScheduleTimezone(event.target.value)}
-                      disabled={
-                        !lockoutScheduleEnabled ||
-                        isSavingLockoutSchedule ||
-                        isTogglingLockout
-                      }
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white outline-none disabled:opacity-50"
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-white/80">Password</label>
+                <div className="flex gap-2">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={loginPassword}
+                    onChange={(event) => setLoginPassword(event.target.value)}
+                    className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400"
+                    autoComplete="current-password"
+                  />
                   <button
                     type="button"
-                    onClick={() => void handleSaveLockoutSchedule()}
-                    disabled={isSavingLockoutSchedule || isTogglingLockout || isSavingTeam}
-                    className="rounded-xl border border-violet-500/30 bg-violet-500/15 px-4 py-3 text-sm font-semibold text-violet-100 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 hover:bg-white/10"
                   >
-                    {isSavingLockoutSchedule ? "Saving Schedule..." : "Save Lockout Schedule"}
+                    {showPassword ? "Hide" : "Show"}
                   </button>
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <div className="mb-3 text-lg font-semibold">Lockout Status</div>
-                <div className="space-y-2 text-sm text-white/75">
-                  <div>Manual lockout: {manualTeamLockout ? "ON" : "OFF"}</div>
-                  <div>Schedule enabled: {lockoutScheduleEnabled ? "ON" : "OFF"}</div>
-                  <div>
-                    Scheduled lockout currently: {scheduledTeamLockoutActive ? "ACTIVE" : "INACTIVE"}
-                  </div>
-                  <div>
-                    Scheduled trigger:{" "}
-                    {lockoutScheduleAt ? formatTimestamp(lockoutScheduleAt) : "Not set"}
-                  </div>
-                  <div>Schedule timezone: {lockoutScheduleTimezone || DEFAULT_LOCKOUT_TIMEZONE}</div>
-                  <div>Effective lockout: {isTeamLocked ? "ON" : "OFF"}</div>
-                  <div>Effective source: {lockoutModeText}</div>
-                  <div>Countdown: {countdownLabel}</div>
+              {loginError ? (
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+                  {loginError}
                 </div>
+              ) : null}
 
-                <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-white/60">
-                  Turning manual lockout off does not override an active schedule. If teams are
-                  still locked, set Schedule Status to Off and click Save Lockout Schedule.
-                </div>
-              </div>
-            </div>
+              <button
+                type="submit"
+                className="w-full rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={isAuthenticating}
+              >
+                {isAuthenticating ? "Signing in..." : "Sign In"}
+              </button>
+            </form>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
-            <div className="grid gap-4 xl:grid-cols-2">
-              {coachConfigs.map((coach) => {
-                const coachTeam = teamsByCoach[coach.id] ?? emptyTeamState();
-                const coachSubmitted = Boolean(submittedCoachIds[coach.id]);
-                const meta = coachMetaById[coach.id] ?? {
-                  updatedAt: null,
-                  submittedAt: null,
-                };
+  const selectedCoachMeta = selectedCoach ? coachMetaById[selectedCoach.id] : undefined;
+  const selectedCoachSubmitted = selectedCoach ? submittedCoachIds[selectedCoach.id] ?? false : false;
+  const selectedCoachSaveIndicator = selectedCoach
+    ? saveIndicatorByCoachId[selectedCoach.id] ?? "saved"
+    : "saved";
 
-                return (
-                  <div
-                    key={coach.id}
-                    className={`rounded-2xl border p-4 ${
-                      coachSubmitted
-                        ? "border-emerald-500/20 bg-emerald-500/5"
-                        : "border-white/10 bg-black/20"
-                    }`}
-                  >
-                    <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <div className="text-lg font-bold">{coach.name}</div>
-                        <div className="text-xs text-white/50">Coach ID: {coach.id}</div>
-                      </div>
-                      <div
-                        className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                          coachSubmitted
-                            ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-                            : "border-amber-500/30 bg-amber-500/15 text-amber-200"
-                        }`}
-                      >
-                        {coachSubmitted ? "Submitted Final Team" : "Draft in Progress"}
-                      </div>
-                    </div>
-
-                    <div className="mb-3 text-xs text-white/50">
-                      <div>Last updated: {formatTimestamp(meta.updatedAt)}</div>
-                      {meta.submittedAt ? (
-                        <div>Submitted at: {formatTimestamp(meta.submittedAt)}</div>
-                      ) : null}
-                    </div>
-
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {POSITIONS.map((position) => (
-                        <div
-                          key={`${coach.id}-${position}`}
-                          className="rounded-xl border border-white/10 bg-white/5 p-3"
-                        >
-                          <div className="mb-2 text-sm font-bold">{position}</div>
-
-                          <div className="mb-2">
-                            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-200">
-                              On-Field
-                            </div>
-                            {coachTeam[position].onField.length === 0 ? (
-                              <div className="text-xs text-white/40">None selected</div>
-                            ) : (
-                              <div className="space-y-1">
-                                {coachTeam[position].onField.map((player, index) => (
-                                  <div
-                                    key={`${coach.id}-${position}-on-${player}-${index}`}
-                                    className="rounded-lg bg-black/20 px-2 py-1 text-xs text-white/85"
-                                  >
-                                    {player}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          <div>
-                            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-200">
-                              Emergencies
-                            </div>
-                            {coachTeam[position].emergencies.length === 0 ? (
-                              <div className="text-xs text-white/40">None selected</div>
-                            ) : (
-                              <div className="space-y-1">
-                                {coachTeam[position].emergencies.map((player, index) => (
-                                  <div
-                                    key={`${coach.id}-${position}-em-${player}-${index}`}
-                                    className="rounded-lg bg-black/20 px-2 py-1 text-xs text-white/85"
-                                  >
-                                    {index + 1}. {player}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        <section className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+  return (
+    <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className="text-2xl font-bold">Team Controls</h2>
-              <p className="mt-1 text-sm text-white/70">
-                {isAdmin
-                  ? "Admin can view and manage any coach team."
-                  : "Select and submit your team for this round."}
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-violet-200">
+                  {APP_ENV}
+                </span>
+                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white/70">
+                  {loginSession.role === "admin" ? "Admin" : "Coach"}
+                </span>
+              </div>
+
+              <h1 className="text-3xl font-bold">Coach Team Selection</h1>
+              <p className="mt-2 text-sm text-white/70">
+                Signed in as {loginSession.coachName}
+                {loginSession.email ? ` • ${loginSession.email}` : ""}
               </p>
             </div>
 
-            <div className="w-full max-w-xs">
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-white/60">
-                Coach
-              </label>
+            <div className="flex flex-wrap gap-3">
+              {isAdmin ? (
+                <button
+                  type="button"
+                  onClick={handleExportTeamsXlsx}
+                  disabled={isExportingTeams}
+                  className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isExportingTeams ? "Exporting..." : "Export Teams XLSX"}
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="grid gap-4 xl:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                Effective Lockout
+              </div>
+              <div className="text-2xl font-bold">{lockoutModeText}</div>
+              <div className="mt-2 text-xs text-white/60">
+                Manual: {manualTeamLockout ? "ON" : "OFF"}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                Schedule Summary
+              </div>
+              <div className="text-sm font-medium text-white/90">{lockoutScheduleSummary}</div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                Countdown
+              </div>
+              <div className="text-sm font-medium text-white/90">{countdownLabel}</div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                Team Status
+              </div>
+              <div className="text-sm font-medium text-white/90">
+                {isTeamLocked ? "Locked" : "Unlocked"}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {isAdmin ? (
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <div className="mb-4">
+              <h2 className="text-2xl font-bold">Admin Controls</h2>
+              <p className="mt-1 text-sm text-white/70">
+                Manage manual lockout, scheduled lockout, resets, and coach access.
+              </p>
+            </div>
+
+            <div className="grid gap-6 xl:grid-cols-2">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-3 text-lg font-semibold">Manual Team Lockout</div>
+                <p className="mb-4 text-sm text-white/70">
+                  Toggle immediate team lockout for the current environment.
+                </p>
+
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleTeamLockout()}
+                    disabled={isTogglingLockout}
+                    className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isTogglingLockout
+                      ? "Updating..."
+                      : manualTeamLockout
+                        ? "Turn Manual Lockout OFF"
+                        : "Turn Manual Lockout ON"}
+                  </button>
+
+                  <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white/70">
+                    Manual lockout: {manualTeamLockout ? "ON" : "OFF"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-3 text-lg font-semibold">Reset All Coach Teams</div>
+                <p className="mb-4 text-sm text-white/70">
+                  Clear all team selections, unlock all teams, and remove submitted status.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => void handleResetAllTeams()}
+                  disabled={isSavingTeam}
+                  className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isSavingTeam ? "Processing..." : "Reset All Teams"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="mb-3 text-lg font-semibold">Scheduled Lockout</div>
+              <p className="mb-4 text-sm text-white/70">
+                Save the weekly lockout schedule for this environment. When the scheduled lockout becomes active, a one-time round snapshot will be created automatically.
+              </p>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-white/80">Schedule</label>
+                  <select
+                    value={lockoutScheduleEnabled ? "on" : "off"}
+                    onChange={(event) => setLockoutScheduleEnabled(event.target.value === "on")}
+                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400"
+                  >
+                    <option value="off">OFF</option>
+                    <option value="on">ON</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-white/80">Day</label>
+                  <select
+                    value={lockoutScheduleDay}
+                    onChange={(event) =>
+                      setLockoutScheduleDay(normaliseWeekday(event.target.value))
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400"
+                  >
+                    {WEEKDAY_OPTIONS.map((weekday) => (
+                      <option key={weekday} value={weekday}>
+                        {weekday}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-white/80">Time</label>
+                  <input
+                    type="time"
+                    value={lockoutScheduleTime}
+                    onChange={(event) => setLockoutScheduleTime(event.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-white/80">Timezone</label>
+                  <input
+                    type="text"
+                    value={lockoutScheduleTimezone}
+                    onChange={(event) => setLockoutScheduleTimezone(event.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400"
+                    placeholder={DEFAULT_LOCKOUT_TIMEZONE}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void handleSaveLockoutSchedule()}
+                  disabled={isSavingLockoutSchedule}
+                  className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isSavingLockoutSchedule ? "Saving..." : "Save Lockout Schedule"}
+                </button>
+
+                <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white/70">
+                  Scheduled lockout currently: {scheduledTeamLockoutActive ? "ACTIVE" : "INACTIVE"}
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {submitMessage ? (
+          <section className="rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4 text-sm text-violet-100">
+            {submitMessage}
+          </section>
+        ) : null}
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold">Team Controls</h2>
+              <p className="mt-1 text-sm text-white/70">
+                Select a coach, save draft teams, submit final teams, and manage unlock state.
+              </p>
+            </div>
+
+            <div className="w-full max-w-sm">
+              <label className="mb-1 block text-sm font-medium text-white/80">Coach</label>
               <select
                 value={selectedCoachId}
-                onChange={(event) => setSelectedCoachId(Number(event.target.value))}
+                onChange={(event) => handleCoachChange(Number(event.target.value))}
+                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400"
                 disabled={!isAdmin}
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {coachConfigs.map((coach) => (
                   <option key={coach.id} value={coach.id}>
@@ -2605,436 +2510,295 @@ export default function SelectTeamPage() {
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <div
-              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass}`}
-            >
-              {isLoadingTeam
-                ? "Loading saved team..."
-                : isSubmitted
-                  ? "Submitted Final Team"
-                  : "Draft in Progress"}
-            </div>
-
-            <div
-              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                APP_ENV === "preview"
-                  ? "border-amber-500/30 bg-amber-500/15 text-amber-200"
-                  : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-              }`}
-            >
-              Environment: {APP_ENV}
-            </div>
-
-            <div
-              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                isTeamLocked
-                  ? "border-red-500/30 bg-red-500/15 text-red-200"
-                  : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-              }`}
-            >
-              Team Lockout: {isTeamLocked ? "ON" : "OFF"} ({lockoutModeText})
-            </div>
-
-            <div
-              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                lockoutScheduleEnabled
-                  ? "border-violet-500/30 bg-violet-500/15 text-violet-200"
-                  : "border-white/10 bg-white/5 text-white/60"
-              }`}
-            >
-              {lockoutScheduleSummary}
-            </div>
-
-            {isAdmin ? (
-              <div className="text-xs text-white/60">
-                Manual lockout and scheduled lockout are separate. Effective lockout shows what is
-                actually locking teams right now.
+          {selectedCoach ? (
+            <div className="grid gap-4 xl:grid-cols-4">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Coach
+                </div>
+                <div className="text-lg font-bold">{selectedCoach.name}</div>
               </div>
-            ) : null}
 
-            {coachLockedByAppSetting ? (
-              <div className="text-xs text-red-200/90">
-                Team lockout is active ({lockoutModeText}). You can view your team but cannot save,
-                reset, or submit changes.
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Submitted
+                </div>
+                <div className="text-lg font-bold">{selectedCoachSubmitted ? "Yes" : "No"}</div>
               </div>
-            ) : isSubmitted ? (
-              <div className="text-xs text-emerald-200/90">
-                This final team is locked until it is unlocked for changes.
+
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Last Updated
+                </div>
+                <div className="text-sm font-medium text-white/90">
+                  {formatTimestamp(selectedCoachMeta?.updatedAt ?? null)}
+                </div>
               </div>
-            ) : canEditSelectedCoach ? (
-              <div className="text-xs text-white/60">
-                Save Team, Reset Team, and Submit Final Team are available.
-              </div>
-            ) : (
-              <div className="text-xs text-white/60">
-                This team cannot be edited from the current session.
-              </div>
-            )}
 
-            <div
-              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${saveIndicatorClass}`}
-            >
-              {saveIndicatorText}
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4">
-            <div className="text-sm font-semibold text-violet-100">Next Scheduled Lockout</div>
-            <div className="mt-1 text-xl font-bold text-white">{countdownLabel}</div>
-          </div>
-
-          <div className="mt-3 text-xs text-white/50">
-            <div>Last saved: {formatTimestamp(coachMeta.updatedAt)}</div>
-            <div>Submitted at: {formatTimestamp(coachMeta.submittedAt)}</div>
-          </div>
-
-          {canUnlockSelectedCoach ? (
-            <div className="mt-4 rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
-              <div className="mb-2 text-sm font-semibold text-sky-100">Unlock available</div>
-              <div className="text-sm text-sky-100/80">
-                Unlock this submitted team to restore Save Team, Reset Team, and Submit Final Team.
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Save State
+                </div>
+                <div className="text-lg font-bold capitalize">{selectedCoachSaveIndicator}</div>
               </div>
             </div>
           ) : null}
 
-          <div className="mt-4 flex flex-wrap gap-3">
-            {canEditSelectedCoach && (
-              <>
-                <button
-                  type="button"
-                  onClick={() =>
-                    selectedCoach
-                      ? void saveTeam({
-                          coach: selectedCoach,
-                          team: teamState,
-                          isSubmitting: false,
-                          source: "manual",
-                        })
-                      : undefined
-                  }
-                  disabled={isSavingTeam || isLoadingTeam}
-                  className="rounded-xl border border-white/10 bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Save Team
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleResetCoachTeam()}
-                  disabled={isSavingTeam || isLoadingTeam}
-                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Reset Team
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    selectedCoach
-                      ? void saveTeam({
-                          coach: selectedCoach,
-                          team: teamState,
-                          isSubmitting: true,
-                          source: "manual",
-                        })
-                      : undefined
-                  }
-                  disabled={isSavingTeam || isLoadingTeam || isSubmitted}
-                  className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Submit Final Team
-                </button>
-              </>
-            )}
-
-            {canUnlockSelectedCoach && (
-              <button
-                type="button"
-                onClick={() => void unlockTeam()}
-                disabled={isSavingTeam || isLoadingTeam}
-                className="rounded-xl border border-sky-500/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Unlock Team
-              </button>
-            )}
-          </div>
-
-          {submitMessage ? (
-            <div
-              className={`mt-4 rounded-xl px-4 py-3 text-sm ${
-                isSubmitted
-                  ? "border border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
-                  : "border border-white/10 bg-black/20 text-white/85"
-              }`}
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                selectedCoach
+                  ? void saveTeam({
+                      coach: selectedCoach,
+                      team: teamState,
+                      isSubmitting: false,
+                      source: "manual",
+                    })
+                  : undefined
+              }
+              disabled={!selectedCoach || !canEditSelectedCoach || isSavingTeam}
+              className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {submitMessage}
-            </div>
-          ) : null}
+              {isSavingTeam ? "Saving..." : "Save Team"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleResetCoachTeam()}
+              disabled={!selectedCoach || !canEditSelectedCoach || isSavingTeam}
+              className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Reset Team
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                selectedCoach
+                  ? void saveTeam({
+                      coach: selectedCoach,
+                      team: teamState,
+                      isSubmitting: true,
+                      source: "manual",
+                    })
+                  : undefined
+              }
+              disabled={!selectedCoach || !canEditSelectedCoach || isSavingTeam}
+              className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Submit Final Team
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void unlockTeam()}
+              disabled={!selectedCoach || !canUnlockSelectedCoach || isSavingTeam}
+              className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Unlock Team
+            </button>
+          </div>
         </section>
 
-        <section
-          className={`mb-6 rounded-2xl border p-6 ${
-            readyToSubmit
-              ? "border-emerald-500/20 bg-emerald-500/5"
-              : "border-amber-500/20 bg-amber-500/5"
-          }`}
-        >
-          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h2 className="text-2xl font-bold">Submission Review</h2>
-              <p className="mt-1 text-sm text-white/70">
-                Check position counts before saving or submitting the final team.
-              </p>
-            </div>
-
-            <div
-              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                readyToSubmit
-                  ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-                  : "border-amber-500/30 bg-amber-500/15 text-amber-200"
-              }`}
-            >
-              {readyToSubmit ? "Ready to Submit" : "Not Ready Yet"}
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {reviewRows.map((row) => (
-              <div
-                key={row.position}
-                className="rounded-xl border border-white/10 bg-black/20 p-4"
-              >
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="text-base font-semibold">{row.position}</div>
-                  <div
-                    className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${row.statusClass}`}
-                  >
-                    {row.statusText}
-                  </div>
-                </div>
-
-                <div className="space-y-1 text-sm text-white/75">
-                  <div>
-                    On-field: {row.onFieldSelected} / {row.onFieldRequired}
-                  </div>
-                  <div>
-                    Emergencies: {row.emergencySelected} / {row.emergencyAllowed}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            <div
-              className={`rounded-xl border p-4 ${
-                duplicateCheck.hasDuplicates
-                  ? "border-red-500/20 bg-red-500/5"
-                  : "border-emerald-500/20 bg-emerald-500/5"
-              }`}
-            >
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-base font-semibold">Duplicate Check</div>
-                <div
-                  className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${
-                    duplicateCheck.hasDuplicates
-                      ? "border-red-500/30 bg-red-500/15 text-red-200"
-                      : "border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
-                  }`}
-                >
-                  {duplicateCheck.hasDuplicates ? "Duplicates Found" : "All Unique"}
-                </div>
-              </div>
-
-              <div className="space-y-1 text-sm text-white/75">
-                <div>Total selected: {duplicateCheck.totalSelected}</div>
-                <div>Unique selected: {duplicateCheck.uniqueSelected}</div>
-              </div>
-            </div>
-          </div>
-
-          {!readyToSubmit && validationResult.errors.length > 0 ? (
-            <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4">
-              <div className="mb-2 text-sm font-semibold text-amber-100">Fix these before submitting</div>
-              <ul className="list-disc space-y-1 pl-5 text-sm text-amber-100/90">
-                {validationResult.errors.map((error) => (
-                  <li key={error}>{error}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </section>
-
-        <section className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="mb-4">
-            <h2 className="text-2xl font-bold">Available Players</h2>
+            <h2 className="text-2xl font-bold">Player Selection</h2>
             <p className="mt-1 text-sm text-white/70">
-              Select on-field players and emergencies for each position.
+              Add players by position, manage on-field order, and set emergencies.
             </p>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-6 xl:grid-cols-2">
             {POSITIONS.map((position) => {
-              const pool = coachPool[position];
+              const onFieldRequired = selectedCoach?.slots[position] ?? 0;
+              const emergencyLimit = selectedCoach?.emergencyLimits[position] ?? 0;
+              const availablePlayers = getAvailablePlayersForPosition(position);
               const onFieldSelected = teamState[position].onField;
               const emergenciesSelected = teamState[position].emergencies;
-              const onFieldLimit = selectedCoach?.slots[position] ?? 0;
-              const emergencyLimit = selectedCoach?.emergencyLimits[position] ?? 0;
-
-              const availablePlayers = pool.filter(
-                (player) => !isPlayerAlreadySelected(teamState, player.name)
-              );
 
               return (
                 <div
                   key={position}
-                  className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                  className="rounded-xl border border-white/10 bg-black/20 p-4"
                 >
-                  <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="mb-4 flex items-start justify-between gap-4">
                     <div>
                       <h3 className="text-xl font-bold">{position}</h3>
-                      <div className="text-xs text-white/50">
-                        On-field {onFieldSelected.length}/{onFieldLimit}
-                        {" • "}
-                        Emergencies {emergenciesSelected.length}/{emergencyLimit}
+                      <p className="mt-1 text-xs text-white/60">
+                        On-field: {onFieldSelected.length}/{onFieldRequired} • Emergencies:{" "}
+                        {emergenciesSelected.length}/{emergencyLimit}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div>
+                      <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-violet-200">
+                        On-Field
+                      </div>
+
+                      <div className="space-y-2">
+                        {onFieldSelected.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-white/10 bg-black/20 px-3 py-3 text-xs text-white/40">
+                            No on-field players selected yet.
+                          </div>
+                        ) : (
+                          onFieldSelected.map((playerName, index) => (
+                            <div
+                              key={`on-${position}-${playerName}-${index}`}
+                              className="rounded-xl border border-white/10 bg-black/30 p-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-white/90">
+                                    {index + 1}. {playerName}
+                                  </div>
+                                  <div className="mt-1 text-xs text-white/50">
+                                    {getPlayerClub(playerName)}
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveOnFieldUp(position, index)}
+                                    disabled={!canEditSelectedCoach || index === 0}
+                                    className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Up
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveOnFieldDown(position, index)}
+                                    disabled={
+                                      !canEditSelectedCoach ||
+                                      index === onFieldSelected.length - 1
+                                    }
+                                    className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Down
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRemovePlayer(position, "onField", playerName)
+                                    }
+                                    disabled={!canEditSelectedCoach}
+                                    className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-100 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-amber-200">
+                        Emergencies
+                      </div>
+
+                      <div className="space-y-2">
+                        {emergenciesSelected.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-white/10 bg-black/20 px-3 py-3 text-xs text-white/40">
+                            No emergencies selected yet.
+                          </div>
+                        ) : (
+                          emergenciesSelected.map((playerName, index) => (
+                            <div
+                              key={`em-${position}-${playerName}-${index}`}
+                              className="rounded-xl border border-white/10 bg-black/30 p-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-white/90">
+                                    {index + 1}. {playerName}
+                                  </div>
+                                  <div className="mt-1 text-xs text-white/50">
+                                    {getPlayerClub(playerName)}
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveEmergencyUp(position, index)}
+                                    disabled={!canEditSelectedCoach || index === 0}
+                                    className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Up
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveEmergencyDown(position, index)}
+                                    disabled={
+                                      !canEditSelectedCoach ||
+                                      index === emergenciesSelected.length - 1
+                                    }
+                                    className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Down
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRemovePlayer(position, "emergencies", playerName)
+                                    }
+                                    disabled={!canEditSelectedCoach}
+                                    className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-100 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3">
-                      <div className="mb-2 text-sm font-semibold text-violet-100">On-Field</div>
-                      <div className="space-y-2">
-                        {onFieldSelected.length === 0 ? (
-                          <div className="text-xs text-white/40">No players selected</div>
-                        ) : (
-                          onFieldSelected.map((playerName, index) => (
-                            <div
-                              key={`${position}-on-${playerName}-${index}`}
-                              className="rounded-lg border border-violet-500/20 bg-black/20 p-2"
-                            >
-                              <div className="text-sm font-medium text-white">{playerName}</div>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemovePlayer(position, "onField", playerName)}
-                                  disabled={!canEditSelectedCoach}
-                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Remove
-                                </button>
-                                {emergencyLimit > 0 ? (
+                  <div className="mt-4">
+                    <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                      Available Players
+                    </div>
+
+                    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                      {availablePlayers.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-white/10 bg-black/20 px-3 py-3 text-xs text-white/40">
+                          No players available for this position.
+                        </div>
+                      ) : (
+                        availablePlayers.map((player) => (
+                          <div
+                            key={`${position}-${player.name}`}
+                            className="rounded-xl border border-white/10 bg-black/30 p-3"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-semibold text-white/90">
+                                  {player.number}. {player.name}
+                                </div>
+                                <div className="mt-1 text-xs text-white/50">{player.club}</div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                {onFieldSelected.length < onFieldRequired ? (
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      handleMovePlayer(position, "onField", "emergencies", playerName)
+                                      handleAddPlayer(position, "onField", player.name)
                                     }
                                     disabled={!canEditSelectedCoach}
-                                    className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[11px] font-semibold text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-[11px] font-semibold text-violet-100 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
                                   >
-                                    Move to Emergency
+                                    Add On-Field
                                   </button>
                                 ) : null}
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
-                      <div className="mb-2 text-sm font-semibold text-amber-100">Emergencies</div>
-                      <div className="space-y-2">
-                        {emergenciesSelected.length === 0 ? (
-                          <div className="text-xs text-white/40">No emergencies selected</div>
-                        ) : (
-                          emergenciesSelected.map((playerName, index) => (
-                            <div
-                              key={`${position}-em-${playerName}-${index}`}
-                              className="rounded-lg border border-amber-500/20 bg-black/20 p-2"
-                            >
-                              <div className="text-sm font-medium text-white">
-                                {index + 1}. {playerName}
-                              </div>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleMoveEmergencyUp(position, index)
-                                  }
-                                  disabled={!canEditSelectedCoach || index === 0}
-                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Move Up
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleMoveEmergencyDown(position, index)
-                                  }
-                                  disabled={
-                                    !canEditSelectedCoach ||
-                                    index === emergenciesSelected.length - 1
-                                  }
-                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Move Down
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleRemovePlayer(position, "emergencies", playerName)
-                                  }
-                                  disabled={!canEditSelectedCoach}
-                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Remove
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleMovePlayer(position, "emergencies", "onField", playerName)
-                                  }
-                                  disabled={!canEditSelectedCoach}
-                                  className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-[11px] font-semibold text-violet-100 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Move to On-Field
-                                </button>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                      <div className="mb-2 text-sm font-semibold text-white">Available Players</div>
-                      <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
-                        {availablePlayers.length === 0 ? (
-                          <div className="text-xs text-white/40">No available players</div>
-                        ) : (
-                          availablePlayers.map((player) => (
-                            <div
-                              key={`${position}-available-${player.name}`}
-                              className="rounded-lg border border-white/10 bg-black/20 p-2"
-                            >
-                              <div className="text-sm font-medium text-white">{player.name}</div>
-                              <div className="text-xs text-white/50">
-                                #{player.number} • {player.club}
-                              </div>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleAddPlayer(position, "onField", player.name)
-                                  }
-                                  disabled={!canEditSelectedCoach || onFieldSelected.length >= onFieldLimit}
-                                  className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-[11px] font-semibold text-violet-100 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Add On-Field
-                                </button>
 
                                 {emergencyLimit > 0 ? (
                                   <button
@@ -3053,9 +2817,9 @@ export default function SelectTeamPage() {
                                 ) : null}
                               </div>
                             </div>
-                          ))
-                        )}
-                      </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>
