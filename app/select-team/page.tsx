@@ -158,7 +158,7 @@ const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
 ];
 
 const AUTO_SAVE_DEBOUNCE_MS = 10000;
-const LOCKOUT_TICK_MS = 30000;
+const LOCKOUT_TICK_MS = 1000;
 const DEFAULT_LOCKOUT_DAY = "Thursday";
 const DEFAULT_LOCKOUT_TIME = "19:20";
 const DEFAULT_LOCKOUT_TIMEZONE = "Australia/Melbourne";
@@ -387,6 +387,50 @@ function formatScheduleSummary(options: {
   }
 
   return `Schedule ON • ${base} • Next lockout: ${formatTimestamp(options.lockoutAt)}`;
+}
+
+function formatCountdown(durationMs: number): string {
+  if (durationMs <= 0) {
+    return "00d 00h 00m 00s";
+  }
+
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${String(days).padStart(2, "0")}d ${String(hours).padStart(2, "0")}h ${String(
+    minutes
+  ).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+function getCountdownLabel(options: {
+  enabled: boolean;
+  lockoutAt: string | null;
+  scheduledLockoutActive: boolean;
+}): string {
+  if (!options.enabled) {
+    return "Countdown unavailable — schedule is off.";
+  }
+
+  if (!options.lockoutAt) {
+    return "Countdown unavailable — next lockout is not set.";
+  }
+
+  if (options.scheduledLockoutActive) {
+    return "Scheduled lockout is active now.";
+  }
+
+  const lockoutDate = new Date(options.lockoutAt);
+
+  if (Number.isNaN(lockoutDate.getTime())) {
+    return "Countdown unavailable — saved lockout date is invalid.";
+  }
+
+  const remainingMs = lockoutDate.getTime() - Date.now();
+
+  return `Time until scheduled lockout: ${formatCountdown(remainingMs)}`;
 }
 
 function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
@@ -698,6 +742,16 @@ export default function SelectTeamPage() {
     lockoutTimezone: lockoutScheduleTimezone,
     lockoutAt: lockoutScheduleAt,
   });
+
+  const countdownLabel = useMemo(
+    () =>
+      getCountdownLabel({
+        enabled: lockoutScheduleEnabled,
+        lockoutAt: lockoutScheduleAt,
+        scheduledLockoutActive: scheduledTeamLockoutActive,
+      }),
+    [lockoutClockTick, lockoutScheduleAt, lockoutScheduleEnabled, scheduledTeamLockoutActive]
+  );
 
   const selectedCoach =
     coachConfigs.find((coach) => coach.id === selectedCoachId) ?? coachConfigs[0];
@@ -2277,6 +2331,11 @@ export default function SelectTeamPage() {
               </div>
             </div>
 
+            <div className="mb-4 rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4">
+              <div className="text-sm font-semibold text-violet-100">Countdown Timer</div>
+              <div className="mt-1 text-2xl font-bold text-white">{countdownLabel}</div>
+            </div>
+
             <div className="mb-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
               <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                 <div className="mb-3 text-lg font-semibold">Weekly Lockout Schedule</div>
@@ -2388,6 +2447,7 @@ export default function SelectTeamPage() {
                   <div>Schedule timezone: {lockoutScheduleTimezone || DEFAULT_LOCKOUT_TIMEZONE}</div>
                   <div>Effective lockout: {isTeamLocked ? "ON" : "OFF"}</div>
                   <div>Effective source: {lockoutModeText}</div>
+                  <div>Countdown: {countdownLabel}</div>
                 </div>
 
                 <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-white/60">
@@ -2597,6 +2657,11 @@ export default function SelectTeamPage() {
             >
               {saveIndicatorText}
             </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4">
+            <div className="text-sm font-semibold text-violet-100">Next Scheduled Lockout</div>
+            <div className="mt-1 text-xl font-bold text-white">{countdownLabel}</div>
           </div>
 
           <div className="mt-3 text-xs text-white/50">
