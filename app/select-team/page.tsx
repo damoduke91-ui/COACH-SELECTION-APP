@@ -677,6 +677,35 @@ async function loadAppSettings(): Promise<AppSettingsRow> {
   return normaliseAppSettingsRow(data);
 }
 
+async function saveAppSettingsRow(
+  payload: Record<string, unknown>
+): Promise<{ errorMessage: string | null }> {
+  const environment = String(payload.environment ?? APP_ENV);
+
+  const { data: existingRow, error: existingError } = await supabase
+    .from("app_settings")
+    .select("environment")
+    .eq("environment", environment)
+    .maybeSingle();
+
+  if (existingError) {
+    return { errorMessage: existingError.message };
+  }
+
+  if (existingRow) {
+    const { error: updateError } = await supabase
+      .from("app_settings")
+      .update(payload)
+      .eq("environment", environment);
+
+    return { errorMessage: updateError?.message ?? null };
+  }
+
+  const { error: insertError } = await supabase.from("app_settings").insert(payload);
+
+  return { errorMessage: insertError?.message ?? null };
+}
+
 export default function SelectTeamPage() {
   const router = useRouter();
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
@@ -1744,17 +1773,14 @@ export default function SelectTeamPage() {
         : "Turning manual team lockout OFF..."
     );
 
-    const { error } = await supabase.from("app_settings").upsert(
-      {
-        environment: APP_ENV,
-        team_lockout: nextManualLockState,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "environment" }
-    );
+    const result = await saveAppSettingsRow({
+      environment: APP_ENV,
+      team_lockout: nextManualLockState,
+      updated_at: new Date().toISOString(),
+    });
 
-    if (error) {
-      setSubmitMessage(`Manual team lockout update failed: ${error.message}`);
+    if (result.errorMessage) {
+      setSubmitMessage(`Manual team lockout update failed: ${result.errorMessage}`);
       setIsTogglingLockout(false);
       return;
     }
@@ -1811,7 +1837,7 @@ export default function SelectTeamPage() {
       lockoutScheduleEnabled ? "Saving lockout schedule..." : "Clearing lockout schedule..."
     );
 
-    const schedulePayload = {
+    const result = await saveAppSettingsRow({
       environment: APP_ENV,
       team_lockout: manualTeamLockout,
       lockout_enabled: lockoutScheduleEnabled,
@@ -1820,16 +1846,10 @@ export default function SelectTeamPage() {
       lockout_timezone: normalisedTimezone,
       lockout_at: nextLockoutAt,
       updated_at: new Date().toISOString(),
-    };
+    });
 
-    const { error } = await supabase
-      .from("app_settings")
-      .upsert(schedulePayload, { onConflict: "environment" });
-
-    if (error) {
-      setSubmitMessage(
-        `Lockout schedule save failed: ${error.message}. You may need to add the schedule columns to app_settings before this can be saved.`
-      );
+    if (result.errorMessage) {
+      setSubmitMessage(`Lockout schedule save failed: ${result.errorMessage}`);
       setIsSavingLockoutSchedule(false);
       return;
     }
