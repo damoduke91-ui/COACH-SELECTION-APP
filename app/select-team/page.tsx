@@ -170,6 +170,17 @@ const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
   },
 ];
 
+const COACH_TEAM_NAMES: Record<number, string> = {
+  1: "The Cattery",
+  2: "Kalamata Pythons",
+  3: "Damos Magpies",
+  4: "Spread Eagle",
+  5: "Push Up Kings",
+  6: "Western Warriors",
+  7: "Pogers Bombers",
+  8: "Snow Coast",
+};
+
 const AUTO_SAVE_DEBOUNCE_MS = 10000;
 const LOCKOUT_TICK_MS = 1000;
 const DEFAULT_LOCKOUT_DAY = "Thursday";
@@ -800,6 +811,7 @@ export default function SelectTeamPage() {
 
   const selectedCoach =
     coachConfigs.find((coach) => coach.id === selectedCoachId) ?? coachConfigs[0];
+  const selectedCoachTeamName = COACH_TEAM_NAMES[selectedCoach?.id] ?? selectedCoach?.name ?? "Coach";
 
   const teamState = teamsByCoach[selectedCoachId] ?? emptyTeamState();
   const coachPool = getCoachPool(selectedCoach);
@@ -2273,16 +2285,20 @@ export default function SelectTeamPage() {
         <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-violet-200">
-                  {APP_ENV}
-                </span>
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white/70">
-                  {loginSession.role === "admin" ? "Admin" : "Coach"}
-                </span>
-              </div>
+              {isAdmin ? (
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-violet-200">
+                    {APP_ENV}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white/70">
+                    {loginSession.role === "admin" ? "Admin" : "Coach"}
+                  </span>
+                </div>
+              ) : null}
 
-              <h1 className="text-3xl font-bold">Coach Team Selection</h1>
+              <h1 className="text-3xl font-bold">
+                {isAdmin ? "Coach Team Selection" : `${selectedCoachTeamName} Team Selection`}
+              </h1>
               <p className="mt-2 text-sm text-white/70">
                 Signed in as {loginSession.coachName}
                 {loginSession.email ? ` • ${loginSession.email}` : ""}
@@ -2312,42 +2328,44 @@ export default function SelectTeamPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="grid gap-4 xl:grid-cols-4">
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-              <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
-                Effective Lockout
+        {isAdmin ? (
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <div className="grid gap-4 xl:grid-cols-4">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Effective Lockout
+                </div>
+                <div className="text-2xl font-bold">{lockoutModeText}</div>
+                <div className="mt-2 text-xs text-white/60">
+                  Manual: {manualTeamLockout ? "ON" : "OFF"}
+                </div>
               </div>
-              <div className="text-2xl font-bold">{lockoutModeText}</div>
-              <div className="mt-2 text-xs text-white/60">
-                Manual: {manualTeamLockout ? "ON" : "OFF"}
-              </div>
-            </div>
 
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-              <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
-                Schedule Summary
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Schedule Summary
+                </div>
+                <div className="text-sm font-medium text-white/90">{lockoutScheduleSummary}</div>
               </div>
-              <div className="text-sm font-medium text-white/90">{lockoutScheduleSummary}</div>
-            </div>
 
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-              <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
-                Countdown
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Countdown
+                </div>
+                <div className="text-sm font-medium text-white/90">{countdownLabel}</div>
               </div>
-              <div className="text-sm font-medium text-white/90">{countdownLabel}</div>
-            </div>
 
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-              <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
-                Team Status
-              </div>
-              <div className="text-sm font-medium text-white/90">
-                {isTeamLocked ? "Locked" : "Unlocked"}
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Team Status
+                </div>
+                <div className="text-sm font-medium text-white/90">
+                  {isTeamLocked ? "Locked" : "Unlocked"}
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         {isAdmin ? (
           <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
@@ -2495,18 +2513,23 @@ export default function SelectTeamPage() {
 
             <div className="w-full max-w-sm">
               <label className="mb-1 block text-sm font-medium text-white/80">Coach</label>
-              <select
-                value={selectedCoachId}
-                onChange={(event) => handleCoachChange(Number(event.target.value))}
-                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400"
-                disabled={!isAdmin}
-              >
-                {coachConfigs.map((coach) => (
-                  <option key={coach.id} value={coach.id}>
-                    {coach.name}
-                  </option>
-                ))}
-              </select>
+              {isAdmin ? (
+                <select
+                  value={selectedCoachId}
+                  onChange={(event) => handleCoachChange(Number(event.target.value))}
+                  className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400"
+                >
+                  {coachConfigs.map((coach) => (
+                    <option key={coach.id} value={coach.id}>
+                      {coach.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white">
+                  {selectedCoach?.name ?? "—"}
+                </div>
+              )}
             </div>
           </div>
 

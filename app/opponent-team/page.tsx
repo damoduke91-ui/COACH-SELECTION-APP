@@ -391,83 +391,92 @@ function TeamPanel({
   accentClass = "border-white/10",
 }: TeamPanelProps) {
   return (
-    <section className={`rounded-2xl border bg-white/5 p-4 ${accentClass}`}>
+    <section className={`rounded-2xl border bg-white/5 p-3 ${accentClass}`}>
       <div className="border-b border-white/10 pb-3">
-        <h2 className="text-xl font-bold">{title}</h2>
+        <h2 className="text-lg font-bold">{title}</h2>
         <p className="mt-1 text-xs text-white/65">{subtitle}</p>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-white/65">
-          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-white/65">
+          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
             Players: {countSelectedPlayers(team)}
           </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
             Submitted: {submitted ? "Yes" : "No"}
           </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
             Updated: {formatTimestamp(updatedAt)}
           </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
             Submitted At: {formatTimestamp(submittedAt)}
           </div>
         </div>
       </div>
 
-      <div className="mt-4 space-y-3">
-        {POSITIONS.map((position) => (
-          <div key={position} className="rounded-xl border border-white/10 bg-black/20 p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="text-sm font-bold">{position}</div>
-              <div className="text-[11px] text-white/50">
-                On {team[position].onField.length} • Emg {team[position].emergencies.length}
-              </div>
-            </div>
+      <div className="mt-4 space-y-2">
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+            On Field
+          </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <div>
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
-                  On Ground
+          <div className="space-y-2">
+            {POSITIONS.map((position) => (
+              <div key={`${position}-onfield`} className="rounded-lg border border-white/10 bg-neutral-900/60 p-2.5">
+                <div className="mb-1 text-xs font-bold text-white">
+                  {position} On Field players
                 </div>
-                <div className="space-y-1.5">
+
+                <div className="space-y-1">
                   {team[position].onField.length > 0 ? (
                     team[position].onField.map((playerName) => (
                       <div
                         key={`${position}-on-${playerName}`}
-                        className="rounded-md border border-white/10 bg-neutral-900 px-2.5 py-1.5 text-xs text-white"
+                        className="rounded-md border border-white/10 bg-neutral-900 px-2 py-1.5 text-xs text-white"
                       >
                         {renderPlayerLine(playerName, lookup)}
                       </div>
                     ))
                   ) : (
-                    <div className="rounded-md border border-dashed border-white/10 px-2.5 py-1.5 text-xs text-white/45">
+                    <div className="rounded-md border border-dashed border-white/10 px-2 py-1.5 text-xs text-white/45">
                       None selected
                     </div>
                   )}
                 </div>
               </div>
+            ))}
+          </div>
+        </div>
 
-              <div>
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
-                  Emergencies
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+            Emergencies
+          </div>
+
+          <div className="space-y-2">
+            {POSITIONS.map((position) => (
+              <div key={`${position}-emergencies`} className="rounded-lg border border-white/10 bg-neutral-900/60 p-2.5">
+                <div className="mb-1 text-xs font-bold text-white">
+                  {position} Emergencies players
                 </div>
-                <div className="space-y-1.5">
+
+                <div className="space-y-1">
                   {team[position].emergencies.length > 0 ? (
                     team[position].emergencies.map((playerName) => (
                       <div
                         key={`${position}-emg-${playerName}`}
-                        className="rounded-md border border-white/10 bg-neutral-900 px-2.5 py-1.5 text-xs text-white"
+                        className="rounded-md border border-white/10 bg-neutral-900 px-2 py-1.5 text-xs text-white"
                       >
                         {renderPlayerLine(playerName, lookup)}
                       </div>
                     ))
                   ) : (
-                    <div className="rounded-md border border-dashed border-white/10 px-2.5 py-1.5 text-xs text-white/45">
+                    <div className="rounded-md border border-dashed border-white/10 px-2 py-1.5 text-xs text-white/45">
                       None selected
                     </div>
                   )}
                 </div>
               </div>
-            </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
     </section>
   );
@@ -801,8 +810,8 @@ export default function OpponentTeamPage() {
   const isLoadingPage = isLoadingTeams || isLoadingFixture;
   const comparisonGridClass =
     opponentPanels.length >= 2
-      ? "grid gap-4 xl:grid-cols-3"
-      : "grid gap-4 xl:grid-cols-2";
+      ? "grid gap-3 xl:grid-cols-3"
+      : "grid gap-3 xl:grid-cols-2";
 
   if (isAuthenticating) {
     return (
@@ -819,14 +828,14 @@ export default function OpponentTeamPage() {
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 px-4 py-6 text-white">
-      <div className="mx-auto max-w-[1800px] space-y-5">
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <main className="min-h-screen bg-neutral-950 px-4 py-5 text-white">
+      <div className="mx-auto max-w-[1800px] space-y-4">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h1 className="text-3xl font-bold">Opponent Team</h1>
+              <h1 className="text-2xl font-bold">Opponent Team</h1>
               <p className="mt-1 text-sm text-white/70">
-                Compact side-by-side matchup view for the current AFL week.
+                Compact matchup view for the current AFL week.
               </p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-white/60">
                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
@@ -844,7 +853,7 @@ export default function OpponentTeamPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -879,8 +888,8 @@ export default function OpponentTeamPage() {
           ) : null}
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="grid gap-4 lg:grid-cols-3">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="grid gap-3 lg:grid-cols-3">
             <div>
               <div className="mb-2 text-sm font-medium text-white/80">Coach</div>
               {canChangeCoach ? (
@@ -973,12 +982,12 @@ export default function OpponentTeamPage() {
           ))}
         </section>
 
-        <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-5 text-sm text-white/60">
+        <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-4 text-sm text-white/60">
           {isLoadingPage
             ? "Loading team selections and fixture..."
             : opponentPanels.length > 1
               ? "Double round detected automatically. Teams are shown side by side in a compact layout."
-              : "Opponent team page is now using a compact side-by-side layout with on-ground and emergency players shown separately for each position."}
+              : "Opponent team page is using a more compact layout with On Field players shown first by position, followed by Emergencies in the same position order."}
         </section>
       </div>
     </main>
