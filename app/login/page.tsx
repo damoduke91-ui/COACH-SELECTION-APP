@@ -66,7 +66,8 @@ export default function LoginPage() {
         return;
       }
 
-      router.replace("/select-team");
+      // ✅ UPDATED ROUTE
+      router.replace("/dashboard");
     }
 
     void checkExistingSession();
@@ -131,7 +132,8 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace("/select-team");
+    // ✅ UPDATED ROUTE
+    router.replace("/dashboard");
   }
 
   return (
