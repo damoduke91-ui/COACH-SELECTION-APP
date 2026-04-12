@@ -57,6 +57,34 @@ type PlayerLookupRow = {
   position: PositionKey;
 };
 
+type AppSettingsRow = {
+  environment: "production" | "preview";
+  current_afl_round: number | null;
+};
+
+type FixtureRow = {
+  id: number;
+  environment: "production" | "preview";
+  competition_round: number;
+  afl_round: number;
+  matchup_index: number;
+  coach_id: number;
+  coach_name: string;
+  opponent_coach_id: number;
+  opponent_coach_name: string;
+};
+
+type TeamPanelProps = {
+  title: string;
+  subtitle: string;
+  team: TeamState;
+  lookup: Map<string, PlayerLookupRow>;
+  submitted: boolean;
+  updatedAt: string | null | undefined;
+  submittedAt?: string | null | undefined;
+  accentClass?: string;
+};
+
 const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
 
 const DEFAULT_ON_FIELD_SLOTS: Record<PositionKey, number> = {
@@ -284,23 +312,6 @@ function normaliseCoachConfigs(): CoachConfigShape[] {
   return FALLBACK_COACH_CONFIGS;
 }
 
-function getOpponentCoachId(coachId: number | null): number | null {
-  if (!coachId) return null;
-
-  const matchupMap: Record<number, number> = {
-    1: 2,
-    2: 1,
-    3: 4,
-    4: 3,
-    5: 6,
-    6: 5,
-    7: 8,
-    8: 7,
-  };
-
-  return matchupMap[coachId] ?? null;
-}
-
 function countSelectedPlayers(teamData: TeamState): number {
   return POSITIONS.reduce((total, position) => {
     return total + teamData[position].onField.length + teamData[position].emergencies.length;
@@ -341,6 +352,127 @@ function renderPlayerLine(playerName: string, lookup: Map<string, PlayerLookupRo
   return `${player.number}. ${player.name} (${player.club})`;
 }
 
+function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
+  const row = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+
+  return {
+    environment: APP_ENV,
+    current_afl_round:
+      typeof row.current_afl_round === "number"
+        ? row.current_afl_round
+        : typeof row.current_afl_round === "string"
+          ? Number(row.current_afl_round)
+          : null,
+  };
+}
+
+function sortFixtureRows(rows: FixtureRow[]): FixtureRow[] {
+  return [...rows].sort((a, b) => {
+    if (a.competition_round !== b.competition_round) {
+      return a.competition_round - b.competition_round;
+    }
+
+    if (a.matchup_index !== b.matchup_index) {
+      return a.matchup_index - b.matchup_index;
+    }
+
+    return a.opponent_coach_id - b.opponent_coach_id;
+  });
+}
+
+function TeamPanel({
+  title,
+  subtitle,
+  team,
+  lookup,
+  submitted,
+  updatedAt,
+  submittedAt,
+  accentClass = "border-white/10",
+}: TeamPanelProps) {
+  return (
+    <section className={`rounded-2xl border bg-white/5 p-4 ${accentClass}`}>
+      <div className="border-b border-white/10 pb-3">
+        <h2 className="text-xl font-bold">{title}</h2>
+        <p className="mt-1 text-xs text-white/65">{subtitle}</p>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-white/65">
+          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+            Players: {countSelectedPlayers(team)}
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+            Submitted: {submitted ? "Yes" : "No"}
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+            Updated: {formatTimestamp(updatedAt)}
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+            Submitted At: {formatTimestamp(submittedAt)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {POSITIONS.map((position) => (
+          <div key={position} className="rounded-xl border border-white/10 bg-black/20 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-sm font-bold">{position}</div>
+              <div className="text-[11px] text-white/50">
+                On {team[position].onField.length} • Emg {team[position].emergencies.length}
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+                  On Ground
+                </div>
+                <div className="space-y-1.5">
+                  {team[position].onField.length > 0 ? (
+                    team[position].onField.map((playerName) => (
+                      <div
+                        key={`${position}-on-${playerName}`}
+                        className="rounded-md border border-white/10 bg-neutral-900 px-2.5 py-1.5 text-xs text-white"
+                      >
+                        {renderPlayerLine(playerName, lookup)}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-md border border-dashed border-white/10 px-2.5 py-1.5 text-xs text-white/45">
+                      None selected
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+                  Emergencies
+                </div>
+                <div className="space-y-1.5">
+                  {team[position].emergencies.length > 0 ? (
+                    team[position].emergencies.map((playerName) => (
+                      <div
+                        key={`${position}-emg-${playerName}`}
+                        className="rounded-md border border-white/10 bg-neutral-900 px-2.5 py-1.5 text-xs text-white"
+                      >
+                        {renderPlayerLine(playerName, lookup)}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-md border border-dashed border-white/10 px-2.5 py-1.5 text-xs text-white/45">
+                      None selected
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function OpponentTeamPage() {
   const router = useRouter();
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
@@ -348,8 +480,11 @@ export default function OpponentTeamPage() {
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [selectedCoachId, setSelectedCoachId] = useState<number>(coachConfigs[0]?.id ?? 1);
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
+  const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
+  const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [isLoadingTeams, setIsLoadingTeams] = useState(true);
+  const [isLoadingFixture, setIsLoadingFixture] = useState(true);
   const [message, setMessage] = useState("");
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
@@ -388,6 +523,25 @@ export default function OpponentTeamPage() {
     } satisfies LoginSession;
   }, []);
 
+  const refreshCurrentRound = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("app_settings")
+      .select("environment, current_afl_round")
+      .eq("environment", APP_ENV)
+      .maybeSingle();
+
+    if (error) {
+      setMessage(`Current AFL round load failed: ${error.message}`);
+      setCurrentAflRound(null);
+      return null;
+    }
+
+    const settings = normaliseAppSettingsRow(data);
+    setCurrentAflRound(settings.current_afl_round);
+
+    return settings.current_afl_round;
+  }, []);
+
   const refreshTeams = useCallback(async () => {
     setIsLoadingTeams(true);
 
@@ -411,6 +565,36 @@ export default function OpponentTeamPage() {
     setTeamRowsByCoachId(nextMap);
     setIsLoadingTeams(false);
   }, []);
+
+  const refreshFixture = useCallback(async () => {
+    setIsLoadingFixture(true);
+
+    const aflRound = await refreshCurrentRound();
+
+    if (!aflRound || !Number.isFinite(aflRound)) {
+      setFixtureRows([]);
+      setIsLoadingFixture(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("season_fixture")
+      .select(
+        "id, environment, competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
+      )
+      .eq("environment", APP_ENV)
+      .eq("afl_round", aflRound);
+
+    if (error) {
+      setMessage(`Fixture load failed: ${error.message}`);
+      setFixtureRows([]);
+      setIsLoadingFixture(false);
+      return;
+    }
+
+    setFixtureRows(sortFixtureRows((data ?? []) as FixtureRow[]));
+    setIsLoadingFixture(false);
+  }, [refreshCurrentRound]);
 
   useEffect(() => {
     let isMounted = true;
@@ -457,7 +641,7 @@ export default function OpponentTeamPage() {
       }
 
       setIsAuthenticating(false);
-      await refreshTeams();
+      await Promise.all([refreshTeams(), refreshFixture()]);
     }
 
     void bootstrapAuth();
@@ -493,7 +677,7 @@ export default function OpponentTeamPage() {
         }
 
         setIsAuthenticating(false);
-        await refreshTeams();
+        await Promise.all([refreshTeams(), refreshFixture()]);
       })();
     });
 
@@ -501,12 +685,12 @@ export default function OpponentTeamPage() {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [loadProfileForUser, refreshTeams, router]);
+  }, [loadProfileForUser, refreshFixture, refreshTeams, router]);
 
   useEffect(() => {
     if (!loginSession) return;
 
-    const channel = supabase
+    const teamChannel = supabase
       .channel(`opponent-team-selections-${APP_ENV}`)
       .on(
         "postgres_changes",
@@ -522,10 +706,39 @@ export default function OpponentTeamPage() {
       )
       .subscribe();
 
+    const fixtureChannel = supabase
+      .channel(`opponent-fixture-${APP_ENV}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "season_fixture",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshFixture();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "app_settings",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshFixture();
+        }
+      )
+      .subscribe();
+
     return () => {
-      void supabase.removeChannel(channel);
+      void supabase.removeChannel(teamChannel);
+      void supabase.removeChannel(fixtureChannel);
     };
-  }, [loginSession, refreshTeams]);
+  }, [loginSession, refreshFixture, refreshTeams]);
 
   useEffect(() => {
     if (!loginSession) return;
@@ -543,48 +756,58 @@ export default function OpponentTeamPage() {
   const selectedCoach =
     coachConfigs.find((coach) => coach.id === selectedCoachId) ?? coachConfigs[0] ?? null;
 
-  const opponentCoach = useMemo(() => {
-    const opponentCoachId = getOpponentCoachId(selectedCoach?.id ?? null);
-    if (!opponentCoachId) return null;
-    return coachConfigs.find((coach) => coach.id === opponentCoachId) ?? null;
-  }, [coachConfigs, selectedCoach]);
+  const canChangeCoach = loginSession?.role === "admin";
 
   const selectedCoachPool = useMemo(
     () => getCoachPool(selectedCoach ?? undefined),
     [selectedCoach]
-  );
-  const opponentCoachPool = useMemo(
-    () => getCoachPool(opponentCoach ?? undefined),
-    [opponentCoach]
   );
 
   const selectedCoachLookup = useMemo(
     () => buildPlayerLookup(selectedCoachPool),
     [selectedCoachPool]
   );
-  const opponentCoachLookup = useMemo(
-    () => buildPlayerLookup(opponentCoachPool),
-    [opponentCoachPool]
-  );
 
   const selectedCoachRow = selectedCoach ? teamRowsByCoachId[selectedCoach.id] ?? null : null;
-  const opponentCoachRow = opponentCoach ? teamRowsByCoachId[opponentCoach.id] ?? null : null;
-
   const selectedCoachTeam = useMemo(
     () => sanitiseTeamState(selectedCoachRow?.team_data),
     [selectedCoachRow]
   );
-  const opponentCoachTeam = useMemo(
-    () => sanitiseTeamState(opponentCoachRow?.team_data),
-    [opponentCoachRow]
-  );
 
-  const canChangeCoach = loginSession?.role === "admin";
+  const selectedCoachFixtureRows = useMemo(() => {
+    if (!selectedCoach) return [];
+    return sortFixtureRows(fixtureRows.filter((row) => row.coach_id === selectedCoach.id));
+  }, [fixtureRows, selectedCoach]);
+
+  const opponentPanels = useMemo(() => {
+    return selectedCoachFixtureRows.map((fixtureRow) => {
+      const opponentCoach = coachConfigs.find(
+        (coach) => coach.id === fixtureRow.opponent_coach_id
+      );
+      const opponentCoachRow = teamRowsByCoachId[fixtureRow.opponent_coach_id] ?? null;
+      const opponentCoachTeam = sanitiseTeamState(opponentCoachRow?.team_data);
+      const opponentCoachPool = getCoachPool(opponentCoach);
+      const opponentCoachLookup = buildPlayerLookup(opponentCoachPool);
+
+      return {
+        fixtureRow,
+        opponentCoachRow,
+        opponentCoachTeam,
+        opponentCoachLookup,
+      };
+    });
+  }, [coachConfigs, selectedCoachFixtureRows, teamRowsByCoachId]);
+
+  const isLoadingPage = isLoadingTeams || isLoadingFixture;
+  const comparisonGridClass =
+    opponentPanels.length >= 2
+      ? "grid gap-4 xl:grid-cols-3"
+      : "grid gap-4 xl:grid-cols-2";
 
   if (isAuthenticating) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
-        <div className="mx-auto max-w-7xl rounded-2xl border border-white/10 bg-white/5 p-6">
+        <div className="mx-auto max-w-[1800px] rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="text-lg font-semibold">Checking session...</div>
         </div>
       </main>
@@ -596,14 +819,14 @@ export default function OpponentTeamPage() {
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+    <main className="min-h-screen bg-neutral-950 px-4 py-6 text-white">
+      <div className="mx-auto max-w-[1800px] space-y-5">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h1 className="text-3xl font-bold">Opponent Team</h1>
-              <p className="mt-2 text-sm text-white/70">
-                View the current coach matchup and compare both teams side by side.
+              <p className="mt-1 text-sm text-white/70">
+                Compact side-by-side matchup view for the current AFL week.
               </p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-white/60">
                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
@@ -615,13 +838,18 @@ export default function OpponentTeamPage() {
                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
                   Environment: {APP_ENV}
                 </span>
+                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
+                  Current AFL Round: {currentAflRound ?? "Not set"}
+                </span>
               </div>
             </div>
 
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => void refreshTeams()}
+                onClick={() => {
+                  void Promise.all([refreshTeams(), refreshFixture()]);
+                }}
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
               >
                 Refresh
@@ -651,10 +879,10 @@ export default function OpponentTeamPage() {
           ) : null}
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="grid gap-4 md:grid-cols-3">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="grid gap-4 lg:grid-cols-3">
             <div>
-              <div className="mb-2 text-sm font-medium text-white/80">Coach matchup</div>
+              <div className="mb-2 text-sm font-medium text-white/80">Coach</div>
               {canChangeCoach ? (
                 <select
                   value={selectedCoachId}
@@ -692,196 +920,65 @@ export default function OpponentTeamPage() {
 
             <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
               <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                Opponent Coach
+                Weekly Opponents
               </div>
-              <div className="mt-2 text-lg font-bold">{opponentCoach?.name ?? "—"}</div>
+              <div className="mt-2 text-lg font-bold">
+                {selectedCoachFixtureRows.length > 0
+                  ? `${selectedCoachFixtureRows.length} matchup${
+                      selectedCoachFixtureRows.length === 1 ? "" : "s"
+                    }`
+                  : "No matchup found"}
+              </div>
               <div className="mt-1 text-sm text-white/70">
-                Players selected: {countSelectedPlayers(opponentCoachTeam)}
-              </div>
-              <div className="mt-1 text-sm text-white/70">
-                Submitted: {opponentCoachRow?.is_submitted ? "Yes" : "No"}
-              </div>
-              <div className="mt-1 text-xs text-white/50">
-                Last updated: {formatTimestamp(opponentCoachRow?.updated_at)}
+                {selectedCoachFixtureRows.length > 0
+                  ? selectedCoachFixtureRows
+                      .map((row) => `R${row.competition_round} vs ${row.opponent_coach_name}`)
+                      .join(" • ")
+                  : "Check current_afl_round and season_fixture"}
               </div>
             </div>
           </div>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-2xl font-bold">
-              {selectedCoach?.name ?? "Selected Coach"} Team
-            </h2>
-            <p className="mt-1 text-sm text-white/70">
-              Current selected team by position.
-            </p>
+        {selectedCoachFixtureRows.length === 0 && !isLoadingPage ? (
+          <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-5 text-sm text-white/60">
+            No opponent rows were found for this coach in AFL Round {currentAflRound ?? "—"}.
+          </section>
+        ) : null}
 
-            <div className="mt-4 space-y-4">
-              {POSITIONS.map((position) => (
-                <div key={position} className="rounded-xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-lg font-bold">{position}</div>
-                    <div className="text-xs text-white/50">
-                      On Field {selectedCoachTeam[position].onField.length} • Emergencies{" "}
-                      {selectedCoachTeam[position].emergencies.length}
-                    </div>
-                  </div>
+        <section className={comparisonGridClass}>
+          <TeamPanel
+            title={selectedCoach?.name ?? "Selected Coach"}
+            subtitle="Your team for the current AFL week."
+            team={selectedCoachTeam}
+            lookup={selectedCoachLookup}
+            submitted={Boolean(selectedCoachRow?.is_submitted)}
+            updatedAt={selectedCoachRow?.updated_at}
+            submittedAt={selectedCoachRow?.submitted_at}
+            accentClass="border-violet-500/30"
+          />
 
-                  <div className="mt-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                      On Field
-                    </div>
-                    <div className="mt-2 space-y-2">
-                      {selectedCoachTeam[position].onField.length > 0 ? (
-                        selectedCoachTeam[position].onField.map((playerName) => (
-                          <div
-                            key={`${position}-on-${playerName}`}
-                            className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm text-white"
-                          >
-                            {renderPlayerLine(playerName, selectedCoachLookup)}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-white/10 px-3 py-2 text-sm text-white/50">
-                          No players selected.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                      Emergencies
-                    </div>
-                    <div className="mt-2 space-y-2">
-                      {selectedCoachTeam[position].emergencies.length > 0 ? (
-                        selectedCoachTeam[position].emergencies.map((playerName) => (
-                          <div
-                            key={`${position}-emg-${playerName}`}
-                            className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm text-white"
-                          >
-                            {renderPlayerLine(playerName, selectedCoachLookup)}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-white/10 px-3 py-2 text-sm text-white/50">
-                          No emergencies selected.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-2xl font-bold">
-              {opponentCoach?.name ?? "Opponent Coach"} Team
-            </h2>
-            <p className="mt-1 text-sm text-white/70">
-              Opposition team by position.
-            </p>
-
-            <div className="mt-4 space-y-4">
-              {POSITIONS.map((position) => (
-                <div key={position} className="rounded-xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-lg font-bold">{position}</div>
-                    <div className="text-xs text-white/50">
-                      On Field {opponentCoachTeam[position].onField.length} • Emergencies{" "}
-                      {opponentCoachTeam[position].emergencies.length}
-                    </div>
-                  </div>
-
-                  <div className="mt-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                      On Field
-                    </div>
-                    <div className="mt-2 space-y-2">
-                      {opponentCoachTeam[position].onField.length > 0 ? (
-                        opponentCoachTeam[position].onField.map((playerName) => (
-                          <div
-                            key={`${position}-opp-on-${playerName}`}
-                            className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm text-white"
-                          >
-                            {renderPlayerLine(playerName, opponentCoachLookup)}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-white/10 px-3 py-2 text-sm text-white/50">
-                          No players selected.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                      Emergencies
-                    </div>
-                    <div className="mt-2 space-y-2">
-                      {opponentCoachTeam[position].emergencies.length > 0 ? (
-                        opponentCoachTeam[position].emergencies.map((playerName) => (
-                          <div
-                            key={`${position}-opp-emg-${playerName}`}
-                            className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm text-white"
-                          >
-                            {renderPlayerLine(playerName, opponentCoachLookup)}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-white/10 px-3 py-2 text-sm text-white/50">
-                          No emergencies selected.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          {opponentPanels.map((panel) => (
+            <TeamPanel
+              key={panel.fixtureRow.id}
+              title={panel.fixtureRow.opponent_coach_name}
+              subtitle={`Competition Round ${panel.fixtureRow.competition_round} • AFL Round ${panel.fixtureRow.afl_round}`}
+              team={panel.opponentCoachTeam}
+              lookup={panel.opponentCoachLookup}
+              submitted={Boolean(panel.opponentCoachRow?.is_submitted)}
+              updatedAt={panel.opponentCoachRow?.updated_at}
+              submittedAt={panel.opponentCoachRow?.submitted_at}
+              accentClass="border-white/10"
+            />
+          ))}
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <h2 className="text-2xl font-bold">Status Summary</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-              <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                {selectedCoach?.name ?? "Selected Coach"}
-              </div>
-              <div className="mt-2 text-sm text-white/70">
-                Submitted at: {formatTimestamp(selectedCoachRow?.submitted_at)}
-              </div>
-              <div className="mt-1 text-sm text-white/70">
-                Last updated: {formatTimestamp(selectedCoachRow?.updated_at)}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-              <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                {opponentCoach?.name ?? "Opponent Coach"}
-              </div>
-              <div className="mt-2 text-sm text-white/70">
-                Submitted at: {formatTimestamp(opponentCoachRow?.submitted_at)}
-              </div>
-              <div className="mt-1 text-sm text-white/70">
-                Last updated: {formatTimestamp(opponentCoachRow?.updated_at)}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-white/60">
-            Next improvement could be a true head-to-head matchup view that compares each position
-            side by side in one compact table.
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-6 text-sm text-white/60">
-          {isLoadingTeams
-            ? "Loading team selections..."
-            : "Opponent team page is now live and reading real team selections from coach_team_selections."}
+        <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-5 text-sm text-white/60">
+          {isLoadingPage
+            ? "Loading team selections and fixture..."
+            : opponentPanels.length > 1
+              ? "Double round detected automatically. Teams are shown side by side in a compact layout."
+              : "Opponent team page is now using a compact side-by-side layout with on-ground and emergency players shown separately for each position."}
         </section>
       </div>
     </main>
