@@ -2557,6 +2557,51 @@ async function handleUseLastWeekTeam() {
           </section>
         ) : null}
 
+       {submitMessage ? (
+  <section className="rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4 text-sm text-violet-100">
+    {submitMessage}
+  </section>
+) : null}
+
+{!isAdmin ? (
+  <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+    <div className="mb-4">
+      <h2 className="text-2xl font-bold">Lockout Status</h2>
+      <p className="mt-1 text-sm text-white/70">
+        Current team lockout status for coaches.
+      </p>
+    </div>
+
+    <div className="grid gap-4 md:grid-cols-2">
+      <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+        <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+          Team Status
+        </div>
+        <div
+  className={`text-lg font-bold ${
+    isTeamLocked ? "text-rose-400" : "text-emerald-400"
+  }`}
+>
+  {isTeamLocked ? "Locked" : "Unlocked"}
+</div>
+      </div>
+
+           <div
+  className={`rounded-xl border p-4 ${
+    isTeamLocked
+      ? "border-rose-500/30 bg-rose-500/10"
+      : "border-emerald-500/30 bg-emerald-500/10"
+  }`}
+>
+        <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+          Countdown
+        </div>
+        <div className="text-sm font-medium text-white/90">{countdownLabel}</div>
+      </div>
+    </div>
+  </section>
+) : null} 
+
         <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
