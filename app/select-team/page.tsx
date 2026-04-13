@@ -1622,7 +1622,7 @@ async function handleUseLastWeekTeam() {
   if (!confirmed) return;
 
   setIsLoadingLastTeam(true);
-  setSubmitMessage("Loading previous team...");
+  setSubmitMessage("Loading last week's team...");
 
   try {
     const { data, error } = await supabase
