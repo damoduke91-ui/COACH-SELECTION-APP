@@ -749,6 +749,7 @@ export default function SelectTeamPage() {
   const [isLoadingTeam, setIsLoadingTeam] = useState(false);
   const [isSavingTeam, setIsSavingTeam] = useState(false);
   const [isExportingTeams, setIsExportingTeams] = useState(false);
+  const [isLoadingLastTeam, setIsLoadingLastTeam] = useState(false);
   const [manualTeamLockout, setManualTeamLockout] = useState(false);
   const [lockoutScheduleEnabled, setLockoutScheduleEnabled] = useState(false);
   const [lockoutScheduleDay, setLockoutScheduleDay] = useState<WeekdayName>(DEFAULT_LOCKOUT_DAY);
@@ -1608,6 +1609,60 @@ export default function SelectTeamPage() {
     updateCoachTeamState(emptyTeamState());
     setSubmitMessage(`Team reset for ${selectedCoach.name}. Save it again when ready.`);
   }
+
+async function handleUseLastWeekTeam() {
+  if (!selectedCoach) return;
+  if (!loginSession) return;
+  if (!canEditSelectedCoach) return;
+
+  const confirmed = window.confirm(
+    "Replace your current team with last week's team?"
+  );
+
+  if (!confirmed) return;
+
+  setIsLoadingLastTeam(true);
+  setSubmitMessage("Loading previous team...");
+
+  try {
+    const { data, error } = await supabase
+      .from("coach_team_selections")
+      .select("team_data, updated_at")
+      .eq("coach_id", selectedCoach.id)
+      .eq("environment", APP_ENV)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      setSubmitMessage("No previous team found for this coach.");
+      setIsLoadingLastTeam(false);
+      return;
+    }
+
+    const lastTeam = sanitiseTeamState(data[0].team_data);
+
+    setTeamsByCoach((prev) => ({
+      ...prev,
+      [selectedCoach.id]: lastTeam,
+    }));
+
+    setLoadedCoachIds((prev) => ({
+      ...prev,
+      [selectedCoach.id]: true,
+    }));
+
+    markCoachAsDirty(selectedCoach.id);
+    setSubmitMessage("Previous team loaded. Save or submit when ready.");
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown error loading previous team.";
+    setSubmitMessage(`Failed to load previous team: ${message}`);
+  }
+
+  setIsLoadingLastTeam(false);
+}
 
   function validateTeamState(
     coach: CoachConfigShape | undefined,
@@ -2585,6 +2640,17 @@ export default function SelectTeamPage() {
             >
               {isSavingTeam ? "Saving..." : "Save Team"}
             </button>
+
+            <button
+  type="button"
+  onClick={() => handleUseLastWeekTeam()}
+  disabled={
+    !selectedCoach || !canEditSelectedCoach || isSavingTeam || isLoadingLastTeam
+  }
+  className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-200 transition hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+>
+  {isLoadingLastTeam ? "Loading..." : "Use Last Week's Team"}
+</button>
 
             <button
               type="button"
