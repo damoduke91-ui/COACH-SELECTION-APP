@@ -2422,6 +2422,14 @@ async function handleUseLastWeekTeam() {
             </div>
 
             <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard")}
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+              >
+                ← Back to Dashboard
+              </button>
+
               {isAdmin ? (
                 <button
                   type="button"
