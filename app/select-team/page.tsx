@@ -181,6 +181,17 @@ const COACH_TEAM_NAMES: Record<number, string> = {
   8: "Snow Coast",
 };
 
+const OPPONENT_MAP: Record<number, number> = {
+  1: 2,
+  2: 1,
+  3: 4,
+  4: 3,
+  5: 6,
+  6: 5,
+  7: 8,
+  8: 7,
+};
+
 const AUTO_SAVE_DEBOUNCE_MS = 10000;
 const LOCKOUT_TICK_MS = 1000;
 const DEFAULT_LOCKOUT_DAY = "Thursday";
@@ -750,6 +761,9 @@ export default function SelectTeamPage() {
   const [isSavingTeam, setIsSavingTeam] = useState(false);
   const [isExportingTeams, setIsExportingTeams] = useState(false);
   const [isLoadingLastTeam, setIsLoadingLastTeam] = useState(false);
+  const [opponentTeam, setOpponentTeam] = useState<TeamState | null>(null);
+  const [opponentCoachName, setOpponentCoachName] = useState<string>("");
+  const [isLoadingOpponentTeam, setIsLoadingOpponentTeam] = useState(false);
   const [manualTeamLockout, setManualTeamLockout] = useState(false);
   const [lockoutScheduleEnabled, setLockoutScheduleEnabled] = useState(false);
   const [lockoutScheduleDay, setLockoutScheduleDay] = useState<WeekdayName>(DEFAULT_LOCKOUT_DAY);
@@ -1372,6 +1386,57 @@ export default function SelectTeamPage() {
 
     void loadAllCoachTeamsForAdmin();
   }, [loginSession, isAdmin]);
+
+  useEffect(() => {
+    async function loadOpponentTeam() {
+      if (!loginSession) return;
+      if (isAdmin) return;
+      if (!selectedCoach) return;
+
+      if (!isTeamLocked) {
+        setOpponentTeam(null);
+        setOpponentCoachName("");
+        return;
+      }
+
+      const opponentCoachId = OPPONENT_MAP[selectedCoach.id];
+
+      if (!opponentCoachId) {
+        setOpponentTeam(null);
+        setOpponentCoachName("");
+        return;
+      }
+
+      const opponentCoach = coachConfigs.find((coach) => coach.id === opponentCoachId);
+
+      setIsLoadingOpponentTeam(true);
+
+      const { data, error } = await supabase
+        .from("coach_team_selections")
+        .select(
+          "coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment"
+        )
+        .eq("coach_id", opponentCoachId)
+        .eq("environment", APP_ENV)
+        .maybeSingle();
+
+      if (error) {
+        setSubmitMessage(`Opponent team load failed: ${error.message}`);
+        setOpponentTeam(null);
+        setOpponentCoachName(opponentCoach?.name ?? "");
+        setIsLoadingOpponentTeam(false);
+        return;
+      }
+
+      const row = data as SavedTeamRow | null;
+
+      setOpponentTeam(row?.team_data ? sanitiseTeamState(row.team_data) : emptyTeamState());
+      setOpponentCoachName(row?.coach_name ?? opponentCoach?.name ?? `Coach ${opponentCoachId}`);
+      setIsLoadingOpponentTeam(false);
+    }
+
+    void loadOpponentTeam();
+  }, [coachConfigs, isAdmin, isTeamLocked, loginSession, selectedCoach]);
 
   function getPlayerClub(playerName: string): string {
     return playerLookup.get(playerName)?.club ?? "";
@@ -2557,50 +2622,44 @@ async function handleUseLastWeekTeam() {
           </section>
         ) : null}
 
-       {submitMessage ? (
-  <section className="rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4 text-sm text-violet-100">
-    {submitMessage}
-  </section>
-) : null}
+        {!isAdmin ? (
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <div className="mb-4">
+              <h2 className="text-2xl font-bold">Lockout Status</h2>
+              <p className="mt-1 text-sm text-white/70">
+                Current team lockout status for coaches.
+              </p>
+            </div>
 
-{!isAdmin ? (
-  <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
-    <div className="mb-4">
-      <h2 className="text-2xl font-bold">Lockout Status</h2>
-      <p className="mt-1 text-sm text-white/70">
-        Current team lockout status for coaches.
-      </p>
-    </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div
+                className={`rounded-xl border p-4 ${
+                  isTeamLocked
+                    ? "border-rose-500/30 bg-rose-500/10"
+                    : "border-emerald-500/30 bg-emerald-500/10"
+                }`}
+              >
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Team Status
+                </div>
+                <div
+                  className={`text-lg font-bold ${
+                    isTeamLocked ? "text-rose-400" : "text-emerald-400"
+                  }`}
+                >
+                  {isTeamLocked ? "Locked" : "Unlocked"}
+                </div>
+              </div>
 
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-        <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
-          Team Status
-        </div>
-        <div
-  className={`text-lg font-bold ${
-    isTeamLocked ? "text-rose-400" : "text-emerald-400"
-  }`}
->
-  {isTeamLocked ? "Locked" : "Unlocked"}
-</div>
-      </div>
-
-           <div
-  className={`rounded-xl border p-4 ${
-    isTeamLocked
-      ? "border-rose-500/30 bg-rose-500/10"
-      : "border-emerald-500/30 bg-emerald-500/10"
-  }`}
->
-        <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
-          Countdown
-        </div>
-        <div className="text-sm font-medium text-white/90">{countdownLabel}</div>
-      </div>
-    </div>
-  </section>
-) : null} 
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                  Countdown
+                </div>
+                <div className="text-sm font-medium text-white/90">{countdownLabel}</div>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">

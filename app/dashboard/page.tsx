@@ -21,6 +21,7 @@ type LoginSession = {
   role: "admin" | "coach";
   coachId: number | null;
   coachName: string;
+  teamName: string;
 };
 
 type UserProfileRow = {
@@ -28,6 +29,7 @@ type UserProfileRow = {
   role: "admin" | "coach";
   coach_id: number | null;
   coach_name: string | null;
+  team_name: string | null;
 };
 
 type SavedTeamRow = {
@@ -209,60 +211,6 @@ function normaliseCoachConfigs(): CoachConfigShape[] {
   return FALLBACK_COACH_CONFIGS;
 }
 
-function formatTimestamp(value: string | null | undefined): string {
-  if (!value) return "—";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "—";
-
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function countSelectedPlayers(teamData: unknown): number {
-  if (!teamData || typeof teamData !== "object") return 0;
-
-  const obj = teamData as Record<string, unknown>;
-  let total = 0;
-
-  for (const position of POSITIONS) {
-    const entry = obj[position];
-
-    if (!entry || typeof entry !== "object") continue;
-
-    const record = entry as Record<string, unknown>;
-    const onField = Array.isArray(record.onField) ? record.onField.length : 0;
-    const emergencies = Array.isArray(record.emergencies) ? record.emergencies.length : 0;
-
-    total += onField + emergencies;
-  }
-
-  return total;
-}
-
-function getOpponentCoachId(coachId: number | null): number | null {
-  if (!coachId) return null;
-
-  const matchupMap: Record<number, number> = {
-    1: 2,
-    2: 1,
-    3: 4,
-    4: 3,
-    5: 6,
-    6: 5,
-    7: 8,
-    8: 7,
-  };
-
-  return matchupMap[coachId] ?? null;
-}
-
 function buildPlaceholderLadder(coaches: CoachConfigShape[]) {
   return coaches.map((coach, index) => ({
     position: index + 1,
@@ -341,12 +289,11 @@ export default function DashboardPage() {
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [message, setMessage] = useState("");
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
-  const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, role, coach_id, coach_name")
+      .select("id, role, coach_id, coach_name, team_name")
       .eq("id", userId)
       .eq("environment", APP_ENV)
       .single();
@@ -378,12 +325,11 @@ export default function DashboardPage() {
         (profile.role === "admin"
           ? "Admin"
           : `Coach ${profile.coach_id ?? ""}`.trim()),
+      teamName: profile.team_name?.trim() || "",
     } satisfies LoginSession;
   }, []);
 
   const refreshDashboardData = useCallback(async () => {
-    setIsLoadingDashboard(true);
-
     const { data, error } = await supabase
       .from("coach_team_selections")
       .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
@@ -391,7 +337,6 @@ export default function DashboardPage() {
 
     if (error) {
       setMessage(`Dashboard load failed: ${error.message}`);
-      setIsLoadingDashboard(false);
       return;
     }
 
@@ -402,7 +347,6 @@ export default function DashboardPage() {
     }
 
     setTeamRowsByCoachId(nextMap);
-    setIsLoadingDashboard(false);
   }, []);
 
   useEffect(() => {
@@ -515,27 +459,15 @@ export default function DashboardPage() {
     router.replace("/login");
   }
 
-  const currentCoach = useMemo(() => {
-    if (!loginSession) return null;
+  const dashboardTitle = useMemo(() => {
+    if (!loginSession) return "Dashboard";
 
-    if (loginSession.role === "coach" && loginSession.coachId) {
-      return coachConfigs.find((coach) => coach.id === loginSession.coachId) ?? null;
+    if (loginSession.role === "admin") {
+      return "Admin Dashboard";
     }
 
-    return null;
-  }, [coachConfigs, loginSession]);
-
-  const opponentCoach = useMemo(() => {
-    if (!currentCoach) return null;
-
-    const opponentCoachId = getOpponentCoachId(currentCoach.id);
-    if (!opponentCoachId) return null;
-
-    return coachConfigs.find((coach) => coach.id === opponentCoachId) ?? null;
-  }, [coachConfigs, currentCoach]);
-
-  const currentCoachTeamRow = currentCoach ? teamRowsByCoachId[currentCoach.id] ?? null : null;
-  const opponentCoachTeamRow = opponentCoach ? teamRowsByCoachId[opponentCoach.id] ?? null : null;
+    return `${loginSession.teamName || loginSession.coachName} Dashboard`;
+  }, [loginSession]);
 
   const ladderRows = useMemo(() => buildPlaceholderLadder(coachConfigs), [coachConfigs]);
   const currentWeekFixture = useMemo(() => buildCurrentWeekFixture(coachConfigs), [coachConfigs]);
@@ -561,19 +493,7 @@ export default function DashboardPage() {
         <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h1 className="text-3xl font-bold">Coach Dashboard</h1>
-              <p className="mt-2 text-sm text-white/70">
-                Welcome {loginSession.coachName}. This is your landing page for team selection,
-                fixtures, results, and records.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-white/60">
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
-                  Role: {loginSession.role}
-                </span>
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
-                  Environment: {APP_ENV}
-                </span>
-              </div>
+              <h1 className="text-3xl font-bold">{dashboardTitle}</h1>
             </div>
 
             <div className="flex flex-wrap gap-3">
@@ -654,57 +574,8 @@ export default function DashboardPage() {
           </Link>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-3">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 xl:col-span-1">
-            <h2 className="text-2xl font-bold">This Week Matchup</h2>
-            <p className="mt-1 text-sm text-white/70">
-              Coach team versus opposition team summary.
-            </p>
-
-            <div className="mt-4 space-y-4">
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                  Your Team
-                </div>
-                <div className="mt-2 text-lg font-bold">
-                  {currentCoach?.name ?? "Admin view"}
-                </div>
-                <div className="mt-2 text-sm text-white/70">
-                  Players selected: {countSelectedPlayers(currentCoachTeamRow?.team_data ?? null)}
-                </div>
-                <div className="mt-1 text-sm text-white/70">
-                  Submitted: {currentCoachTeamRow?.is_submitted ? "Yes" : "No"}
-                </div>
-                <div className="mt-1 text-xs text-white/50">
-                  Last updated: {formatTimestamp(currentCoachTeamRow?.updated_at)}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                  Opponent
-                </div>
-                <div className="mt-2 text-lg font-bold">
-                  {opponentCoach?.name ?? "Not assigned yet"}
-                </div>
-                <div className="mt-2 text-sm text-white/70">
-                  Players selected: {countSelectedPlayers(opponentCoachTeamRow?.team_data ?? null)}
-                </div>
-                <div className="mt-1 text-sm text-white/70">
-                  Submitted: {opponentCoachTeamRow?.is_submitted ? "Yes" : "No"}
-                </div>
-                <div className="mt-1 text-xs text-white/50">
-                  Last updated: {formatTimestamp(opponentCoachTeamRow?.updated_at)}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-white/60">
-                Later this section can become a proper player-by-player matchup card.
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 xl:col-span-2">
+        <section className="grid gap-6 xl:grid-cols-1">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <h2 className="text-2xl font-bold">Ladder</h2>
             <p className="mt-1 text-sm text-white/70">
               Placeholder ladder for now. This can be wired to real standings later.
@@ -789,12 +660,6 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
-        </section>
-
-        <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-6 text-sm text-white/60">
-          {isLoadingDashboard
-            ? "Loading dashboard data..."
-            : "Dashboard is live. The navigation is in place, Coach Selection is usable, and the other pages are ready to be built next."}
         </section>
       </div>
     </main>
