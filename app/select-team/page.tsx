@@ -2419,10 +2419,6 @@ async function handleUseLastWeekTeam() {
               <h1 className="text-3xl font-bold">
                 {isAdmin ? "Coach Team Selection" : `${selectedCoachTeamName} Team Selection`}
               </h1>
-              <p className="mt-2 text-sm text-white/70">
-                Signed in as {loginSession.coachName}
-                {loginSession.email ? ` • ${loginSession.email}` : ""}
-              </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
@@ -2623,55 +2619,27 @@ async function handleUseLastWeekTeam() {
         ) : null}
 
         {!isAdmin ? (
-          <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <div className="mb-4">
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="mb-3">
               <h2 className="text-2xl font-bold">Lockout Status</h2>
-              <p className="mt-1 text-sm text-white/70">
-                Current team lockout status for coaches.
-              </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div
-                className={`rounded-xl border p-4 ${
-                  isTeamLocked
-                    ? "border-rose-500/30 bg-rose-500/10"
-                    : "border-emerald-500/30 bg-emerald-500/10"
-                }`}
-              >
-                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
-                  Team Status
-                </div>
-                <div
-                  className={`text-lg font-bold ${
-                    isTeamLocked ? "text-rose-400" : "text-emerald-400"
-                  }`}
-                >
-                  {isTeamLocked ? "Locked" : "Unlocked"}
-                </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
+                Countdown
               </div>
-
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
-                  Countdown
-                </div>
-                <div className="text-sm font-medium text-white/90">{countdownLabel}</div>
-              </div>
+              <div className="text-sm font-medium text-white/90">{countdownLabel}</div>
             </div>
           </section>
         ) : null}
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h2 className="text-2xl font-bold">Team Controls</h2>
-              <p className="mt-1 text-sm text-white/70">
-                Select a coach, save draft teams, submit final teams, and manage unlock state.
-              </p>
             </div>
 
-            <div className="w-full max-w-sm">
-              <label className="mb-1 block text-sm font-medium text-white/80">Coach</label>
+            <div className="w-full max-w-xs">
               {isAdmin ? (
                 <select
                   value={selectedCoachId}
@@ -2693,14 +2661,7 @@ async function handleUseLastWeekTeam() {
           </div>
 
           {selectedCoach ? (
-            <div className="grid gap-4 xl:grid-cols-4">
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
-                  Coach
-                </div>
-                <div className="text-lg font-bold">{selectedCoach.name}</div>
-              </div>
-
+            <div className="grid gap-4 xl:grid-cols-3">
               <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                 <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/60">
                   Submitted
@@ -2726,7 +2687,7 @@ async function handleUseLastWeekTeam() {
             </div>
           ) : null}
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-4 flex flex-wrap gap-3">
             <button
               type="button"
               onClick={() =>
@@ -2794,12 +2755,9 @@ async function handleUseLastWeekTeam() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="mb-4">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="mb-3">
             <h2 className="text-2xl font-bold">Player Selection</h2>
-            <p className="mt-1 text-sm text-white/70">
-              Add players by position, manage on-field order, and set emergencies.
-            </p>
           </div>
 
           <div className="grid gap-6 xl:grid-cols-2">
