@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
 import * as coachConfigModule from "../../lib/coachConfig";
 import {
   type CoachPlayerPool,
@@ -759,8 +758,7 @@ export default function SelectTeamPage() {
   const [submitMessage, setSubmitMessage] = useState<string>("");
   const [isLoadingTeam, setIsLoadingTeam] = useState(false);
   const [isSavingTeam, setIsSavingTeam] = useState(false);
-  const [isExportingTeams, setIsExportingTeams] = useState(false);
-  const [isLoadingLastTeam, setIsLoadingLastTeam] = useState(false);
+    const [isLoadingLastTeam, setIsLoadingLastTeam] = useState(false);
   const [opponentTeam, setOpponentTeam] = useState<TeamState | null>(null);
   const [opponentCoachName, setOpponentCoachName] = useState<string>("");
   const [isLoadingOpponentTeam, setIsLoadingOpponentTeam] = useState(false);
@@ -2208,113 +2206,9 @@ async function handleUseLastWeekTeam() {
     teamState,
   ]);
 
-  function buildExportRowsForCoach(
-    coachId: number,
-    team: TeamState,
-    poolsByCoach: Record<number, CoachPlayerPool>
-  ): ExportPlayerRow[] {
-    const rows: ExportPlayerRow[] = [];
-    const coachPoolForLookup = poolsByCoach[coachId];
-    const selectionOrder: string[] = [];
 
-    for (const position of POSITIONS) {
-      selectionOrder.push(...team[position].onField);
-      selectionOrder.push(...team[position].emergencies);
-    }
 
-    const orderLookup = new Map<string, number>();
-    selectionOrder.forEach((playerName, index) => {
-      if (!orderLookup.has(playerName)) {
-        orderLookup.set(playerName, index + 1);
-      }
-    });
-
-    const groupedPlayers = POSITIONS.flatMap((position) =>
-      coachPoolForLookup[position].map((player) => ({
-        position,
-        player,
-      }))
-    );
-
-    for (const { position, player } of groupedPlayers) {
-      const isSelected = selectionOrder.includes(player.name);
-
-      rows.push({
-        "Player No.": player.number,
-        Position: position,
-        Club: player.club,
-        "Player Name": player.name,
-        Selected: isSelected ? "Yes" : "",
-        "Selection Order": isSelected ? orderLookup.get(player.name) ?? "" : "",
-      });
-    }
-
-    return rows;
-  }
-
-  async function handleExportTeamsXlsx() {
-    if (!loginSession || !isAdmin) {
-      setSubmitMessage("Only admin can export teams.");
-      return;
-    }
-
-    setIsExportingTeams(true);
-    setSubmitMessage("Preparing XLSX export...");
-
-    try {
-      const poolsByCoach: Record<number, CoachPlayerPool> = {};
-      for (const coach of coachConfigs) {
-        poolsByCoach[coach.id] = getPlayersForCoach({
-          coachId: coach.id,
-          coachName: coach.name,
-        });
-      }
-
-      const workbook = XLSX.utils.book_new();
-
-      const summaryRows = coachConfigs.map((coach) => {
-        const meta = coachMetaById[coach.id];
-        const submitted = submittedCoachIds[coach.id] ?? false;
-        const saveIndicator = saveIndicatorByCoachId[coach.id] ?? "saved";
-        const coachTeam = teamsByCoach[coach.id] ?? emptyTeamState();
-        const selectedCount = getAllSelectedPlayers(coachTeam).length;
-
-        return {
-          Coach: coach.name,
-          "Coach ID": coach.id,
-          Submitted: submitted ? "Yes" : "No",
-          "Last Updated": formatTimestamp(meta?.updatedAt ?? null),
-          "Submitted At": formatTimestamp(meta?.submittedAt ?? null),
-          "Save State": saveIndicator,
-          "Players Selected": selectedCount,
-        };
-      });
-
-      const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
-      XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
-
-      for (const coach of coachConfigs) {
-        const coachTeam = teamsByCoach[coach.id] ?? emptyTeamState();
-        const rows = buildExportRowsForCoach(coach.id, coachTeam, poolsByCoach);
-        const worksheet = XLSX.utils.json_to_sheet(rows);
-
-        XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(coach.name));
-      }
-
-      const now = new Date();
-      const fileName = `coach-team-selections-${APP_ENV}-${now
-        .toISOString()
-        .replace(/[:.]/g, "-")}.xlsx`;
-
-      XLSX.writeFile(workbook, fileName);
-      setSubmitMessage(`XLSX export created: ${fileName}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown export error.";
-      setSubmitMessage(`XLSX export failed: ${message}`);
-    } finally {
-      setIsExportingTeams(false);
-    }
-  }
+ 
 
   if (isAuthenticating) {
     return (
@@ -2429,17 +2323,6 @@ async function handleUseLastWeekTeam() {
               >
                 ← Back to Dashboard
               </button>
-
-              {isAdmin ? (
-                <button
-                  type="button"
-                  onClick={handleExportTeamsXlsx}
-                  disabled={isExportingTeams}
-                  className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {isExportingTeams ? "Exporting..." : "Export Teams XLSX"}
-                </button>
-              ) : null}
 
               <button
                 type="button"

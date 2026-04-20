@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import * as coachConfigModule from "../../lib/coachConfig";
+import { getPlayersForCoach } from "../../lib/playersByCoach";
 import { APP_ENV, supabase } from "../../lib/supabase";
 
 type PositionKey = "KD" | "DEF" | "MID" | "FOR" | "KF" | "RUC";
@@ -40,6 +42,27 @@ type SavedTeamRow = {
   submitted_at: string | null;
   updated_at: string | null;
   environment: "production" | "preview";
+};
+
+type PositionState = {
+  onField: string[];
+  emergencies: string[];
+};
+
+type TeamState = Record<PositionKey, PositionState>;
+
+type ExportPlayerRow = {
+  "Player No.": number | string;
+  Position: string;
+  Club: string;
+  "Player Name": string;
+  Selected: string;
+  "Selection Order": number | string;
+};
+
+type AppSettingsRow = {
+  environment: "production" | "preview";
+  current_afl_round: number | null;
 };
 
 const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
@@ -281,6 +304,161 @@ function buildNextWeekFixture(coaches: CoachConfigShape[]) {
   ];
 }
 
+function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
+  const row = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+
+  const parsedRound =
+    typeof row.current_afl_round === "number"
+      ? row.current_afl_round
+      : typeof row.current_afl_round === "string"
+        ? Number(row.current_afl_round)
+        : null;
+
+  return {
+    environment: APP_ENV,
+    current_afl_round: Number.isFinite(parsedRound) ? parsedRound : null,
+  };
+}
+
+function emptyTeamState(): TeamState {
+  return {
+    KD: { onField: [], emergencies: [] },
+    DEF: { onField: [], emergencies: [] },
+    MID: { onField: [], emergencies: [] },
+    FOR: { onField: [], emergencies: [] },
+    KF: { onField: [], emergencies: [] },
+    RUC: { onField: [], emergencies: [] },
+  };
+}
+
+function sanitiseTeamState(input: unknown): TeamState {
+  const clean = emptyTeamState();
+
+  if (!input || typeof input !== "object") {
+    return clean;
+  }
+
+  const obj = input as Record<string, unknown>;
+
+  for (const position of POSITIONS) {
+    const savedPosition = obj[position];
+
+    if (!savedPosition || typeof savedPosition !== "object") {
+      continue;
+    }
+
+    const positionObj = savedPosition as Record<string, unknown>;
+
+    clean[position] = {
+      onField: Array.isArray(positionObj.onField)
+        ? positionObj.onField.filter((value): value is string => typeof value === "string")
+        : [],
+      emergencies: Array.isArray(positionObj.emergencies)
+        ? positionObj.emergencies.filter((value): value is string => typeof value === "string")
+        : [],
+    };
+  }
+
+  return clean;
+}
+
+function getAllSelectedPlayers(teamState: TeamState): string[] {
+  return POSITIONS.flatMap((position) => [
+    ...teamState[position].onField,
+    ...teamState[position].emergencies,
+  ]);
+}
+
+function safeSheetName(input: string): string {
+  return input.replace(/[\\/?*[\]:]/g, "").slice(0, 31) || "Coach";
+}
+
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function buildExportRowsForCoach(
+  coachId: number,
+  team: TeamState,
+  poolsByCoach: Record<number, ReturnType<typeof getPlayersForCoach>>
+): ExportPlayerRow[] {
+  const rows: ExportPlayerRow[] = [];
+  const coachPoolForLookup = poolsByCoach[coachId];
+  const selectionOrder: string[] = [];
+
+// On-field first
+for (const position of POSITIONS) {
+  selectionOrder.push(...team[position].onField);
+}
+
+// Then emergencies
+for (const position of POSITIONS) {
+  selectionOrder.push(...team[position].emergencies);
+}
+
+const orderLookup = new Map<string, number>();
+selectionOrder.forEach((playerName, index) => {
+  if (!orderLookup.has(playerName)) {
+    orderLookup.set(playerName, index + 1);
+  }
+});
+
+// Emergency numbering resets inside each position
+const emergencyLookup = new Map<string, string>();
+
+for (const position of POSITIONS) {
+  team[position].emergencies.forEach((playerName, index) => {
+    if (!emergencyLookup.has(playerName)) {
+      emergencyLookup.set(playerName, `I${index + 1}`);
+    }
+  });
+}
+
+  const groupedPlayers = POSITIONS.flatMap((position) =>
+    coachPoolForLookup[position].map((player) => ({
+      position,
+      player,
+    }))
+  );
+
+  for (const { position, player } of groupedPlayers) {
+const isOnField = team[position].onField.includes(player.name);
+const isEmergency = team[position].emergencies.includes(player.name);
+
+let selectedValue = "Z";
+
+if (isOnField) {
+  selectedValue = "X";
+} else if (isEmergency) {
+  selectedValue = emergencyLookup.get(player.name) ?? "I";
+}
+
+rows.push({
+  "Player No.": player.number,
+  Position: position,
+  Club: player.club,
+  "Player Name": player.name,
+  Selected: selectedValue,
+  "Selection Order":
+    selectedValue !== "Z" ? orderLookup.get(player.name) ?? "" : "",
+});
+  }
+
+  return rows;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
@@ -289,6 +467,10 @@ export default function DashboardPage() {
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [message, setMessage] = useState("");
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
+  const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
+const [roundInput, setRoundInput] = useState("1");
+const [isSavingRound, setIsSavingRound] = useState(false);
+const [isExportingTeams, setIsExportingTeams] = useState(false);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -349,6 +531,74 @@ export default function DashboardPage() {
     setTeamRowsByCoachId(nextMap);
   }, []);
 
+  const refreshCurrentRound = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("app_settings")
+      .select("environment, current_afl_round")
+      .eq("environment", APP_ENV)
+      .maybeSingle();
+
+    if (error) {
+      setMessage(`Current AFL round load failed: ${error.message}`);
+      setCurrentAflRound(null);
+      return;
+    }
+
+    const settings = normaliseAppSettingsRow(data);
+    setCurrentAflRound(settings.current_afl_round);
+    setRoundInput(String(settings.current_afl_round ?? 1));
+  }, []);
+
+  const saveCurrentRound = useCallback(async () => {
+    if (loginSession?.role !== "admin") {
+      return;
+    }
+
+    const parsedRound = Number(roundInput);
+
+    if (!Number.isInteger(parsedRound) || parsedRound < 1) {
+      setMessage("Please enter a valid AFL round number.");
+      return;
+    }
+
+    setIsSavingRound(true);
+    setMessage("");
+
+    const payload = {
+      environment: APP_ENV,
+      current_afl_round: parsedRound,
+    };
+
+    const { error: updateError, data: updateData } = await supabase
+      .from("app_settings")
+      .update(payload)
+      .eq("environment", APP_ENV)
+      .select("environment, current_afl_round");
+
+    if (updateError) {
+      setMessage(`AFL round save failed: ${updateError.message}`);
+      setIsSavingRound(false);
+      return;
+    }
+
+    if (!updateData || updateData.length === 0) {
+      const { error: insertError } = await supabase
+        .from("app_settings")
+        .insert(payload);
+
+      if (insertError) {
+        setMessage(`AFL round save failed: ${insertError.message}`);
+        setIsSavingRound(false);
+        return;
+      }
+    }
+
+    setCurrentAflRound(parsedRound);
+    setRoundInput(String(parsedRound));
+    setMessage(`Current AFL round updated to ${parsedRound}.`);
+    setIsSavingRound(false);
+  }, [loginSession?.role, roundInput]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -389,7 +639,7 @@ export default function DashboardPage() {
 
       setLoginSession(nextSession);
       setIsAuthenticating(false);
-      await refreshDashboardData();
+      await Promise.all([refreshDashboardData(), refreshCurrentRound()]);
     }
 
     void bootstrapAuth();
@@ -420,7 +670,7 @@ export default function DashboardPage() {
 
         setLoginSession(nextSession);
         setIsAuthenticating(false);
-        await refreshDashboardData();
+        await Promise.all([refreshDashboardData(), refreshCurrentRound()]);
       })();
     });
 
@@ -428,13 +678,13 @@ export default function DashboardPage() {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [loadProfileForUser, refreshDashboardData, router]);
+  }, [loadProfileForUser, refreshCurrentRound, refreshDashboardData, router]);
 
   useEffect(() => {
     if (!loginSession) return;
 
     const channel = supabase
-      .channel(`dashboard-team-selections-${APP_ENV}`)
+      .channel(`dashboard-live-${APP_ENV}`)
       .on(
         "postgres_changes",
         {
@@ -447,18 +697,91 @@ export default function DashboardPage() {
           void refreshDashboardData();
         }
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "app_settings",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshCurrentRound();
+        }
+      )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loginSession, refreshDashboardData]);
+  }, [loginSession, refreshCurrentRound, refreshDashboardData]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace("/login");
   }
 
+  async function handleExportTeamsXlsx() {
+  if (loginSession?.role !== "admin") {
+    setMessage("Only admin can export teams.");
+    return;
+  }
+
+  setIsExportingTeams(true);
+  setMessage("Preparing XLSX export...");
+
+  try {
+    const poolsByCoach: Record<number, ReturnType<typeof getPlayersForCoach>> = {};
+
+    for (const coach of coachConfigs) {
+      poolsByCoach[coach.id] = getPlayersForCoach({
+        coachId: coach.id,
+        coachName: coach.name,
+      });
+    }
+
+    const workbook = XLSX.utils.book_new();
+
+    const summaryRows = coachConfigs.map((coach) => {
+      const row = teamRowsByCoachId[coach.id];
+      const teamData = sanitiseTeamState(row?.team_data);
+      const selectedCount = getAllSelectedPlayers(teamData).length;
+
+      return {
+        Coach: coach.name,
+        "Coach ID": coach.id,
+        Submitted: row?.is_submitted ? "Yes" : "No",
+        "Last Updated": formatTimestamp(row?.updated_at ?? null),
+        "Submitted At": formatTimestamp(row?.submitted_at ?? null),
+        "Players Selected": selectedCount,
+      };
+    });
+
+    const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+
+    for (const coach of coachConfigs) {
+      const coachTeam = sanitiseTeamState(teamRowsByCoachId[coach.id]?.team_data);
+      const rows = buildExportRowsForCoach(coach.id, coachTeam, poolsByCoach);
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+
+      XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(coach.name));
+    }
+
+    const now = new Date();
+    const fileName = `coach-team-selections-${APP_ENV}-${now
+      .toISOString()
+      .replace(/[:.]/g, "-")}.xlsx`;
+
+    XLSX.writeFile(workbook, fileName);
+    setMessage(`XLSX export created: ${fileName}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown export error.";
+    setMessage(`XLSX export failed: ${message}`);
+  } finally {
+    setIsExportingTeams(false);
+  }
+}
   const dashboardTitle = useMemo(() => {
     if (!loginSession) return "Dashboard";
 
@@ -499,7 +822,7 @@ export default function DashboardPage() {
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => void refreshDashboardData()}
+                onClick={() => void Promise.all([refreshDashboardData(), refreshCurrentRound()])}
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
               >
                 Refresh
@@ -573,6 +896,135 @@ export default function DashboardPage() {
             </div>
           </Link>
         </section>
+
+        {loginSession.role === "admin" && (
+          <>
+            <section className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-6">
+              <h2 className="text-2xl font-bold">Round Control</h2>
+              <p className="mt-1 text-sm text-white/70">
+                Update the AFL round used by the opponent team screen.
+              </p>
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-[220px_180px_1fr] lg:items-end">
+                <div>
+                  <div className="mb-2 text-sm font-medium text-white/80">Current AFL Round</div>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={roundInput}
+                    onChange={(e) => setRoundInput(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void saveCurrentRound()}
+                  disabled={isSavingRound}
+                  className="rounded-xl border border-yellow-400/30 bg-yellow-500/20 px-4 py-3 text-sm font-semibold text-yellow-100 transition hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingRound ? "Saving..." : "Save AFL Round"}
+                </button>
+
+                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                    Live Setting
+                  </div>
+                  <div className="mt-2 text-lg font-bold">
+                    {currentAflRound ?? "Not set"}
+                  </div>
+                  <div className="mt-1 text-sm text-white/70">
+                    Opponent screen reads from app_settings.current_afl_round
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-green-500/20 bg-green-500/10 p-6">
+  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <h2 className="text-2xl font-bold">Coach Teams (Admin View)</h2>
+      <p className="mt-1 text-sm text-white/70">
+        View submission status and full team selections for all coaches.
+      </p>
+    </div>
+
+    <button
+      type="button"
+      onClick={() => void handleExportTeamsXlsx()}
+      disabled={isExportingTeams}
+      className="rounded-xl border border-green-400/30 bg-green-500/20 px-4 py-3 text-sm font-semibold text-green-100 transition hover:bg-green-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {isExportingTeams ? "Exporting..." : "Export Teams (XLSX)"}
+    </button>
+  </div>
+
+  <div className="mt-6 space-y-6">
+                {coachConfigs.map((coach) => {
+                  const row = teamRowsByCoachId[coach.id];
+
+                  const teamData =
+                    row?.team_data && typeof row.team_data === "object"
+                      ? (row.team_data as Record<string, any>)
+                      : {};
+
+                  return (
+                    <div
+                      key={coach.id}
+                      className="rounded-xl border border-white/10 bg-black/30 p-5"
+                    >
+                      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="text-lg font-semibold">
+                          {coach.name}
+                        </div>
+
+                        <div className="text-sm">
+                          {row?.is_submitted ? (
+                            <span className="text-green-400 font-semibold">Submitted</span>
+                          ) : (
+                            <span className="text-red-400 font-semibold">Not Submitted</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-2 text-xs text-white/50">
+                        Last updated: {row?.updated_at ?? "-"}
+                      </div>
+
+                      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        {POSITIONS.map((pos) => {
+                          const posData = teamData?.[pos] ?? {};
+                          const onField = posData?.onField ?? [];
+                          const emergencies = posData?.emergencies ?? [];
+
+                          return (
+                            <div
+                              key={pos}
+                              className="rounded-lg border border-white/10 bg-white/5 p-3"
+                            >
+                              <div className="text-sm font-bold mb-2">{pos}</div>
+
+                              <div className="text-xs text-white/60">On Field</div>
+                              <div className="text-sm">
+                                {onField.length > 0 ? onField.join(", ") : "-"}
+                              </div>
+
+                              <div className="mt-2 text-xs text-white/60">Emergencies</div>
+                              <div className="text-sm">
+                                {emergencies.length > 0 ? emergencies.join(", ") : "-"}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </>
+        )}
 
         <section className="grid gap-6 xl:grid-cols-1">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
