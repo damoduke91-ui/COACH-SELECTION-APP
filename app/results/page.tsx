@@ -43,6 +43,7 @@ export default function ResultsPage() {
   const [message, setMessage] = useState("");
   const [results, setResults] = useState<MatchResultRow[]>([]);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [isLoadingResults, setIsLoadingResults] = useState(false);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -159,17 +160,14 @@ export default function ResultsPage() {
     };
   }, [loadProfileForUser, router]);
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.replace("/login");
-  }
-
-    useEffect(() => {
+  useEffect(() => {
     if (!loginSession) return;
 
     let isMounted = true;
 
     async function loadResults() {
+      setIsLoadingResults(true);
+
       const { data, error } = await supabase
         .from("super8_match_results")
         .select(
@@ -184,6 +182,7 @@ export default function ResultsPage() {
         setMessage(`Results load failed: ${error.message}`);
         setResults([]);
         setSelectedRound(null);
+        setIsLoadingResults(false);
         return;
       }
 
@@ -208,6 +207,7 @@ export default function ResultsPage() {
         .filter((round): round is number => typeof round === "number");
 
       setSelectedRound(availableRounds.length > 0 ? Math.max(...availableRounds) : null);
+      setIsLoadingResults(false);
     }
 
     void loadResults();
@@ -216,6 +216,12 @@ export default function ResultsPage() {
       isMounted = false;
     };
   }, [loginSession]);
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.replace("/login");
+  }
+
   if (isAuthenticating) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
@@ -229,6 +235,16 @@ export default function ResultsPage() {
   if (!loginSession) {
     return null;
   }
+
+  const roundButtons = Array.from(
+    new Set(
+      results
+        .map((row) => row.round_number)
+        .filter((round): round is number => typeof round === "number")
+    )
+  ).sort((a, b) => b - a);
+
+  const filteredResults = results.filter((row) => row.round_number === selectedRound);
 
   return (
     <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
@@ -267,20 +283,15 @@ export default function ResultsPage() {
           ) : null}
         </section>
 
-        <section className="space-y-6">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <h2 className="mb-3 text-xl font-bold">Select Round</h2>
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+          <h2 className="mb-3 text-2xl font-bold">Results</h2>
 
-            <div className="flex flex-wrap gap-2">
-              {Array.from(
-                new Set(
-                  results
-                    .map((row) => row.round_number)
-                    .filter((round): round is number => typeof round === "number")
-                )
-              )
-                .sort((a, b) => b - a)
-                .map((round) => (
+          {isLoadingResults ? (
+            <div className="text-sm text-white/70">Loading results...</div>
+          ) : (
+            <>
+              <div className="mb-4 flex flex-wrap gap-2">
+                {roundButtons.map((round) => (
                   <button
                     key={round}
                     type="button"
@@ -294,64 +305,35 @@ export default function ResultsPage() {
                     Round {round}
                   </button>
                 ))}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h2 className="mb-4 text-2xl font-bold">
-              {selectedRound ? `Round ${selectedRound} Results` : "Results"}
-            </h2>
-
-            {selectedRound === null ? (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/70">
-                No results found yet.
               </div>
-            ) : (
-              <div className="space-y-4">
-                {results
-                  .filter((row) => row.round_number === selectedRound)
-                  .map((match, index) => {
+
+              {selectedRound === null ? (
+                <div className="text-sm text-white/70">No results found yet.</div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredResults.map((match, index) => {
                     const coach1Score = match.coach_1_score ?? 0;
                     const coach2Score = match.coach_2_score ?? 0;
-                    const isDraw = coach1Score === coach2Score;
-                    const coach1Won = coach1Score > coach2Score;
 
                     return (
                       <div
                         key={`${match.round_number ?? "x"}-${match.matchup_index ?? index}-${index}`}
-                        className="flex items-center justify-between rounded-xl border border-white/10 bg-black/30 p-4"
+                        className="rounded-xl border border-white/10 bg-black/20 p-4"
                       >
-                        <div className="flex flex-col">
-                          <span
-                            className={`font-semibold ${
-                              coach1Won && !isDraw ? "text-green-400" : "text-white"
-                            }`}
-                          >
-                            {match.coach_1_name ?? "Unknown Team"} ({coach1Score})
-                          </span>
-
-                          <span className="text-sm text-white/60">
-                            {isDraw ? "Drew with" : coach1Won ? "Defeated" : "Lost to"}
-                          </span>
-
-                          <span
-                            className={`font-semibold ${
-                              !coach1Won && !isDraw ? "text-green-400" : "text-white"
-                            }`}
-                          >
-                            {match.coach_2_name ?? "Unknown Team"} ({coach2Score})
-                          </span>
-                        </div>
-
                         <div className="text-sm text-white/60">
                           Match {match.matchup_index ?? index + 1}
+                        </div>
+                        <div className="mt-2 text-base font-semibold">
+                          {match.coach_1_name ?? "Unknown Team"} {coach1Score} v{" "}
+                          {match.coach_2_name ?? "Unknown Team"} {coach2Score}
                         </div>
                       </div>
                     );
                   })}
-              </div>
-            )}
-          </div>
+                </div>
+              )}
+            </>
+          )}
         </section>
       </div>
     </main>
