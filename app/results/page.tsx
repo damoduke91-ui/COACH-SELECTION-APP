@@ -20,12 +20,25 @@ type UserProfileRow = {
   coach_name: string | null;
 };
 
+type MatchResultRow = {
+  round_number: number;
+  afl_round: number | null;
+  matchup_index: number;
+  coach_1_name: string;
+  coach_1_score: number;
+  coach_2_name: string;
+  coach_2_score: number;
+};
+
 export default function ResultsPage() {
   const router = useRouter();
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [message, setMessage] = useState("");
+
+const [results, setResults] = useState<MatchResultRow[]>([]);
+const [selectedRound, setSelectedRound] = useState<number | null>(null);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -65,6 +78,34 @@ export default function ResultsPage() {
 
   useEffect(() => {
     let isMounted = true;
+
+    useEffect(() => {
+  if (!loginSession) return;
+
+  async function loadResults() {
+    const { data, error } = await supabase
+      .from("super8_match_results")
+      .select("*")
+      .order("round_number", { ascending: false })
+      .order("matchup_index", { ascending: true });
+
+    if (error) {
+      setMessage(`Results load failed: ${error.message}`);
+      return;
+    }
+
+    const rows = (data ?? []) as MatchResultRow[];
+
+    setResults(rows);
+
+    if (rows.length > 0) {
+      const latestRound = Math.max(...rows.map((r) => r.round_number));
+      setSelectedRound(latestRound);
+    }
+  }
+
+  void loadResults();
+}, [loginSession]);
 
     async function bootstrapAuth() {
       setIsAuthenticating(true);
@@ -198,21 +239,81 @@ export default function ResultsPage() {
           ) : null}
         </section>
 
-        <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-8">
-          <h2 className="text-2xl font-bold">Coming Soon</h2>
-          <p className="mt-3 text-sm leading-6 text-white/70">
-            This page will become the full season results page, including current round scores and
-            archived results from earlier rounds.
-          </p>
+<section className="space-y-6">
 
-          <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/60">
-            Planned future content:
-            <div className="mt-2">- current round results</div>
-            <div>- progressive live scoring updates</div>
-            <div>- previous round archive</div>
-            <div>- round-by-round result summaries</div>
-          </div>
-        </section>
+  {/* Round Selector */}
+  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+    <h2 className="text-xl font-bold mb-3">Select Round</h2>
+
+    <div className="flex flex-wrap gap-2">
+      {[...new Set(results.map(r => r.round_number))]
+        .sort((a, b) => b - a)
+        .map(round => (
+          <button
+            key={round}
+            onClick={() => setSelectedRound(round)}
+            className={`px-3 py-1 rounded-lg text-sm font-semibold border ${
+              selectedRound === round
+                ? "bg-violet-500 border-violet-400 text-white"
+                : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+            }`}
+          >
+            Round {round}
+          </button>
+        ))}
+    </div>
+  </div>
+
+  {/* Results */}
+  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+    <h2 className="text-2xl font-bold mb-4">
+      Round {selectedRound} Results
+    </h2>
+
+    <div className="space-y-4">
+      {results
+        .filter(r => r.round_number === selectedRound)
+        .map(match => {
+          const isDraw = match.coach_1_score === match.coach_2_score;
+          const coach1Won = match.coach_1_score > match.coach_2_score;
+
+          return (
+            <div
+              key={match.matchup_index}
+              className="rounded-xl border border-white/10 bg-black/30 p-4 flex justify-between items-center"
+            >
+              <div className="flex flex-col">
+                <span className={`font-semibold ${
+                  coach1Won ? "text-green-400" : "text-white"
+                }`}>
+                  {match.coach_1_name} ({match.coach_1_score})
+                </span>
+
+                <span className="text-sm text-white/60">
+                  {isDraw
+                    ? "Draw"
+                    : coach1Won
+                    ? "Defeated"
+                    : "Lost to"}
+                </span>
+
+                <span className={`font-semibold ${
+                  !coach1Won && !isDraw ? "text-green-400" : "text-white"
+                }`}>
+                  {match.coach_2_name} ({match.coach_2_score})
+                </span>
+              </div>
+
+              <div className="text-sm text-white/60">
+                Match {match.matchup_index}
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  </div>
+
+</section>
       </div>
     </main>
   );
