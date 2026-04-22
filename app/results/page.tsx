@@ -21,14 +21,19 @@ type UserProfileRow = {
 };
 
 type MatchResultRow = {
-  round_number: number;
+  round_number: number | null;
   afl_round: number | null;
-  matchup_index: number;
-  coach_1_name: string;
-  coach_1_score: number;
-  coach_2_name: string;
-  coach_2_score: number;
+  matchup_index: number | null;
+  coach_1_name: string | null;
+  coach_1_score: number | null;
+  coach_2_name: string | null;
+  coach_2_score: number | null;
 };
+
+function toNumber(value: unknown): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
 
 export default function ResultsPage() {
   const router = useRouter();
@@ -36,9 +41,8 @@ export default function ResultsPage() {
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [message, setMessage] = useState("");
-
-const [results, setResults] = useState<MatchResultRow[]>([]);
-const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [results, setResults] = useState<MatchResultRow[]>([]);
+  const [selectedRound, setSelectedRound] = useState<number | null>(null);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -78,34 +82,6 @@ const [selectedRound, setSelectedRound] = useState<number | null>(null);
 
   useEffect(() => {
     let isMounted = true;
-
-    useEffect(() => {
-  if (!loginSession) return;
-
-  async function loadResults() {
-    const { data, error } = await supabase
-      .from("super8_match_results")
-      .select("*")
-      .order("round_number", { ascending: false })
-      .order("matchup_index", { ascending: true });
-
-    if (error) {
-      setMessage(`Results load failed: ${error.message}`);
-      return;
-    }
-
-    const rows = (data ?? []) as MatchResultRow[];
-
-    setResults(rows);
-
-    if (rows.length > 0) {
-      const latestRound = Math.max(...rows.map((r) => r.round_number));
-      setSelectedRound(latestRound);
-    }
-  }
-
-  void loadResults();
-}, [loginSession]);
 
     async function bootstrapAuth() {
       setIsAuthenticating(true);
@@ -188,6 +164,58 @@ const [selectedRound, setSelectedRound] = useState<number | null>(null);
     router.replace("/login");
   }
 
+    useEffect(() => {
+    if (!loginSession) return;
+
+    let isMounted = true;
+
+    async function loadResults() {
+      const { data, error } = await supabase
+        .from("super8_match_results")
+        .select(
+          "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
+        )
+        .order("round_number", { ascending: false })
+        .order("matchup_index", { ascending: true });
+
+      if (!isMounted) return;
+
+      if (error) {
+        setMessage(`Results load failed: ${error.message}`);
+        setResults([]);
+        setSelectedRound(null);
+        return;
+      }
+
+      const rows: MatchResultRow[] = Array.isArray(data)
+        ? data.map((row) => ({
+            round_number: toNumber(row.round_number),
+            afl_round: toNumber(row.afl_round),
+            matchup_index: toNumber(row.matchup_index),
+            coach_1_name:
+              typeof row.coach_1_name === "string" ? row.coach_1_name : "Unknown Team",
+            coach_1_score: toNumber(row.coach_1_score),
+            coach_2_name:
+              typeof row.coach_2_name === "string" ? row.coach_2_name : "Unknown Team",
+            coach_2_score: toNumber(row.coach_2_score),
+          }))
+        : [];
+
+      setResults(rows);
+
+      const availableRounds = rows
+        .map((row) => row.round_number)
+        .filter((round): round is number => typeof round === "number");
+
+      setSelectedRound(availableRounds.length > 0 ? Math.max(...availableRounds) : null);
+    }
+
+    void loadResults();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loginSession]);
   if (isAuthenticating) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
@@ -239,81 +267,92 @@ const [selectedRound, setSelectedRound] = useState<number | null>(null);
           ) : null}
         </section>
 
-<section className="space-y-6">
+        <section className="space-y-6">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <h2 className="mb-3 text-xl font-bold">Select Round</h2>
 
-  {/* Round Selector */}
-  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-    <h2 className="text-xl font-bold mb-3">Select Round</h2>
-
-    <div className="flex flex-wrap gap-2">
-      {[...new Set(results.map(r => r.round_number))]
-        .sort((a, b) => b - a)
-        .map(round => (
-          <button
-            key={round}
-            onClick={() => setSelectedRound(round)}
-            className={`px-3 py-1 rounded-lg text-sm font-semibold border ${
-              selectedRound === round
-                ? "bg-violet-500 border-violet-400 text-white"
-                : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
-            }`}
-          >
-            Round {round}
-          </button>
-        ))}
-    </div>
-  </div>
-
-  {/* Results */}
-  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-    <h2 className="text-2xl font-bold mb-4">
-      Round {selectedRound} Results
-    </h2>
-
-    <div className="space-y-4">
-      {results
-        .filter(r => r.round_number === selectedRound)
-        .map(match => {
-          const isDraw = match.coach_1_score === match.coach_2_score;
-          const coach1Won = match.coach_1_score > match.coach_2_score;
-
-          return (
-            <div
-              key={match.matchup_index}
-              className="rounded-xl border border-white/10 bg-black/30 p-4 flex justify-between items-center"
-            >
-              <div className="flex flex-col">
-                <span className={`font-semibold ${
-                  coach1Won ? "text-green-400" : "text-white"
-                }`}>
-                  {match.coach_1_name} ({match.coach_1_score})
-                </span>
-
-                <span className="text-sm text-white/60">
-                  {isDraw
-                    ? "Draw"
-                    : coach1Won
-                    ? "Defeated"
-                    : "Lost to"}
-                </span>
-
-                <span className={`font-semibold ${
-                  !coach1Won && !isDraw ? "text-green-400" : "text-white"
-                }`}>
-                  {match.coach_2_name} ({match.coach_2_score})
-                </span>
-              </div>
-
-              <div className="text-sm text-white/60">
-                Match {match.matchup_index}
-              </div>
+            <div className="flex flex-wrap gap-2">
+              {Array.from(
+                new Set(
+                  results
+                    .map((row) => row.round_number)
+                    .filter((round): round is number => typeof round === "number")
+                )
+              )
+                .sort((a, b) => b - a)
+                .map((round) => (
+                  <button
+                    key={round}
+                    type="button"
+                    onClick={() => setSelectedRound(round)}
+                    className={`rounded-lg border px-3 py-1 text-sm font-semibold ${
+                      selectedRound === round
+                        ? "border-violet-400 bg-violet-500 text-white"
+                        : "border-white/10 bg-white/5 text-white/70 hover:bg-white/10"
+                    }`}
+                  >
+                    Round {round}
+                  </button>
+                ))}
             </div>
-          );
-        })}
-    </div>
-  </div>
+          </div>
 
-</section>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <h2 className="mb-4 text-2xl font-bold">
+              {selectedRound ? `Round ${selectedRound} Results` : "Results"}
+            </h2>
+
+            {selectedRound === null ? (
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/70">
+                No results found yet.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {results
+                  .filter((row) => row.round_number === selectedRound)
+                  .map((match, index) => {
+                    const coach1Score = match.coach_1_score ?? 0;
+                    const coach2Score = match.coach_2_score ?? 0;
+                    const isDraw = coach1Score === coach2Score;
+                    const coach1Won = coach1Score > coach2Score;
+
+                    return (
+                      <div
+                        key={`${match.round_number ?? "x"}-${match.matchup_index ?? index}-${index}`}
+                        className="flex items-center justify-between rounded-xl border border-white/10 bg-black/30 p-4"
+                      >
+                        <div className="flex flex-col">
+                          <span
+                            className={`font-semibold ${
+                              coach1Won && !isDraw ? "text-green-400" : "text-white"
+                            }`}
+                          >
+                            {match.coach_1_name ?? "Unknown Team"} ({coach1Score})
+                          </span>
+
+                          <span className="text-sm text-white/60">
+                            {isDraw ? "Drew with" : coach1Won ? "Defeated" : "Lost to"}
+                          </span>
+
+                          <span
+                            className={`font-semibold ${
+                              !coach1Won && !isDraw ? "text-green-400" : "text-white"
+                            }`}
+                          >
+                            {match.coach_2_name ?? "Unknown Team"} ({coach2Score})
+                          </span>
+                        </div>
+
+                        <div className="text-sm text-white/60">
+                          Match {match.matchup_index ?? index + 1}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     </main>
   );
