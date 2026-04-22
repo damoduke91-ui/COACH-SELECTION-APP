@@ -311,9 +311,18 @@ export default function ResultsPage() {
                 <div className="text-sm text-white/70">No results found yet.</div>
               ) : (
                 <div className="space-y-3">
-                  {filteredResults.map((match, index) => {
+                                    {filteredResults.map((match, index) => {
                     const coach1Score = match.coach_1_score ?? 0;
                     const coach2Score = match.coach_2_score ?? 0;
+                    const coach1Name = match.coach_1_name ?? "Unknown Team";
+                    const coach2Name = match.coach_2_name ?? "Unknown Team";
+                    const isDraw = coach1Score === coach2Score;
+                    const coach1Won = coach1Score > coach2Score;
+                    const winnerName = coach1Won ? coach1Name : coach2Name;
+                    const winnerScore = coach1Won ? coach1Score : coach2Score;
+                    const loserName = coach1Won ? coach2Name : coach1Name;
+                    const loserScore = coach1Won ? coach2Score : coach1Score;
+                    const margin = Math.abs(coach1Score - coach2Score);
 
                     return (
                       <div
@@ -323,10 +332,22 @@ export default function ResultsPage() {
                         <div className="text-sm text-white/60">
                           Match {match.matchup_index ?? index + 1}
                         </div>
-                        <div className="mt-2 text-base font-semibold">
-                          {match.coach_1_name ?? "Unknown Team"} {coach1Score} v{" "}
-                          {match.coach_2_name ?? "Unknown Team"} {coach2Score}
-                        </div>
+
+                        {isDraw ? (
+                          <div className="mt-2 text-base font-semibold text-white">
+                            {coach1Name} {coach1Score} drew with {coach2Name} {coach2Score}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="mt-2 text-base font-semibold text-white">
+                              <span className="text-green-400">{winnerName} {winnerScore}</span>{" "}
+                              def. {loserName} {loserScore}
+                            </div>
+                            <div className="mt-1 text-sm text-white/60">
+                              by {margin}
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
