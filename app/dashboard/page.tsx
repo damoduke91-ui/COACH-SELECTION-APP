@@ -1036,12 +1036,23 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           </>
         )}
 
-        <section className="grid gap-6 xl:grid-cols-1">
+                <section className="grid gap-6 xl:grid-cols-2">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-2xl font-bold">Ladder</h2>
-            <p className="mt-1 text-sm text-white/70">
-              Placeholder ladder for now. This can be wired to real standings later.
-            </p>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold">Ladder</h2>
+                <p className="mt-1 text-sm text-white/70">
+                  Quick ladder preview. Open the full ladder page for full standings.
+                </p>
+              </div>
+
+              <Link
+                href="/ladder"
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+              >
+                Open Ladder
+              </Link>
+            </div>
 
             <div className="mt-4 overflow-x-auto">
               <table className="min-w-full text-left text-sm">
@@ -1052,29 +1063,23 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
                     <th className="px-3 py-2">W</th>
                     <th className="px-3 py-2">L</th>
                     <th className="px-3 py-2">D</th>
-                    <th className="px-3 py-2">PF</th>
-                    <th className="px-3 py-2">PA</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ladderRows.map((row) => (
+                  {ladderRows.slice(0, 5).map((row) => (
                     <tr key={row.coachName} className="border-b border-white/5">
                       <td className="px-3 py-2">{row.position}</td>
                       <td className="px-3 py-2">{row.coachName}</td>
                       <td className="px-3 py-2">{row.wins}</td>
                       <td className="px-3 py-2">{row.losses}</td>
                       <td className="px-3 py-2">{row.draws}</td>
-                      <td className="px-3 py-2">{row.pointsFor}</td>
-                      <td className="px-3 py-2">{row.pointsAgainst}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
-        </section>
 
-        <section className="grid gap-6 xl:grid-cols-2">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <h2 className="text-2xl font-bold">Current Week Fixture</h2>
             <p className="mt-1 text-sm text-white/70">
@@ -1099,7 +1104,9 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
               ))}
             </div>
           </div>
+        </section>
 
+                <section className="grid gap-6 xl:grid-cols-1">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <h2 className="text-2xl font-bold">Next Week Fixture</h2>
             <p className="mt-1 text-sm text-white/70">
