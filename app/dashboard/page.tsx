@@ -845,7 +845,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           ) : null}
         </section>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <Link
             href="/select-team"
             className="rounded-2xl border border-violet-500/20 bg-violet-500/10 p-5 transition hover:bg-violet-500/20"
@@ -882,7 +882,17 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           >
             <div className="text-lg font-bold">Full Season Results</div>
             <div className="mt-2 text-sm text-white/75">
-              Placeholder page for full season results.
+              View completed round results and history.
+            </div>
+          </Link>
+
+          <Link
+            href="/ladder"
+            className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10"
+          >
+            <div className="text-lg font-bold">Ladder</div>
+            <div className="mt-2 text-sm text-white/75">
+              View the current ladder standings.
             </div>
           </Link>
 
