@@ -65,6 +65,25 @@ type AppSettingsRow = {
   current_afl_round: number | null;
 };
 
+type MatchResultRow = {
+  coach_1_name: string | null;
+  coach_1_score: number | null;
+  coach_2_name: string | null;
+  coach_2_score: number | null;
+};
+
+type LadderRow = {
+  team: string;
+  played: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  pointsFor: number;
+  pointsAgainst: number;
+  percentage: number;
+  ladderPoints: number;
+};
+
 const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
 
 const DEFAULT_ON_FIELD_SLOTS: Record<PositionKey, number> = {
@@ -232,18 +251,6 @@ function normaliseCoachConfigs(): CoachConfigShape[] {
   }
 
   return FALLBACK_COACH_CONFIGS;
-}
-
-function buildPlaceholderLadder(coaches: CoachConfigShape[]) {
-  return coaches.map((coach, index) => ({
-    position: index + 1,
-    coachName: coach.name,
-    wins: 0,
-    losses: 0,
-    draws: 0,
-    pointsFor: 0,
-    pointsAgainst: 0,
-  }));
 }
 
 function buildCurrentWeekFixture(coaches: CoachConfigShape[]) {
@@ -465,6 +472,7 @@ export default function DashboardPage() {
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
+  const [results, setResults] = useState<MatchResultRow[]>([]);
   const [message, setMessage] = useState("");
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
@@ -681,6 +689,23 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
   }, [loadProfileForUser, refreshCurrentRound, refreshDashboardData, router]);
 
   useEffect(() => {
+  async function loadResults() {
+    const { data, error } = await supabase
+      .from("super8_match_results")
+      .select("coach_1_name, coach_1_score, coach_2_name, coach_2_score");
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    setResults((data ?? []) as MatchResultRow[]);
+  }
+
+  loadResults();
+}, []);
+
+  useEffect(() => {
     if (!loginSession) return;
 
     const channel = supabase
@@ -715,6 +740,72 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
       void supabase.removeChannel(channel);
     };
   }, [loginSession, refreshCurrentRound, refreshDashboardData]);
+
+  const ladder = useMemo(() => {
+  const map = new Map<string, LadderRow>();
+
+  function getTeam(name: string): LadderRow {
+    if (!map.has(name)) {
+      map.set(name, {
+        team: name,
+        played: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        pointsFor: 0,
+        pointsAgainst: 0,
+        percentage: 0,
+        ladderPoints: 0,
+      });
+    }
+    return map.get(name)!;
+  }
+
+  results.forEach((match) => {
+    const t1 = getTeam(match.coach_1_name ?? "Unknown");
+    const t2 = getTeam(match.coach_2_name ?? "Unknown");
+
+    const s1 = match.coach_1_score ?? 0;
+    const s2 = match.coach_2_score ?? 0;
+
+    t1.played++;
+    t2.played++;
+
+    t1.pointsFor += s1;
+    t1.pointsAgainst += s2;
+
+    t2.pointsFor += s2;
+    t2.pointsAgainst += s1;
+
+    if (s1 > s2) {
+      t1.wins++;
+      t1.ladderPoints += 4;
+      t2.losses++;
+    } else if (s2 > s1) {
+      t2.wins++;
+      t2.ladderPoints += 4;
+      t1.losses++;
+    } else {
+      t1.draws++;
+      t2.draws++;
+      t1.ladderPoints += 2;
+      t2.ladderPoints += 2;
+    }
+  });
+
+  const rows = Array.from(map.values()).map((t) => ({
+    ...t,
+    percentage:
+      t.pointsAgainst > 0 ? (t.pointsFor / t.pointsAgainst) * 100 : 0,
+  }));
+
+  rows.sort((a, b) => {
+    if (b.ladderPoints !== a.ladderPoints) return b.ladderPoints - a.ladderPoints;
+    return b.pointsFor - a.pointsFor;
+  });
+
+  return rows;
+}, [results]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -792,7 +883,6 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     return `${loginSession.teamName || loginSession.coachName} Dashboard`;
   }, [loginSession]);
 
-  const ladderRows = useMemo(() => buildPlaceholderLadder(coachConfigs), [coachConfigs]);
   const currentWeekFixture = useMemo(() => buildCurrentWeekFixture(coachConfigs), [coachConfigs]);
   const nextWeekFixture = useMemo(() => buildNextWeekFixture(coachConfigs), [coachConfigs]);
 
@@ -1066,16 +1156,23 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
                   </tr>
                 </thead>
                 <tbody>
-                  {ladderRows.slice(0, 5).map((row) => (
-                    <tr key={row.coachName} className="border-b border-white/5">
-                      <td className="px-3 py-2">{row.position}</td>
-                      <td className="px-3 py-2">{row.coachName}</td>
-                      <td className="px-3 py-2">{row.wins}</td>
-                      <td className="px-3 py-2">{row.losses}</td>
-                      <td className="px-3 py-2">{row.draws}</td>
-                    </tr>
-                  ))}
-                </tbody>
+  {ladder.map((team, index) => {
+    const divider = index === 5;
+
+    return (
+      <tr
+        key={team.team}
+        className={`${divider ? "border-t-2 border-dashed border-white/40" : "border-b border-white/5"}`}
+      >
+        <td className="px-3 py-2">{index + 1}</td>
+        <td className="px-3 py-2">{team.team}</td>
+        <td className="px-3 py-2 text-center">{team.wins}</td>
+        <td className="px-3 py-2 text-center">{team.losses}</td>
+        <td className="px-3 py-2 text-center">{team.draws}</td>
+      </tr>
+    );
+  })}
+</tbody>
               </table>
             </div>
           </div>
