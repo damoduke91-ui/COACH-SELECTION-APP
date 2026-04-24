@@ -72,6 +72,27 @@ type MatchResultRow = {
   coach_2_score: number | null;
 };
 
+type FixtureRow = {
+  id: number;
+  environment: "production" | "preview";
+  competition_round: number;
+  afl_round: number;
+  matchup_index: number;
+  coach_id: number;
+  coach_name: string;
+  opponent_coach_id: number;
+  opponent_coach_name: string;
+};
+
+type DashboardFixtureMatch = {
+  key: string;
+  matchLabel: string;
+  home: string;
+  away: string;
+  competitionRound: number;
+  aflRound: number;
+};
+
 type LadderRow = {
   team: string;
   played: number;
@@ -253,39 +274,6 @@ function normaliseCoachConfigs(): CoachConfigShape[] {
   return FALLBACK_COACH_CONFIGS;
 }
 
-function buildCurrentWeekFixture(coaches: CoachConfigShape[]) {
-  return [
-    {
-      matchLabel: "Match 1",
-      home: coaches.find((coach) => coach.id === 1)?.name ?? "Coach 1",
-      away: coaches.find((coach) => coach.id === 2)?.name ?? "Coach 2",
-      score: "0.0 (0) vs 0.0 (0)",
-      status: "Coming soon",
-    },
-    {
-      matchLabel: "Match 2",
-      home: coaches.find((coach) => coach.id === 3)?.name ?? "Coach 3",
-      away: coaches.find((coach) => coach.id === 4)?.name ?? "Coach 4",
-      score: "0.0 (0) vs 0.0 (0)",
-      status: "Coming soon",
-    },
-    {
-      matchLabel: "Match 3",
-      home: coaches.find((coach) => coach.id === 5)?.name ?? "Coach 5",
-      away: coaches.find((coach) => coach.id === 6)?.name ?? "Coach 6",
-      score: "0.0 (0) vs 0.0 (0)",
-      status: "Coming soon",
-    },
-    {
-      matchLabel: "Match 4",
-      home: coaches.find((coach) => coach.id === 7)?.name ?? "Coach 7",
-      away: coaches.find((coach) => coach.id === 8)?.name ?? "Coach 8",
-      score: "0.0 (0) vs 0.0 (0)",
-      status: "Coming soon",
-    },
-  ];
-}
-
 function buildNextWeekFixture(coaches: CoachConfigShape[]) {
   return [
     {
@@ -325,6 +313,41 @@ function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
     environment: APP_ENV,
     current_afl_round: Number.isFinite(parsedRound) ? parsedRound : null,
   };
+}
+
+function sortFixtureRows(rows: FixtureRow[]): FixtureRow[] {
+  return [...rows].sort((a, b) => {
+    if (a.competition_round !== b.competition_round) {
+      return a.competition_round - b.competition_round;
+    }
+
+    if (a.matchup_index !== b.matchup_index) {
+      return a.matchup_index - b.matchup_index;
+    }
+
+    return a.coach_id - b.coach_id;
+  });
+}
+
+function buildDashboardFixtureMatches(rows: FixtureRow[]): DashboardFixtureMatch[] {
+  const matchMap = new Map<string, DashboardFixtureMatch>();
+
+  for (const row of sortFixtureRows(rows)) {
+    const key = `${row.competition_round}-${row.matchup_index}`;
+
+    if (!matchMap.has(key)) {
+      matchMap.set(key, {
+        key,
+        matchLabel: `Match ${row.matchup_index}`,
+        home: row.coach_name,
+        away: row.opponent_coach_name,
+        competitionRound: row.competition_round,
+        aflRound: row.afl_round,
+      });
+    }
+  }
+
+  return Array.from(matchMap.values());
 }
 
 function emptyTeamState(): TeamState {
@@ -476,6 +499,8 @@ export default function DashboardPage() {
   const [message, setMessage] = useState("");
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
+  const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
+  const [isLoadingFixture, setIsLoadingFixture] = useState(false);
 const [roundInput, setRoundInput] = useState("1");
 const [isSavingRound, setIsSavingRound] = useState(false);
 const [isExportingTeams, setIsExportingTeams] = useState(false);
@@ -549,13 +574,48 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     if (error) {
       setMessage(`Current AFL round load failed: ${error.message}`);
       setCurrentAflRound(null);
-      return;
+      return null;
     }
 
     const settings = normaliseAppSettingsRow(data);
     setCurrentAflRound(settings.current_afl_round);
     setRoundInput(String(settings.current_afl_round ?? 1));
+
+    return settings.current_afl_round;
   }, []);
+
+  const refreshFixtureForRound = useCallback(async (aflRound: number | null) => {
+    setIsLoadingFixture(true);
+
+    if (!aflRound || !Number.isFinite(aflRound)) {
+      setFixtureRows([]);
+      setIsLoadingFixture(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("season_fixture")
+      .select(
+        "id, environment, competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
+      )
+      .eq("environment", APP_ENV)
+      .eq("afl_round", aflRound);
+
+    if (error) {
+      setMessage(`Fixture load failed: ${error.message}`);
+      setFixtureRows([]);
+      setIsLoadingFixture(false);
+      return;
+    }
+
+    setFixtureRows(sortFixtureRows((data ?? []) as FixtureRow[]));
+    setIsLoadingFixture(false);
+  }, []);
+
+  const refreshDashboardFixture = useCallback(async () => {
+    const aflRound = await refreshCurrentRound();
+    await refreshFixtureForRound(aflRound);
+  }, [refreshCurrentRound, refreshFixtureForRound]);
 
   const saveCurrentRound = useCallback(async () => {
     if (loginSession?.role !== "admin") {
@@ -603,9 +663,10 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 
     setCurrentAflRound(parsedRound);
     setRoundInput(String(parsedRound));
+    await refreshFixtureForRound(parsedRound);
     setMessage(`Current AFL round updated to ${parsedRound}.`);
     setIsSavingRound(false);
-  }, [loginSession?.role, roundInput]);
+  }, [loginSession?.role, refreshFixtureForRound, roundInput]);
 
   useEffect(() => {
     let isMounted = true;
@@ -647,7 +708,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 
       setLoginSession(nextSession);
       setIsAuthenticating(false);
-      await Promise.all([refreshDashboardData(), refreshCurrentRound()]);
+      await Promise.all([refreshDashboardData(), refreshDashboardFixture()]);
     }
 
     void bootstrapAuth();
@@ -678,7 +739,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 
         setLoginSession(nextSession);
         setIsAuthenticating(false);
-        await Promise.all([refreshDashboardData(), refreshCurrentRound()]);
+        await Promise.all([refreshDashboardData(), refreshDashboardFixture()]);
       })();
     });
 
@@ -686,7 +747,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [loadProfileForUser, refreshCurrentRound, refreshDashboardData, router]);
+  }, [loadProfileForUser, refreshDashboardData, refreshDashboardFixture, router]);
 
   useEffect(() => {
   async function loadResults() {
@@ -731,7 +792,19 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           filter: `environment=eq.${APP_ENV}`,
         },
         () => {
-          void refreshCurrentRound();
+          void refreshDashboardFixture();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "season_fixture",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshDashboardFixture();
         }
       )
       .subscribe();
@@ -739,7 +812,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loginSession, refreshCurrentRound, refreshDashboardData]);
+  }, [loginSession, refreshDashboardData, refreshDashboardFixture]);
 
   const ladder = useMemo(() => {
   const map = new Map<string, LadderRow>();
@@ -883,7 +956,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     return `${loginSession.teamName || loginSession.coachName} Dashboard`;
   }, [loginSession]);
 
-  const currentWeekFixture = useMemo(() => buildCurrentWeekFixture(coachConfigs), [coachConfigs]);
+  const currentWeekFixture = useMemo(() => buildDashboardFixtureMatches(fixtureRows), [fixtureRows]);
   const nextWeekFixture = useMemo(() => buildNextWeekFixture(coachConfigs), [coachConfigs]);
 
   if (isAuthenticating) {
@@ -912,7 +985,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => void Promise.all([refreshDashboardData(), refreshCurrentRound()])}
+                onClick={() => void Promise.all([refreshDashboardData(), refreshDashboardFixture()])}
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
               >
                 Refresh
@@ -1180,25 +1253,36 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <h2 className="text-2xl font-bold">Current Week Fixture</h2>
             <p className="mt-1 text-sm text-white/70">
-              Progressive scores can be added here later.
+              Showing fixtures from season_fixture for AFL Round {currentAflRound ?? "—"}.
             </p>
 
             <div className="mt-4 space-y-3">
-              {currentWeekFixture.map((match) => (
-                <div
-                  key={match.matchLabel}
-                  className="rounded-xl border border-white/10 bg-black/20 p-4"
-                >
-                  <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                    {match.matchLabel}
-                  </div>
-                  <div className="mt-2 text-sm font-semibold text-white">
-                    {match.home} vs {match.away}
-                  </div>
-                  <div className="mt-1 text-sm text-white/70">{match.score}</div>
-                  <div className="mt-1 text-xs text-white/50">{match.status}</div>
+              {isLoadingFixture ? (
+                <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/60">
+                  Loading current fixture...
                 </div>
-              ))}
+              ) : currentWeekFixture.length > 0 ? (
+                currentWeekFixture.map((match) => (
+                  <div
+                    key={match.key}
+                    className="rounded-xl border border-white/10 bg-black/20 p-4"
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                      {match.matchLabel} • Competition Round {match.competitionRound}
+                    </div>
+                    <div className="mt-2 text-sm font-semibold text-white">
+                      {match.home} vs {match.away}
+                    </div>
+                    <div className="mt-1 text-xs text-white/50">
+                      AFL Round {match.aflRound}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-white/60">
+                  No fixture rows found for AFL Round {currentAflRound ?? "—"}. Check the admin round control and season_fixture table.
+                </div>
+              )}
             </div>
           </div>
         </section>
