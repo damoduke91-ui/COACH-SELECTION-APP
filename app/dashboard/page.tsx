@@ -1007,8 +1007,8 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           >
             <div className="text-lg font-bold">See Opponent&apos;s Team</div>
             <div className="mt-2 text-sm text-white/75">
-              Placeholder page for opposition team viewing.
-            </div>
+  View your opponents current round team
+</div>
           </Link>
 
           <Link
@@ -1017,8 +1017,8 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           >
             <div className="text-lg font-bold">Full Season Fixture</div>
             <div className="mt-2 text-sm text-white/75">
-              Placeholder page for full season fixtures.
-            </div>
+  View the full season fixture
+</div>
           </Link>
 
           <Link
