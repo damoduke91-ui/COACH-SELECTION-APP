@@ -325,6 +325,18 @@ function buildDashboardFixtureMatches(rows: FixtureRow[]): DashboardFixtureMatch
   return Array.from(matchMap.values());
 }
 
+function isUsersMatch(
+  match: DashboardFixtureMatch,
+  coachName: string | null | undefined
+): boolean {
+  if (!coachName) return false;
+
+  return (
+    match.home.toLowerCase() === coachName.toLowerCase() ||
+    match.away.toLowerCase() === coachName.toLowerCase()
+  );
+}
+
 function emptyTeamState(): TeamState {
   return {
     KD: { onField: [], emergencies: [] },
@@ -1289,19 +1301,36 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
                   Loading current fixture...
                 </div>
               ) : currentWeekFixture.length > 0 ? (
-                currentWeekFixture.map((match) => (
-                  <div
-                    key={match.key}
-                    className="rounded-lg border border-white/10 bg-black/20 p-3"
-                  >
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
-                      Current Round • {match.matchLabel}
-                    </div>
-                    <div className="mt-1 text-sm font-semibold text-white">
-                      {match.home} vs {match.away}
-                    </div>
-                  </div>
-                ))
+                currentWeekFixture.map((match) => {
+  const isUserMatch = isUsersMatch(match, loginSession?.coachName);
+
+  return (
+    <div
+      key={match.key}
+      className={`rounded-lg p-3 border ${
+        isUserMatch
+          ? "border-green-400/40 bg-green-500/10"
+          : "border-white/10 bg-black/20"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
+          Current Round • {match.matchLabel}
+        </div>
+
+        {isUserMatch ? (
+          <div className="shrink-0 text-[10px] font-bold text-green-300">
+            🔥 Your Match
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-1 text-sm font-semibold text-white">
+        {match.home} vs {match.away}
+      </div>
+    </div>
+  );
+})
               ) : (
                 <div className="rounded-lg border border-dashed border-white/10 bg-black/20 p-3 text-xs text-white/60">
                   No fixture rows found for AFL Round {currentAflRound ?? "—"}.
