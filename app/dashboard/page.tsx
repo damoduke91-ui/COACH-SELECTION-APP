@@ -274,31 +274,6 @@ function normaliseCoachConfigs(): CoachConfigShape[] {
   return FALLBACK_COACH_CONFIGS;
 }
 
-function buildNextWeekFixture(coaches: CoachConfigShape[]) {
-  return [
-    {
-      matchLabel: "Next Match 1",
-      home: coaches.find((coach) => coach.id === 1)?.name ?? "Coach 1",
-      away: coaches.find((coach) => coach.id === 3)?.name ?? "Coach 3",
-    },
-    {
-      matchLabel: "Next Match 2",
-      home: coaches.find((coach) => coach.id === 2)?.name ?? "Coach 4",
-      away: coaches.find((coach) => coach.id === 4)?.name ?? "Coach 2",
-    },
-    {
-      matchLabel: "Next Match 3",
-      home: coaches.find((coach) => coach.id === 5)?.name ?? "Coach 5",
-      away: coaches.find((coach) => coach.id === 7)?.name ?? "Coach 7",
-    },
-    {
-      matchLabel: "Next Match 4",
-      home: coaches.find((coach) => coach.id === 6)?.name ?? "Coach 6",
-      away: coaches.find((coach) => coach.id === 8)?.name ?? "Coach 8",
-    },
-  ];
-}
-
 function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
   const row = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
 
@@ -500,6 +475,7 @@ export default function DashboardPage() {
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
   const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
+  const [nextFixtureRows, setNextFixtureRows] = useState<FixtureRow[]>([]);
   const [isLoadingFixture, setIsLoadingFixture] = useState(false);
 const [roundInput, setRoundInput] = useState("1");
 const [isSavingRound, setIsSavingRound] = useState(false);
@@ -589,9 +565,12 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 
     if (!aflRound || !Number.isFinite(aflRound)) {
       setFixtureRows([]);
+      setNextFixtureRows([]);
       setIsLoadingFixture(false);
       return;
     }
+
+    const nextAflRound = aflRound + 1;
 
     const { data, error } = await supabase
       .from("season_fixture")
@@ -599,16 +578,19 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
         "id, environment, competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
       )
       .eq("environment", APP_ENV)
-      .eq("afl_round", aflRound);
+      .in("afl_round", [aflRound, nextAflRound]);
 
     if (error) {
       setMessage(`Fixture load failed: ${error.message}`);
       setFixtureRows([]);
+      setNextFixtureRows([]);
       setIsLoadingFixture(false);
       return;
     }
 
-    setFixtureRows(sortFixtureRows((data ?? []) as FixtureRow[]));
+    const rows = sortFixtureRows((data ?? []) as FixtureRow[]);
+    setFixtureRows(rows.filter((row) => row.afl_round === aflRound));
+    setNextFixtureRows(rows.filter((row) => row.afl_round === nextAflRound));
     setIsLoadingFixture(false);
   }, []);
 
@@ -957,7 +939,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
   }, [loginSession]);
 
   const currentWeekFixture = useMemo(() => buildDashboardFixtureMatches(fixtureRows), [fixtureRows]);
-  const nextWeekFixture = useMemo(() => buildNextWeekFixture(coachConfigs), [coachConfigs]);
+  const nextWeekFixture = useMemo(() => buildDashboardFixtureMatches(nextFixtureRows), [nextFixtureRows]);
 
   if (isAuthenticating) {
     return (
@@ -1199,118 +1181,122 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           </>
         )}
 
-                <section className="grid gap-6 xl:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <div className="flex items-center justify-between gap-4">
+        <section className="grid gap-4 xl:grid-cols-[1.05fr_1fr_0.7fr]">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-bold">Ladder</h2>
-                <p className="mt-1 text-sm text-white/70">
-                  Quick ladder preview. Open the full ladder page for full standings.
-                </p>
+                <h2 className="text-xl font-bold">Ladder</h2>
+                <p className="mt-1 text-xs text-white/60">Quick preview.</p>
               </div>
 
               <Link
                 href="/ladder"
-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/10"
               >
-                Open Ladder
+                Open
               </Link>
             </div>
 
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-left text-xs">
                 <thead className="text-white/50">
                   <tr className="border-b border-white/10">
-                    <th className="px-3 py-2">Pos</th>
-                    <th className="px-3 py-2">Coach</th>
-                    <th className="px-3 py-2">W</th>
-                    <th className="px-3 py-2">L</th>
-                    <th className="px-3 py-2">D</th>
+                    <th className="px-2 py-1.5">#</th>
+                    <th className="px-2 py-1.5">Coach</th>
+                    <th className="px-2 py-1.5 text-center">W</th>
+                    <th className="px-2 py-1.5 text-center">L</th>
+                    <th className="px-2 py-1.5 text-center">D</th>
                   </tr>
                 </thead>
                 <tbody>
-  {ladder.map((team, index) => {
-    const divider = index === 5;
+                  {ladder.map((team, index) => {
+                    const divider = index === 5;
 
-    return (
-      <tr
-        key={team.team}
-        className={`${divider ? "border-t-2 border-dashed border-white/40" : "border-b border-white/5"}`}
-      >
-        <td className="px-3 py-2">{index + 1}</td>
-        <td className="px-3 py-2">{team.team}</td>
-        <td className="px-3 py-2 text-center">{team.wins}</td>
-        <td className="px-3 py-2 text-center">{team.losses}</td>
-        <td className="px-3 py-2 text-center">{team.draws}</td>
-      </tr>
-    );
-  })}
-</tbody>
+                    return (
+                      <tr
+                        key={team.team}
+                        className={`${divider ? "border-t-2 border-dashed border-white/40" : "border-b border-white/5"}`}
+                      >
+                        <td className="px-2 py-1.5">{index + 1}</td>
+                        <td className="px-2 py-1.5 font-medium text-white/90">{team.team}</td>
+                        <td className="px-2 py-1.5 text-center">{team.wins}</td>
+                        <td className="px-2 py-1.5 text-center">{team.losses}</td>
+                        <td className="px-2 py-1.5 text-center">{team.draws}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
               </table>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-2xl font-bold">Current Week Fixture</h2>
-            <p className="mt-1 text-sm text-white/70">
-              Showing fixtures from season_fixture for AFL Round {currentAflRound ?? "—"}.
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <h2 className="text-xl font-bold">Current Week Fixture</h2>
+            <p className="mt-1 text-xs text-white/60">
+              AFL Round {currentAflRound ?? "—"}
             </p>
 
-            <div className="mt-4 space-y-3">
+            <div className="mt-3 space-y-2">
               {isLoadingFixture ? (
-                <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/60">
+                <div className="rounded-lg border border-white/10 bg-black/20 p-3 text-xs text-white/60">
                   Loading current fixture...
                 </div>
               ) : currentWeekFixture.length > 0 ? (
                 currentWeekFixture.map((match) => (
                   <div
                     key={match.key}
-                    className="rounded-xl border border-white/10 bg-black/20 p-4"
+                    className="rounded-lg border border-white/10 bg-black/20 p-3"
                   >
-                    <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                      {match.matchLabel} • Competition Round {match.competitionRound}
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
+                      {match.matchLabel} • CR {match.competitionRound}
                     </div>
-                    <div className="mt-2 text-sm font-semibold text-white">
+                    <div className="mt-1 text-sm font-semibold text-white">
                       {match.home} vs {match.away}
-                    </div>
-                    <div className="mt-1 text-xs text-white/50">
-                      AFL Round {match.aflRound}
                     </div>
                   </div>
                 ))
               ) : (
-                <div className="rounded-xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-white/60">
-                  No fixture rows found for AFL Round {currentAflRound ?? "—"}. Check the admin round control and season_fixture table.
+                <div className="rounded-lg border border-dashed border-white/10 bg-black/20 p-3 text-xs text-white/60">
+                  No fixture rows found for AFL Round {currentAflRound ?? "—"}.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+            <h2 className="text-base font-bold">Next Week</h2>
+            <p className="mt-0.5 text-[11px] text-white/50">
+              AFL Round {currentAflRound ? currentAflRound + 1 : "—"}
+            </p>
+
+            <div className="mt-2 space-y-1.5">
+              {isLoadingFixture ? (
+                <div className="rounded-md border border-white/10 bg-black/20 px-2 py-2 text-[11px] text-white/55">
+                  Loading...
+                </div>
+              ) : nextWeekFixture.length > 0 ? (
+                nextWeekFixture.map((match) => (
+                  <div
+                    key={match.key}
+                    className="rounded-md border border-white/10 bg-black/20 px-2 py-2"
+                  >
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-white/40">
+                      {match.matchLabel}
+                    </div>
+                    <div className="mt-0.5 text-xs font-semibold leading-snug text-white">
+                      {match.home} vs {match.away}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-md border border-dashed border-white/10 bg-black/20 px-2 py-2 text-[11px] text-white/55">
+                  No next fixture found.
                 </div>
               )}
             </div>
           </div>
         </section>
 
-                <section className="grid gap-6 xl:grid-cols-1">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-2xl font-bold">Next Week Fixture</h2>
-            <p className="mt-1 text-sm text-white/70">
-              Placeholder for next week&apos;s matchups.
-            </p>
-
-            <div className="mt-4 space-y-3">
-              {nextWeekFixture.map((match) => (
-                <div
-                  key={match.matchLabel}
-                  className="rounded-xl border border-white/10 bg-black/20 p-4"
-                >
-                  <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                    {match.matchLabel}
-                  </div>
-                  <div className="mt-2 text-sm font-semibold text-white">
-                    {match.home} vs {match.away}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
       </div>
     </main>
   );
