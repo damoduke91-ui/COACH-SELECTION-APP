@@ -1280,8 +1280,8 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <h2 className="text-xl font-bold">Current Week Fixture</h2>
             <p className="mt-1 text-xs text-white/60">
-              AFL Round {currentAflRound ?? "—"}
-            </p>
+  Super 8 Round {currentWeekFixture[0]?.competitionRound ?? "—"} / AFL Round {currentAflRound ?? "—"}
+</p>
 
             <div className="mt-3 space-y-2">
               {isLoadingFixture ? (
@@ -1295,8 +1295,8 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
                     className="rounded-lg border border-white/10 bg-black/20 p-3"
                   >
                     <div className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
-                      {match.matchLabel} • CR {match.competitionRound}
-                    </div>
+  Current Round
+</div>
                     <div className="mt-1 text-sm font-semibold text-white">
                       {match.home} vs {match.away}
                     </div>
