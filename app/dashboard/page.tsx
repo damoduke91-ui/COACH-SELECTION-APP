@@ -1295,8 +1295,8 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
                     className="rounded-lg border border-white/10 bg-black/20 p-3"
                   >
                     <div className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
-  Current Round
-</div>
+                      Current Round • {match.matchLabel}
+                    </div>
                     <div className="mt-1 text-sm font-semibold text-white">
                       {match.home} vs {match.away}
                     </div>
