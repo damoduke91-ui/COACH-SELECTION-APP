@@ -941,6 +941,53 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
   const currentWeekFixture = useMemo(() => buildDashboardFixtureMatches(fixtureRows), [fixtureRows]);
   const nextWeekFixture = useMemo(() => buildDashboardFixtureMatches(nextFixtureRows), [nextFixtureRows]);
 
+  const opponentTeamCardDescription = useMemo(() => {
+    if (!currentAflRound) {
+      return "View your opponent’s team";
+    }
+
+    if (loginSession?.role === "coach" && loginSession.coachId) {
+      const opponentNames = Array.from(
+        new Set(
+          fixtureRows
+            .filter((row) => row.coach_id === loginSession.coachId)
+            .map((row) => row.opponent_coach_name)
+            .filter((name) => name.trim().length > 0)
+        )
+      );
+
+      if (opponentNames.length === 1) {
+        return `AFL Round ${currentAflRound}: view ${opponentNames[0]}’s team`;
+      }
+
+      if (opponentNames.length > 1) {
+        return `AFL Round ${currentAflRound}: view ${opponentNames.join(" and ")} teams`;
+      }
+    }
+
+    if (currentWeekFixture.length > 0) {
+      return `AFL Round ${currentAflRound}: view all opponent teams`;
+    }
+
+    return `AFL Round ${currentAflRound}: view your opponent’s team`;
+  }, [currentAflRound, currentWeekFixture.length, fixtureRows, loginSession]);
+
+  const fixtureCardDescription = useMemo(() => {
+    if (!currentAflRound) {
+      return "See the full season fixture";
+    }
+
+    if (currentWeekFixture.length === 1) {
+      return `See the full season fixture • AFL Round ${currentAflRound} active`;
+    }
+
+    if (currentWeekFixture.length > 1) {
+      return `See the full season fixture • AFL Round ${currentAflRound} has ${currentWeekFixture.length} matchups`;
+    }
+
+    return `See the full season fixture • AFL Round ${currentAflRound} active`;
+  }, [currentAflRound, currentWeekFixture.length]);
+
   if (isAuthenticating) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
@@ -1007,8 +1054,8 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           >
             <div className="text-lg font-bold">See Opponent&apos;s Team</div>
             <div className="mt-2 text-sm text-white/75">
-  View your opponents current round team
-</div>
+              {opponentTeamCardDescription}
+            </div>
           </Link>
 
           <Link
@@ -1017,8 +1064,8 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           >
             <div className="text-lg font-bold">Full Season Fixture</div>
             <div className="mt-2 text-sm text-white/75">
-  View the full season fixture
-</div>
+              {fixtureCardDescription}
+            </div>
           </Link>
 
           <Link
