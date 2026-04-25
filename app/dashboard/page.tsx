@@ -66,6 +66,9 @@ type AppSettingsRow = {
 };
 
 type MatchResultRow = {
+  round_number: number | null;
+  afl_round: number | null;
+  matchup_index: number | null;
   coach_1_name: string | null;
   coach_1_score: number | null;
   coach_2_name: string | null;
@@ -335,6 +338,25 @@ function isUsersMatch(
     match.home.toLowerCase() === coachName.toLowerCase() ||
     match.away.toLowerCase() === coachName.toLowerCase()
   );
+}
+
+function formatResultForMatch(result: MatchResultRow | undefined): string | null {
+  if (!result) return null;
+
+  const coach1Score = Number(result.coach_1_score ?? 0);
+  const coach2Score = Number(result.coach_2_score ?? 0);
+  const coach1Name = result.coach_1_name ?? "Unknown Team";
+  const coach2Name = result.coach_2_name ?? "Unknown Team";
+
+  if (coach1Score === coach2Score) {
+    return `${coach1Name} ${coach1Score} drew with ${coach2Name} ${coach2Score}`;
+  }
+
+  if (coach1Score > coach2Score) {
+    return `${coach1Name} ${coach1Score} def. ${coach2Name} ${coach2Score}`;
+  }
+
+  return `${coach2Name} ${coach2Score} def. ${coach1Name} ${coach1Score}`;
 }
 
 function emptyTeamState(): TeamState {
@@ -747,7 +769,9 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
   async function loadResults() {
     const { data, error } = await supabase
       .from("super8_match_results")
-      .select("coach_1_name, coach_1_score, coach_2_name, coach_2_score");
+      .select(
+        "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
+      );
 
     if (error) {
       console.error(error);
@@ -950,7 +974,23 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     return `${loginSession.teamName || loginSession.coachName} Dashboard`;
   }, [loginSession]);
 
-  const currentWeekFixture = useMemo(() => buildDashboardFixtureMatches(fixtureRows), [fixtureRows]);
+  const currentWeekFixture = useMemo(
+  () => buildDashboardFixtureMatches(fixtureRows),
+  [fixtureRows]
+);
+
+/* 🔥 ADD THIS BLOCK DIRECTLY UNDER HERE */
+const currentRoundResultByMatch = useMemo(() => {
+  const map = new Map<number, MatchResultRow>();
+
+  for (const result of results) {
+    if (result.round_number === currentWeekFixture[0]?.competitionRound) {
+      map.set(Number(result.matchup_index), result);
+    }
+  }
+
+  return map;
+}, [currentWeekFixture, results]);
   const sortedCurrentWeekFixture = useMemo(() => {
   return [...currentWeekFixture].sort((a, b) => {
     const aIsUserMatch = isUsersMatch(a, loginSession?.coachName);
@@ -1320,6 +1360,8 @@ const fixtureCardDescription = useMemo(() => {
               ) : currentWeekFixture.length > 0 ? (
                 sortedCurrentWeekFixture.map((match) => {
   const isUserMatch = isUsersMatch(match, loginSession?.coachName);
+  const result = currentRoundResultByMatch.get(Number(match.matchLabel.replace("Match ", "")));
+  const resultText = formatResultForMatch(result);
 
   return (
     <Link key={match.key} href="/opponent-team">
@@ -1343,8 +1385,14 @@ const fixtureCardDescription = useMemo(() => {
         </div>
 
         <div className="mt-1 text-sm font-semibold text-white">
-          {match.home} vs {match.away}
+          {resultText ?? `${match.home} vs ${match.away}`}
         </div>
+
+        {resultText ? (
+          <div className="mt-1 text-[11px] font-semibold text-green-300">
+            Result entered
+          </div>
+        ) : null}
       </div>
     </Link>
   );
