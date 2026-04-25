@@ -982,11 +982,11 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     );
 
     if (opponentNames.length === 1) {
-      return `Super 8 Round ${currentSuper8Round}: view ${opponentNames[0]}’s team`;
+      return `Super 8 Round ${currentSuper8Round}: vs ${opponentNames[0]}`;
     }
 
     if (opponentNames.length > 1) {
-      return `Super 8 Round ${currentSuper8Round}: view ${opponentNames.join(" and ")} teams`;
+      return `Super 8 Round ${currentSuper8Round}: vs ${opponentNames.join(" and ")}`;
     }
   }
 
@@ -997,8 +997,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
   return `Super 8 Round ${currentSuper8Round}: view your opponent’s team`;
 }, [currentWeekFixture, fixtureRows, loginSession]);
 
-
-  const fixtureCardDescription = useMemo(() => {
+const fixtureCardDescription = useMemo(() => {
   const currentSuper8Round = currentWeekFixture[0]?.competitionRound ?? null;
 
   if (!currentSuper8Round) {
