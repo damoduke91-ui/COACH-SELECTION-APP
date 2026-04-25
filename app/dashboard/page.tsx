@@ -965,35 +965,38 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
   const nextWeekFixture = useMemo(() => buildDashboardFixtureMatches(nextFixtureRows), [nextFixtureRows]);
 
   const opponentTeamCardDescription = useMemo(() => {
-    if (!currentAflRound) {
-      return "View your opponent’s team";
+  const currentSuper8Round = currentWeekFixture[0]?.competitionRound ?? null;
+
+  if (!currentSuper8Round) {
+    return "View your opponent’s team";
+  }
+
+  if (loginSession?.role === "coach" && loginSession.coachId) {
+    const opponentNames = Array.from(
+      new Set(
+        fixtureRows
+          .filter((row) => row.coach_id === loginSession.coachId)
+          .map((row) => row.opponent_coach_name)
+          .filter((name) => name.trim().length > 0)
+      )
+    );
+
+    if (opponentNames.length === 1) {
+      return `Super 8 Round ${currentSuper8Round}: view ${opponentNames[0]}’s team`;
     }
 
-    if (loginSession?.role === "coach" && loginSession.coachId) {
-      const opponentNames = Array.from(
-        new Set(
-          fixtureRows
-            .filter((row) => row.coach_id === loginSession.coachId)
-            .map((row) => row.opponent_coach_name)
-            .filter((name) => name.trim().length > 0)
-        )
-      );
-
-      if (opponentNames.length === 1) {
-        return `AFL Round ${currentAflRound}: view ${opponentNames[0]}’s team`;
-      }
-
-      if (opponentNames.length > 1) {
-        return `AFL Round ${currentAflRound}: view ${opponentNames.join(" and ")} teams`;
-      }
+    if (opponentNames.length > 1) {
+      return `Super 8 Round ${currentSuper8Round}: view ${opponentNames.join(" and ")} teams`;
     }
+  }
 
-    if (currentWeekFixture.length > 0) {
-      return `AFL Round ${currentAflRound}: view all opponent teams`;
-    }
+  if (currentWeekFixture.length > 0) {
+    return `Super 8 Round ${currentSuper8Round}: view all opponent teams`;
+  }
 
-    return `AFL Round ${currentAflRound}: view your opponent’s team`;
-  }, [currentAflRound, currentWeekFixture.length, fixtureRows, loginSession]);
+  return `Super 8 Round ${currentSuper8Round}: view your opponent’s team`;
+}, [currentWeekFixture, fixtureRows, loginSession]);
+
 
   const fixtureCardDescription = useMemo(() => {
     if (!currentAflRound) {
