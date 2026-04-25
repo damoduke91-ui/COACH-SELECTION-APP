@@ -999,20 +999,24 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 
 
   const fixtureCardDescription = useMemo(() => {
-    if (!currentAflRound) {
-      return "See the full season fixture";
-    }
+  const currentSuper8Round = currentWeekFixture[0]?.competitionRound ?? null;
 
-    if (currentWeekFixture.length === 1) {
-      return `See the full season fixture • AFL Round ${currentAflRound} active`;
-    }
+  if (!currentSuper8Round) {
+    return "See the full season fixture";
+  }
 
-    if (currentWeekFixture.length > 1) {
-      return `See the full season fixture • AFL Round ${currentAflRound} has ${currentWeekFixture.length} matchups`;
-    }
+  const matchupCount = currentWeekFixture.length;
 
-    return `See the full season fixture • AFL Round ${currentAflRound} active`;
-  }, [currentAflRound, currentWeekFixture.length]);
+  if (matchupCount === 0) {
+    return `Super 8 Round ${currentSuper8Round}`;
+  }
+
+  if (matchupCount === 1) {
+    return `Super 8 Round ${currentSuper8Round} has 1 matchup`;
+  }
+
+  return `Super 8 Round ${currentSuper8Round} has ${matchupCount} matchups`;
+}, [currentWeekFixture]);
 
   if (isAuthenticating) {
     return (
