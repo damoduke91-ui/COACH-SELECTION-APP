@@ -951,6 +951,17 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
   }, [loginSession]);
 
   const currentWeekFixture = useMemo(() => buildDashboardFixtureMatches(fixtureRows), [fixtureRows]);
+  const sortedCurrentWeekFixture = useMemo(() => {
+  return [...currentWeekFixture].sort((a, b) => {
+    const aIsUserMatch = isUsersMatch(a, loginSession?.coachName);
+    const bIsUserMatch = isUsersMatch(b, loginSession?.coachName);
+
+    if (aIsUserMatch && !bIsUserMatch) return -1;
+    if (!aIsUserMatch && bIsUserMatch) return 1;
+
+    return a.matchLabel.localeCompare(b.matchLabel);
+  });
+}, [currentWeekFixture, loginSession?.coachName]);
   const nextWeekFixture = useMemo(() => buildDashboardFixtureMatches(nextFixtureRows), [nextFixtureRows]);
 
   const opponentTeamCardDescription = useMemo(() => {
@@ -1301,34 +1312,35 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
                   Loading current fixture...
                 </div>
               ) : currentWeekFixture.length > 0 ? (
-                currentWeekFixture.map((match) => {
+                sortedCurrentWeekFixture.map((match) => {
   const isUserMatch = isUsersMatch(match, loginSession?.coachName);
 
   return (
-    <div
-      key={match.key}
-      className={`rounded-lg p-3 border ${
-        isUserMatch
-          ? "border-green-400/40 bg-green-500/10"
-          : "border-white/10 bg-black/20"
-      }`}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
-          Current Round • {match.matchLabel}
+    <Link key={match.key} href="/opponent-team">
+      <div
+        className={`rounded-lg p-3 border cursor-pointer transition ${
+          isUserMatch
+            ? "border-green-400/40 bg-green-500/10 hover:bg-green-500/20"
+            : "border-white/10 bg-black/20 hover:bg-white/10"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
+            Current Round • {match.matchLabel}
+          </div>
+
+          {isUserMatch ? (
+            <div className="shrink-0 text-[10px] font-bold text-green-300">
+              🔥 Your Match
+            </div>
+          ) : null}
         </div>
 
-        {isUserMatch ? (
-          <div className="shrink-0 text-[10px] font-bold text-green-300">
-            🔥 Your Match
-          </div>
-        ) : null}
+        <div className="mt-1 text-sm font-semibold text-white">
+          {match.home} vs {match.away}
+        </div>
       </div>
-
-      <div className="mt-1 text-sm font-semibold text-white">
-        {match.home} vs {match.away}
-      </div>
-    </div>
+    </Link>
   );
 })
               ) : (
