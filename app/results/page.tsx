@@ -113,6 +113,25 @@ type PlayerBreakdownRow = {
   replacedPlayerName: string | null;
 };
 
+type CoachAutoScoreDetails = {
+  coachId: number;
+  coachName: string;
+  submission: RoundSubmissionRow | null;
+  rows: PlayerBreakdownRow[];
+  teamTotal: number;
+  countedPlayers: number;
+  pendingPlayers: number;
+};
+
+type MatchAutoOutcome = {
+  label: string;
+  margin: number | null;
+  isDraw: boolean;
+  winnerName: string | null;
+  loserName: string | null;
+  isReadyToScore: boolean;
+};
+
 type FixtureMatch = {
   key: string;
   roundNumber: number;
@@ -122,11 +141,6 @@ type FixtureMatch = {
   coach1Name: string;
   coach2Id: number;
   coach2Name: string;
-};
-
-type ResultFormState = {
-  coach1Score: string;
-  coach2Score: string;
 };
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -467,6 +481,61 @@ function calculateTeamTotal(rows: PlayerBreakdownRow[]): number {
   }, 0);
 }
 
+function getAutoMatchOutcome(params: {
+  coach1Name: string;
+  coach1Total: number;
+  coach1HasSubmission: boolean;
+  coach2Name: string;
+  coach2Total: number;
+  coach2HasSubmission: boolean;
+  pendingPlayers: number;
+}): MatchAutoOutcome {
+  const isReadyToScore = params.coach1HasSubmission && params.coach2HasSubmission;
+
+  if (!isReadyToScore) {
+    return {
+      label: "Waiting for submitted teams",
+      margin: null,
+      isDraw: false,
+      winnerName: null,
+      loserName: null,
+      isReadyToScore: false,
+    };
+  }
+
+  const pendingLabel =
+    params.pendingPlayers > 0
+      ? ` (${params.pendingPlayers} selected player${params.pendingPlayers === 1 ? "" : "s"} pending)`
+      : "";
+
+  if (params.coach1Total === params.coach2Total) {
+    return {
+      label: `${params.coach1Name} ${formatScore(params.coach1Total)} drew with ${params.coach2Name} ${formatScore(params.coach2Total)}${pendingLabel}`,
+      margin: 0,
+      isDraw: true,
+      winnerName: null,
+      loserName: null,
+      isReadyToScore: true,
+    };
+  }
+
+  const coach1Won = params.coach1Total > params.coach2Total;
+  const winnerName = coach1Won ? params.coach1Name : params.coach2Name;
+  const loserName = coach1Won ? params.coach2Name : params.coach1Name;
+  const winnerScore = coach1Won ? params.coach1Total : params.coach2Total;
+  const loserScore = coach1Won ? params.coach2Total : params.coach1Total;
+  const margin = Math.abs(params.coach1Total - params.coach2Total);
+
+  return {
+    label: `${winnerName} ${formatScore(winnerScore)} def. ${loserName} ${formatScore(loserScore)}${pendingLabel}`,
+    margin,
+    isDraw: false,
+    winnerName,
+    loserName,
+    isReadyToScore: true,
+  };
+}
+
 function getPlayingStatus(row: PlayerBreakdownRow): string {
   if (row.countsToTotal && row.replacedPlayerName) {
     return `Counts for ${row.replacedPlayerName}`;
@@ -543,9 +612,7 @@ export default function ResultsPage() {
   const [roundSubmissions, setRoundSubmissions] = useState<RoundSubmissionRow[]>([]);
   const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
-  const [scoreForms, setScoreForms] = useState<Record<string, ResultFormState>>({});
   const [isLoadingPageData, setIsLoadingPageData] = useState(false);
-  const [savingKey, setSavingKey] = useState<string | null>(null);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -988,10 +1055,6 @@ export default function ResultsPage() {
     return Array.from(new Set(rounds)).sort((a, b) => a - b);
   }, [selectedRoundMatches]);
 
-  const selectedRoundCompletedCount = selectedRoundMatches.filter((match) =>
-    resultByRoundAndMatch.has(buildResultKey(match.roundNumber, match.matchupIndex))
-  ).length;
-
   const submissionByRoundAndCoach = useMemo(() => {
     const map = new Map<string, RoundSubmissionRow>();
     const latestByCoach = new Map<number, RoundSubmissionRow>();
@@ -1017,91 +1080,6 @@ export default function ResultsPage() {
       submissionByRoundAndCoach.latestByCoach.get(coachId) ??
       null
     );
-  }
-
-  function getScoreForm(match: FixtureMatch, result: MatchResultRow | null): ResultFormState {
-    const key = buildResultKey(match.roundNumber, match.matchupIndex);
-    const existingForm = scoreForms[key];
-
-    if (existingForm) {
-      return existingForm;
-    }
-
-    return {
-      coach1Score: result ? String(result.coach_1_score) : "",
-      coach2Score: result ? String(result.coach_2_score) : "",
-    };
-  }
-
-  function updateScoreForm(match: FixtureMatch, field: keyof ResultFormState, value: string) {
-    const key = buildResultKey(match.roundNumber, match.matchupIndex);
-
-    setScoreForms((previous) => ({
-      ...previous,
-      [key]: {
-        coach1Score: previous[key]?.coach1Score ?? "",
-        coach2Score: previous[key]?.coach2Score ?? "",
-        [field]: value,
-      },
-    }));
-  }
-
-  async function handleSaveResult(match: FixtureMatch, result: MatchResultRow | null) {
-    if (loginSession?.role !== "admin") {
-      setMessage("Only admin can save results.");
-      return;
-    }
-
-    const key = buildResultKey(match.roundNumber, match.matchupIndex);
-    const form = getScoreForm(match, result);
-    const coach1Score = Number(form.coach1Score);
-    const coach2Score = Number(form.coach2Score);
-
-    if (!Number.isFinite(coach1Score) || !Number.isFinite(coach2Score)) {
-      setMessage("Please enter valid scores for both teams.");
-      return;
-    }
-
-    setSavingKey(key);
-    setMessage("");
-
-    const payload = {
-      round_number: match.roundNumber,
-      afl_round: match.aflRound,
-      matchup_index: match.matchupIndex,
-      coach_1_id: match.coach1Id,
-      coach_1_name: match.coach1Name,
-      coach_1_score: coach1Score,
-      coach_2_id: match.coach2Id,
-      coach_2_name: match.coach2Name,
-      coach_2_score: coach2Score,
-      imported_at: new Date().toISOString(),
-    };
-
-    if (result?.id) {
-      const { error } = await supabase
-        .from("super8_match_results")
-        .update(payload)
-        .eq("id", result.id);
-
-      if (error) {
-        setMessage(`Result update failed: ${error.message}`);
-        setSavingKey(null);
-        return;
-      }
-    } else {
-      const { error } = await supabase.from("super8_match_results").insert(payload);
-
-      if (error) {
-        setMessage(`Result save failed: ${error.message}`);
-        setSavingKey(null);
-        return;
-      }
-    }
-
-    await refreshResults();
-    setMessage(`Saved result for Super 8 Round ${match.roundNumber}, Match ${match.matchupIndex}.`);
-    setSavingKey(null);
   }
 
   async function handleLogout() {
@@ -1193,13 +1171,13 @@ export default function ResultsPage() {
 
           <div className="rounded-2xl border border-green-500/20 bg-green-500/10 p-5">
             <div className="text-xs font-semibold uppercase tracking-wide text-green-200/80">
-              Results Entered
+              Live Matchups
             </div>
             <div className="mt-2 text-3xl font-bold">
-              {selectedRoundCompletedCount}/{selectedRoundMatches.length}
+              {selectedRoundMatches.length}/{selectedRoundMatches.length}
             </div>
             <div className="mt-1 text-sm text-white/70">
-              Matchups completed for selected round
+              Matchups calculating for selected round
             </div>
           </div>
         </section>
@@ -1209,7 +1187,7 @@ export default function ResultsPage() {
             <div>
               <h2 className="text-2xl font-bold">Round Results</h2>
               <p className="mt-1 text-sm text-white/70">
-                Results are grouped by Super 8 round. Admin can enter or update scores.
+                Results are calculated live from submitted teams, imported AFL stats, and emergency replacements.
               </p>
             </div>
 
@@ -1255,10 +1233,50 @@ export default function ResultsPage() {
                 {selectedRoundMatches.map((match) => {
                   const key = buildResultKey(match.roundNumber, match.matchupIndex);
                   const result = resultByRoundAndMatch.get(key) ?? null;
-                  const outcome = getResultOutcome(result);
                   const isUserMatch = isUsersMatch(match, loginSession.coachId);
-                  const form = getScoreForm(match, result);
-                  const isSaving = savingKey === key;
+                  const statsMap = buildStatsMapForRound(playerStats, match.aflRound);
+                  const importedClubCodes = buildImportedClubSetForRound(playerStats, match.aflRound);
+
+                  const coachDetails: CoachAutoScoreDetails[] = [match.coach1Id, match.coach2Id].map((coachId) => {
+                    const coachName = coachId === match.coach1Id ? match.coach1Name : match.coach2Name;
+                    const submission = getCoachSubmission(match.roundNumber, coachId);
+                    const playerLookup = buildPlayerClubLookup({ coachId, coachName });
+                    const rows = buildCoachBreakdownRows(
+                      submission?.team_data,
+                      statsMap,
+                      importedClubCodes,
+                      playerLookup
+                    );
+                    const teamTotal = calculateTeamTotal(rows);
+                    const countedPlayers = rows.filter((row) => row.countsToTotal).length;
+                    const pendingPlayers = rows.filter(
+                      (row) => row.selectedType === "X" && !row.played && !row.clubImported
+                    ).length;
+
+                    return {
+                      coachId,
+                      coachName,
+                      submission,
+                      rows,
+                      teamTotal,
+                      countedPlayers,
+                      pendingPlayers,
+                    };
+                  });
+
+                  const coach1Details = coachDetails[0];
+                  const coach2Details = coachDetails[1];
+                  const totalPendingPlayers =
+                    (coach1Details?.pendingPlayers ?? 0) + (coach2Details?.pendingPlayers ?? 0);
+                  const outcome = getAutoMatchOutcome({
+                    coach1Name: match.coach1Name,
+                    coach1Total: coach1Details?.teamTotal ?? 0,
+                    coach1HasSubmission: Boolean(coach1Details?.submission),
+                    coach2Name: match.coach2Name,
+                    coach2Total: coach2Details?.teamTotal ?? 0,
+                    coach2HasSubmission: Boolean(coach2Details?.submission),
+                    pendingPlayers: totalPendingPlayers,
+                  });
 
                   return (
                     <div
@@ -1288,12 +1306,18 @@ export default function ResultsPage() {
 
                           <span
                             className={`rounded-full border px-3 py-1 text-xs font-bold ${
-                              result
-                                ? "border-green-400/30 bg-green-500/15 text-green-200"
+                              outcome.isReadyToScore
+                                ? totalPendingPlayers > 0
+                                  ? "border-amber-400/30 bg-amber-500/15 text-amber-100"
+                                  : "border-green-400/30 bg-green-500/15 text-green-200"
                                 : "border-white/10 bg-white/5 text-white/55"
                             }`}
                           >
-                            {result ? "Result entered" : "Awaiting result"}
+                            {outcome.isReadyToScore
+                              ? totalPendingPlayers > 0
+                                ? "Live / pending"
+                                : "Live total"
+                              : "Waiting for teams"}
                           </span>
                         </div>
                       </div>
@@ -1305,30 +1329,22 @@ export default function ResultsPage() {
                         ) : null}
                         {result ? (
                           <div className="mt-2 text-xs text-white/45">
-                            Last saved: {formatTimestamp(result.imported_at)}
+                            Previous saved manual result: {result.coach_1_name} {formatScore(result.coach_1_score)} - {result.coach_2_name} {formatScore(result.coach_2_score)}
+                            {" "}• saved {formatTimestamp(result.imported_at)}
                           </div>
                         ) : null}
                       </div>
 
                       <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                        {[match.coach1Id, match.coach2Id].map((coachId) => {
-                          const coachName = coachId === match.coach1Id ? match.coach1Name : match.coach2Name;
-                          const submission = getCoachSubmission(match.roundNumber, coachId);
-                          const statsMap = buildStatsMapForRound(playerStats, match.aflRound);
-                          const importedClubCodes = buildImportedClubSetForRound(playerStats, match.aflRound);
-                          const playerLookup = buildPlayerClubLookup({ coachId, coachName });
-                          const rows = buildCoachBreakdownRows(
-                            submission?.team_data,
-                            statsMap,
-                            importedClubCodes,
-                            playerLookup
-                          );
-                          const teamTotal = calculateTeamTotal(rows);
-                          const countedPlayers = rows.filter((row) => row.countsToTotal).length;
-                          const pendingPlayers = rows.filter(
-                            (row) => row.selectedType === "X" && !row.played && !row.clubImported
-                          ).length;
-
+                        {coachDetails.map(({
+                          coachId,
+                          coachName,
+                          submission,
+                          rows,
+                          teamTotal,
+                          countedPlayers,
+                          pendingPlayers,
+                        }) => {
                           return (
                             <div
                               key={`${match.key}-${coachId}-breakdown`}
@@ -1435,48 +1451,10 @@ export default function ResultsPage() {
                         })}
                       </div>
 
-                      {loginSession.role === "admin" ? (
-                        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
-                          <label className="block">
-                            <div className="mb-1 text-xs font-semibold text-white/60">
-                              {match.coach1Name} score
-                            </div>
-                            <input
-                              type="number"
-                              value={form.coach1Score}
-                              onChange={(event) =>
-                                updateScoreForm(match, "coach1Score", event.target.value)
-                              }
-                              className="w-full rounded-xl border border-white/10 bg-neutral-900 px-3 py-2 text-white outline-none"
-                              placeholder="0"
-                            />
-                          </label>
+                      <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/10 p-4 text-sm text-sky-100/80">
+                        Auto scoring is now displayed live from imported player stats. This page is not writing calculated totals back to the database yet.
+                      </div>
 
-                          <label className="block">
-                            <div className="mb-1 text-xs font-semibold text-white/60">
-                              {match.coach2Name} score
-                            </div>
-                            <input
-                              type="number"
-                              value={form.coach2Score}
-                              onChange={(event) =>
-                                updateScoreForm(match, "coach2Score", event.target.value)
-                              }
-                              className="w-full rounded-xl border border-white/10 bg-neutral-900 px-3 py-2 text-white outline-none"
-                              placeholder="0"
-                            />
-                          </label>
-
-                          <button
-                            type="button"
-                            onClick={() => void handleSaveResult(match, result)}
-                            disabled={isSaving}
-                            className="rounded-xl border border-violet-400/30 bg-violet-500/20 px-4 py-2 text-sm font-semibold text-violet-100 transition hover:bg-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {isSaving ? "Saving..." : result ? "Update" : "Save"}
-                          </button>
-                        </div>
-                      ) : null}
                     </div>
                   );
                 })}
