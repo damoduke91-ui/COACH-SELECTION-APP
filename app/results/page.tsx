@@ -50,6 +50,60 @@ type MatchResultRow = {
   imported_at: string;
 };
 
+type TeamPositionData = {
+  onField?: string[];
+  emergencies?: string[];
+};
+
+type CoachTeamData = Record<string, TeamPositionData>;
+
+type RoundSubmissionRow = {
+  id: number;
+  coach_id: number;
+  coach_name: string;
+  round_number: number;
+  team_data: CoachTeamData;
+  submitted_at: string;
+};
+
+type AflPlayerRoundStatRow = {
+  id: number;
+  afl_round: number;
+  afl_team_name: string | null;
+  afl_team_code: string;
+  player_name: string;
+  k: number;
+  hb: number;
+  d: number;
+  m: number;
+  g: number;
+  b: number;
+  t: number;
+  ho: number;
+  ga: number;
+  i50: number;
+  cl: number;
+  cg: number;
+  r50: number;
+  ff: number;
+  fa: number;
+  af: number;
+  sc: number;
+  imported_at: string;
+};
+
+type PlayerBreakdownRow = {
+  key: string;
+  position: string;
+  selectedType: string;
+  playerName: string;
+  stat: AflPlayerRoundStatRow | null;
+  points: number | null;
+  played: boolean;
+  countsToTotal: boolean;
+  replacedPlayerName: string | null;
+};
+
 type FixtureMatch = {
   key: string;
   roundNumber: number;
@@ -201,6 +255,199 @@ function getResultOutcome(result: MatchResultRow | null) {
   };
 }
 
+const POSITION_ORDER = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
+
+function normalisePlayerName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function calculatePlayerPoints(stat: AflPlayerRoundStatRow | null): number | null {
+  if (!stat) return null;
+
+  return stat.d * 3 + stat.m * 4 + stat.g * 6 + stat.b + stat.t * 4 + stat.ho + stat.ff - stat.fa;
+}
+
+function buildStatsMapForRound(statsRows: AflPlayerRoundStatRow[], aflRound: number | null): Map<string, AflPlayerRoundStatRow> {
+  const map = new Map<string, AflPlayerRoundStatRow>();
+
+  if (!aflRound) return map;
+
+  for (const row of statsRows) {
+    if (row.afl_round !== aflRound) continue;
+    map.set(normalisePlayerName(row.player_name), row);
+  }
+
+  return map;
+}
+
+function buildCoachBreakdownRows(
+  teamData: CoachTeamData | null | undefined,
+  statsMap: Map<string, AflPlayerRoundStatRow>
+): PlayerBreakdownRow[] {
+  if (!teamData) return [];
+
+  const usedEmergencyNames = new Set<string>();
+  const rows: PlayerBreakdownRow[] = [];
+
+  const positionKeys = Array.from(
+    new Set([...POSITION_ORDER, ...Object.keys(teamData)])
+  ).filter((position) => Boolean(teamData[position]));
+
+  for (const position of positionKeys) {
+    const positionData = teamData[position] ?? {};
+    const onField = Array.isArray(positionData.onField) ? positionData.onField : [];
+    const emergencies = Array.isArray(positionData.emergencies) ? positionData.emergencies : [];
+
+    const emergencyStats = emergencies.map((playerName, index) => {
+      const stat = statsMap.get(normalisePlayerName(playerName)) ?? null;
+
+      return {
+        playerName,
+        index,
+        selectedType: `I${index + 1}`,
+        stat,
+        played: Boolean(stat),
+      };
+    });
+
+    for (const playerName of onField) {
+      const stat = statsMap.get(normalisePlayerName(playerName)) ?? null;
+      const played = Boolean(stat);
+
+      if (played) {
+        rows.push({
+          key: `${position}-X-${playerName}`,
+          position,
+          selectedType: "X",
+          playerName,
+          stat,
+          points: calculatePlayerPoints(stat),
+          played,
+          countsToTotal: true,
+          replacedPlayerName: null,
+        });
+
+        continue;
+      }
+
+      const replacement = emergencyStats.find((emergency) => {
+        if (!emergency.played || !emergency.stat) return false;
+        return !usedEmergencyNames.has(normalisePlayerName(emergency.playerName));
+      });
+
+      rows.push({
+        key: `${position}-X-${playerName}`,
+        position,
+        selectedType: "X",
+        playerName,
+        stat,
+        points: null,
+        played: false,
+        countsToTotal: false,
+        replacedPlayerName: null,
+      });
+
+      if (replacement?.stat) {
+        usedEmergencyNames.add(normalisePlayerName(replacement.playerName));
+        rows.push({
+          key: `${position}-${replacement.selectedType}-${replacement.playerName}-replacement`,
+          position,
+          selectedType: replacement.selectedType,
+          playerName: replacement.playerName,
+          stat: replacement.stat,
+          points: calculatePlayerPoints(replacement.stat),
+          played: true,
+          countsToTotal: true,
+          replacedPlayerName: playerName,
+        });
+      }
+    }
+
+    for (const emergency of emergencyStats) {
+      const emergencyKey = normalisePlayerName(emergency.playerName);
+
+      if (usedEmergencyNames.has(emergencyKey)) continue;
+
+      rows.push({
+        key: `${position}-${emergency.selectedType}-${emergency.playerName}`,
+        position,
+        selectedType: emergency.selectedType,
+        playerName: emergency.playerName,
+        stat: emergency.stat,
+        points: calculatePlayerPoints(emergency.stat),
+        played: emergency.played,
+        countsToTotal: false,
+        replacedPlayerName: null,
+      });
+    }
+  }
+
+  return rows;
+}
+
+function calculateTeamTotal(rows: PlayerBreakdownRow[]): number {
+  return rows.reduce((total, row) => {
+    if (!row.countsToTotal || row.points === null) return total;
+    return total + row.points;
+  }, 0);
+}
+
+function getPlayingStatus(row: PlayerBreakdownRow): string {
+  if (row.countsToTotal && row.replacedPlayerName) {
+    return `Counts for ${row.replacedPlayerName}`;
+  }
+
+  if (row.countsToTotal) {
+    return "Counts";
+  }
+
+  if (row.played) {
+    return "Played - emergency only";
+  }
+
+  return "No stats yet";
+}
+
+function getStatNumber(stat: AflPlayerRoundStatRow | null, key: keyof AflPlayerRoundStatRow): string {
+  if (!stat) return "—";
+  const value = stat[key];
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return "—";
+}
+
+function parseTeamData(value: unknown): CoachTeamData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const output: CoachTeamData = {};
+
+  for (const [position, rawPositionData] of Object.entries(value as Record<string, unknown>)) {
+    if (!rawPositionData || typeof rawPositionData !== "object" || Array.isArray(rawPositionData)) {
+      output[position] = { onField: [], emergencies: [] };
+      continue;
+    }
+
+    const positionData = rawPositionData as Record<string, unknown>;
+
+    output[position] = {
+      onField: Array.isArray(positionData.onField)
+        ? positionData.onField.filter((player): player is string => typeof player === "string")
+        : [],
+      emergencies: Array.isArray(positionData.emergencies)
+        ? positionData.emergencies.filter((player): player is string => typeof player === "string")
+        : [],
+    };
+  }
+
+  return output;
+}
+
+
 export default function ResultsPage() {
   const router = useRouter();
 
@@ -210,6 +457,8 @@ export default function ResultsPage() {
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
   const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
   const [results, setResults] = useState<MatchResultRow[]>([]);
+  const [roundSubmissions, setRoundSubmissions] = useState<RoundSubmissionRow[]>([]);
+  const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [scoreForms, setScoreForms] = useState<Record<string, ResultFormState>>({});
   const [isLoadingPageData, setIsLoadingPageData] = useState(false);
@@ -327,6 +576,81 @@ export default function ResultsPage() {
     return rows;
   }, []);
 
+
+  const refreshRoundSubmissions = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("round_submissions")
+      .select("id, coach_id, coach_name, round_number, team_data, submitted_at")
+      .eq("environment", APP_ENV)
+      .eq("is_submitted", true)
+      .order("round_number", { ascending: false })
+      .order("submitted_at", { ascending: false });
+
+    if (error) {
+      setMessage(`Round submissions load failed: ${error.message}`);
+      setRoundSubmissions([]);
+      return [];
+    }
+
+    const rows: RoundSubmissionRow[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+      id: toNumber(row.id),
+      coach_id: toNumber(row.coach_id),
+      coach_name: typeof row.coach_name === "string" ? row.coach_name : "Unknown Coach",
+      round_number: toNumber(row.round_number),
+      team_data: parseTeamData(row.team_data),
+      submitted_at: typeof row.submitted_at === "string" ? row.submitted_at : "",
+    }));
+
+    setRoundSubmissions(rows);
+    return rows;
+  }, []);
+
+  const refreshPlayerStats = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("afl_player_round_stats")
+      .select(
+        "id, afl_round, afl_team_name, afl_team_code, player_name, k, hb, d, m, g, b, t, ho, ga, i50, cl, cg, r50, ff, fa, af, sc, imported_at"
+      )
+      .eq("environment", APP_ENV)
+      .order("afl_round", { ascending: true })
+      .order("player_name", { ascending: true });
+
+    if (error) {
+      setMessage(`Player stats load failed: ${error.message}`);
+      setPlayerStats([]);
+      return [];
+    }
+
+    const rows: AflPlayerRoundStatRow[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+      id: toNumber(row.id),
+      afl_round: toNumber(row.afl_round),
+      afl_team_name: typeof row.afl_team_name === "string" ? row.afl_team_name : null,
+      afl_team_code: typeof row.afl_team_code === "string" ? row.afl_team_code : "",
+      player_name: typeof row.player_name === "string" ? row.player_name : "",
+      k: toNumber(row.k),
+      hb: toNumber(row.hb),
+      d: toNumber(row.d),
+      m: toNumber(row.m),
+      g: toNumber(row.g),
+      b: toNumber(row.b),
+      t: toNumber(row.t),
+      ho: toNumber(row.ho),
+      ga: toNumber(row.ga),
+      i50: toNumber(row.i50),
+      cl: toNumber(row.cl),
+      cg: toNumber(row.cg),
+      r50: toNumber(row.r50),
+      ff: toNumber(row.ff),
+      fa: toNumber(row.fa),
+      af: toNumber(row.af),
+      sc: toNumber(row.sc),
+      imported_at: typeof row.imported_at === "string" ? row.imported_at : "",
+    }));
+
+    setPlayerStats(rows);
+    return rows;
+  }, []);
+
   const refreshPageData = useCallback(async () => {
     setIsLoadingPageData(true);
     setMessage("");
@@ -335,6 +659,8 @@ export default function ResultsPage() {
       refreshCurrentRound(),
       refreshFixtureRows(),
       refreshResults(),
+      refreshRoundSubmissions(),
+      refreshPlayerStats(),
     ]);
 
     const fixtureMatches = buildFixtureMatches(fixtureData);
@@ -352,7 +678,7 @@ export default function ResultsPage() {
 
     setSelectedRound((previous) => previous ?? preferredRound);
     setIsLoadingPageData(false);
-  }, [refreshCurrentRound, refreshFixtureRows, refreshResults]);
+  }, [refreshCurrentRound, refreshFixtureRows, refreshResults, refreshRoundSubmissions, refreshPlayerStats]);
 
   useEffect(() => {
     let isMounted = true;
@@ -478,6 +804,30 @@ export default function ResultsPage() {
           void refreshPageData();
         }
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "round_submissions",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshPageData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "afl_player_round_stats",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshPageData();
+        }
+      )
       .subscribe();
 
     return () => {
@@ -558,6 +908,33 @@ export default function ResultsPage() {
   const selectedRoundCompletedCount = selectedRoundMatches.filter((match) =>
     resultByRoundAndMatch.has(buildResultKey(match.roundNumber, match.matchupIndex))
   ).length;
+
+  const submissionByRoundAndCoach = useMemo(() => {
+    const map = new Map<string, RoundSubmissionRow>();
+    const latestByCoach = new Map<number, RoundSubmissionRow>();
+
+    for (const submission of roundSubmissions) {
+      const exactKey = `${submission.round_number}-${submission.coach_id}`;
+      if (!map.has(exactKey)) {
+        map.set(exactKey, submission);
+      }
+
+      const latest = latestByCoach.get(submission.coach_id);
+      if (!latest || new Date(submission.submitted_at).getTime() > new Date(latest.submitted_at).getTime()) {
+        latestByCoach.set(submission.coach_id, submission);
+      }
+    }
+
+    return { exact: map, latestByCoach };
+  }, [roundSubmissions]);
+
+  function getCoachSubmission(roundNumber: number, coachId: number): RoundSubmissionRow | null {
+    return (
+      submissionByRoundAndCoach.exact.get(`${roundNumber}-${coachId}`) ??
+      submissionByRoundAndCoach.latestByCoach.get(coachId) ??
+      null
+    );
+  }
 
   function getScoreForm(match: FixtureMatch, result: MatchResultRow | null): ResultFormState {
     const key = buildResultKey(match.roundNumber, match.matchupIndex);
@@ -848,6 +1225,118 @@ export default function ResultsPage() {
                             Last saved: {formatTimestamp(result.imported_at)}
                           </div>
                         ) : null}
+                      </div>
+
+                      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                        {[match.coach1Id, match.coach2Id].map((coachId) => {
+                          const coachName = coachId === match.coach1Id ? match.coach1Name : match.coach2Name;
+                          const submission = getCoachSubmission(match.roundNumber, coachId);
+                          const statsMap = buildStatsMapForRound(playerStats, match.aflRound);
+                          const rows = buildCoachBreakdownRows(submission?.team_data, statsMap);
+                          const teamTotal = calculateTeamTotal(rows);
+                          const countedPlayers = rows.filter((row) => row.countsToTotal).length;
+
+                          return (
+                            <div
+                              key={`${match.key}-${coachId}-breakdown`}
+                              className="rounded-xl border border-white/10 bg-neutral-950/50 p-4"
+                            >
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                  <div className="text-lg font-bold text-white">{coachName}</div>
+                                  <div className="mt-1 text-xs text-white/45">
+                                    {submission
+                                      ? `Team submitted: ${formatTimestamp(submission.submitted_at)}`
+                                      : "No submitted team found"}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-xl border border-violet-400/25 bg-violet-500/15 px-4 py-2 text-right">
+                                  <div className="text-xs font-semibold uppercase tracking-wide text-violet-100/70">
+                                    Live Total
+                                  </div>
+                                  <div className="text-2xl font-bold text-white">{formatScore(teamTotal)}</div>
+                                  <div className="text-xs text-white/50">{countedPlayers} counting players</div>
+                                </div>
+                              </div>
+
+                              {rows.length === 0 ? (
+                                <div className="mt-4 rounded-lg border border-dashed border-white/10 bg-black/20 p-3 text-sm text-white/55">
+                                  Player breakdown will appear once a submitted team exists for this coach.
+                                </div>
+                              ) : (
+                                <div className="mt-4 overflow-x-auto">
+                                  <table className="min-w-[980px] w-full border-separate border-spacing-0 text-left text-xs">
+                                    <thead>
+                                      <tr className="text-white/50">
+                                        <th className="border-b border-white/10 px-2 py-2 font-semibold">Pos</th>
+                                        <th className="border-b border-white/10 px-2 py-2 font-semibold">Sel</th>
+                                        <th className="border-b border-white/10 px-2 py-2 font-semibold">Player</th>
+                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">Pts</th>
+                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">D</th>
+                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">M</th>
+                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">G</th>
+                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">B</th>
+                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">T</th>
+                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">HO</th>
+                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">FF</th>
+                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">FA</th>
+                                        <th className="border-b border-white/10 px-2 py-2 font-semibold">Status</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {rows.map((row) => (
+                                        <tr
+                                          key={row.key}
+                                          className={`${
+                                            row.countsToTotal
+                                              ? "bg-green-500/10 text-white"
+                                              : row.played
+                                                ? "text-white/70"
+                                                : "text-white/35"
+                                          }`}
+                                        >
+                                          <td className="border-b border-white/5 px-2 py-2 font-semibold">{row.position}</td>
+                                          <td className="border-b border-white/5 px-2 py-2">
+                                            <span
+                                              className={`rounded-md border px-2 py-0.5 font-bold ${
+                                                row.countsToTotal
+                                                  ? "border-green-400/30 bg-green-500/15 text-green-100"
+                                                  : "border-white/10 bg-white/5 text-white/55"
+                                              }`}
+                                            >
+                                              {row.selectedType}
+                                            </span>
+                                          </td>
+                                          <td className="border-b border-white/5 px-2 py-2">
+                                            <div className="font-semibold">{row.playerName}</div>
+                                            {row.stat?.afl_team_code ? (
+                                              <div className="text-[11px] text-white/40">{row.stat.afl_team_code}</div>
+                                            ) : null}
+                                          </td>
+                                          <td className="border-b border-white/5 px-2 py-2 text-right font-bold">
+                                            {row.points === null ? "—" : formatScore(row.points)}
+                                          </td>
+                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "d")}</td>
+                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "m")}</td>
+                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "g")}</td>
+                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "b")}</td>
+                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "t")}</td>
+                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "ho")}</td>
+                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "ff")}</td>
+                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "fa")}</td>
+                                          <td className="border-b border-white/5 px-2 py-2">
+                                            <span className="text-[11px]">{getPlayingStatus(row)}</span>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
 
                       {loginSession.role === "admin" ? (

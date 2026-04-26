@@ -340,7 +340,10 @@ function isUsersMatch(
   );
 }
 
-function formatResultForMatch(result: MatchResultRow | undefined): string | null {
+function formatResultForMatch(result: MatchResultRow | undefined): {
+  text: string;
+  margin: number | null;
+} | null {
   if (!result) return null;
 
   const coach1Score = Number(result.coach_1_score ?? 0);
@@ -349,14 +352,23 @@ function formatResultForMatch(result: MatchResultRow | undefined): string | null
   const coach2Name = result.coach_2_name ?? "Unknown Team";
 
   if (coach1Score === coach2Score) {
-    return `${coach1Name} ${coach1Score} drew with ${coach2Name} ${coach2Score}`;
+    return {
+      text: `${coach1Name} ${coach1Score} drew with ${coach2Name} ${coach2Score}`,
+      margin: 0,
+    };
   }
 
   if (coach1Score > coach2Score) {
-    return `${coach1Name} ${coach1Score} def. ${coach2Name} ${coach2Score}`;
+    return {
+      text: `${coach1Name} ${coach1Score} def. ${coach2Name} ${coach2Score}`,
+      margin: coach1Score - coach2Score,
+    };
   }
 
-  return `${coach2Name} ${coach2Score} def. ${coach1Name} ${coach1Score}`;
+  return {
+    text: `${coach2Name} ${coach2Score} def. ${coach1Name} ${coach1Score}`,
+    margin: coach2Score - coach1Score,
+  };
 }
 
 function emptyTeamState(): TeamState {
@@ -974,23 +986,21 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     return `${loginSession.teamName || loginSession.coachName} Dashboard`;
   }, [loginSession]);
 
-  const currentWeekFixture = useMemo(
-  () => buildDashboardFixtureMatches(fixtureRows),
-  [fixtureRows]
-);
+  const currentWeekFixture = useMemo(() => buildDashboardFixtureMatches(fixtureRows), [fixtureRows]);
 
-/* 🔥 ADD THIS BLOCK DIRECTLY UNDER HERE */
-const currentRoundResultByMatch = useMemo(() => {
-  const map = new Map<number, MatchResultRow>();
+  const currentRoundResultByMatch = useMemo(() => {
+    const map = new Map<number, MatchResultRow>();
+    const currentSuper8Round = currentWeekFixture[0]?.competitionRound ?? null;
 
-  for (const result of results) {
-    if (result.round_number === currentWeekFixture[0]?.competitionRound) {
-      map.set(Number(result.matchup_index), result);
+    for (const result of results) {
+      if (result.round_number === currentSuper8Round && result.matchup_index !== null) {
+        map.set(Number(result.matchup_index), result);
+      }
     }
-  }
 
-  return map;
-}, [currentWeekFixture, results]);
+    return map;
+  }, [currentWeekFixture, results]);
+
   const sortedCurrentWeekFixture = useMemo(() => {
   return [...currentWeekFixture].sort((a, b) => {
     const aIsUserMatch = isUsersMatch(a, loginSession?.coachName);
@@ -1022,11 +1032,11 @@ const currentRoundResultByMatch = useMemo(() => {
     );
 
     if (opponentNames.length === 1) {
-      return `Super 8 Round ${currentSuper8Round}: vs ${opponentNames[0]}`;
+      return `Super 8 Round ${currentSuper8Round}: view ${opponentNames[0]}’s team`;
     }
 
     if (opponentNames.length > 1) {
-      return `Super 8 Round ${currentSuper8Round}: vs ${opponentNames.join(" and ")}`;
+      return `Super 8 Round ${currentSuper8Round}: view ${opponentNames.join(" and ")} teams`;
     }
   }
 
@@ -1037,7 +1047,8 @@ const currentRoundResultByMatch = useMemo(() => {
   return `Super 8 Round ${currentSuper8Round}: view your opponent’s team`;
 }, [currentWeekFixture, fixtureRows, loginSession]);
 
-const fixtureCardDescription = useMemo(() => {
+
+  const fixtureCardDescription = useMemo(() => {
   const currentSuper8Round = currentWeekFixture[0]?.competitionRound ?? null;
 
   if (!currentSuper8Round) {
@@ -1349,8 +1360,9 @@ const fixtureCardDescription = useMemo(() => {
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <h2 className="text-xl font-bold">Current Week Fixture</h2>
             <p className="mt-1 text-xs text-white/60">
-  Super 8 Round {currentWeekFixture[0]?.competitionRound ?? "—"} / AFL Round {currentAflRound ?? "—"}
-</p>
+              Super 8 Round {currentWeekFixture[0]?.competitionRound ?? "—"} / AFL Round{" "}
+              {currentAflRound ?? "—"}
+            </p>
 
             <div className="mt-3 space-y-2">
               {isLoadingFixture ? (
@@ -1359,44 +1371,50 @@ const fixtureCardDescription = useMemo(() => {
                 </div>
               ) : currentWeekFixture.length > 0 ? (
                 sortedCurrentWeekFixture.map((match) => {
-  const isUserMatch = isUsersMatch(match, loginSession?.coachName);
-  const result = currentRoundResultByMatch.get(Number(match.matchLabel.replace("Match ", "")));
-  const resultText = formatResultForMatch(result);
+                  const isUserMatch = isUsersMatch(match, loginSession?.coachName);
+                  const result = currentRoundResultByMatch.get(
+                    Number(match.matchLabel.replace("Match ", ""))
+                  );
+                  const resultData = formatResultForMatch(result);
 
-  return (
-    <Link key={match.key} href="/opponent-team">
-      <div
-        className={`rounded-lg p-3 border cursor-pointer transition ${
-          isUserMatch
-            ? "border-green-400/40 bg-green-500/10 hover:bg-green-500/20"
-            : "border-white/10 bg-black/20 hover:bg-white/10"
-        }`}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
-            Current Round • {match.matchLabel}
-          </div>
+                  return (
+                    <Link key={match.key} href="/opponent-team">
+                      <div
+                        className={`rounded-lg border cursor-pointer transition ${
+                          isUserMatch
+                            ? "p-4 border-green-400/50 bg-green-500/15 hover:bg-green-500/25 scale-[1.02]"
+                            : "p-3 border-white/10 bg-black/20 hover:bg-white/10"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
+                            Current Round • {match.matchLabel}
+                          </div>
 
-          {isUserMatch ? (
-            <div className="shrink-0 text-[10px] font-bold text-green-300">
-              🔥 Your Match
-            </div>
-          ) : null}
-        </div>
+                          {isUserMatch ? (
+                            <div className="shrink-0 text-[11px] font-bold text-green-300">
+                              🔥 Your Match
+                            </div>
+                          ) : null}
+                        </div>
 
-        <div className="mt-1 text-sm font-semibold text-white">
-          {resultText ?? `${match.home} vs ${match.away}`}
-        </div>
+                        <div
+                          className={`mt-1 font-semibold ${
+                            isUserMatch ? "text-base text-white" : "text-sm text-white"
+                          }`}
+                        >
+                          {resultData ? resultData.text : `${match.home} vs ${match.away}`}
+                        </div>
 
-        {resultText ? (
-          <div className="mt-1 text-[11px] font-semibold text-green-300">
-            Result entered
-          </div>
-        ) : null}
-      </div>
-    </Link>
-  );
-})
+                        {resultData && resultData.margin !== null && resultData.margin > 0 ? (
+                          <div className="mt-1 text-[12px] font-semibold text-green-300">
+                            won by {resultData.margin}
+                          </div>
+                        ) : null}
+                      </div>
+                    </Link>
+                  );
+                })
               ) : (
                 <div className="rounded-lg border border-dashed border-white/10 bg-black/20 p-3 text-xs text-white/60">
                   No fixture rows found for AFL Round {currentAflRound ?? "—"}.

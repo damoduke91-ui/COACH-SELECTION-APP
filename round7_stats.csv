@@ -1,0 +1,24 @@
+﻿environment,afl_round,afl_team_name,afl_team_code,player_name,k,hb,d,m,g,b,t,ho,ga,i50,cl,cg,r50,ff,fa,af,sc
+production,7,Carlton,CAR,Sam Walsh,19,13,32,5,1,1,7,0,1,8,4,3,2,2,0,135,121
+production,7,Carlton,CAR,Patrick Cripps,8,23,31,1,1,1,7,0,0,5,11,8,0,2,3,101,114
+production,7,Carlton,CAR,Nic Newman,15,7,22,7,0,0,2,0,0,1,1,1,5,0,0,88,79
+production,7,Carlton,CAR,Will Hayward,11,10,21,9,0,2,3,0,0,4,0,3,0,2,0,96,64
+production,7,Carlton,CAR,Adam Cerra,10,11,21,3,0,0,4,0,1,2,1,6,1,2,2,73,70
+production,7,Carlton,CAR,Matt Carroll,12,9,21,5,1,0,0,0,0,7,1,3,1,0,1,72,67
+production,7,Carlton,CAR,Oliver Florent,11,9,20,5,0,0,1,0,0,4,1,4,3,0,0,70,57
+production,7,Carlton,CAR,Nick Haynes,14,5,19,7,0,0,0,0,1,1,0,3,7,0,2,67,85
+production,7,Carlton,CAR,Jagga Smith,8,11,19,8,0,0,5,0,0,4,0,1,0,2,1,89,69
+production,7,Carlton,CAR,Cooper Lord,8,10,18,0,0,1,6,0,1,2,2,2,1,1,1,67,70
+production,7,Carlton,CAR,Zachary Williams,12,5,17,2,0,1,5,0,0,2,2,1,4,1,0,74,91
+production,7,Carlton,CAR,Liam Reidy,4,11,15,2,0,0,4,22,0,2,3,1,2,0,1,75,108
+production,7,Carlton,CAR,Jacob Weitering,9,5,14,5,0,0,1,0,0,0,0,0,1,1,0,57,87
+production,7,Carlton,CAR,Ben Ainsworth,6,8,14,2,0,0,2,0,2,3,1,5,1,1,0,49,38
+production,7,Carlton,CAR,Lewis Young,4,6,10,4,0,0,0,1,0,1,0,0,0,0,0,37,59
+production,7,Carlton,CAR,Matt Cottrell,5,5,10,1,0,0,2,0,0,1,1,1,2,1,0,37,51
+production,7,Carlton,CAR,Lachlan Cowan,5,5,10,2,0,0,3,0,0,1,0,1,2,1,0,44,59
+production,7,Carlton,CAR,Mitch McGovern,7,1,8,2,3,0,1,0,0,2,1,0,0,1,0,52,61
+production,7,Carlton,CAR,Brodie Kemp,8,0,8,7,4,1,1,0,0,2,0,2,0,1,1,72,61
+production,7,Carlton,CAR,Francis Evans,4,4,8,2,1,1,5,0,0,0,0,3,0,0,1,50,54
+production,7,Carlton,CAR,Ashton Moir,3,4,7,2,2,0,0,0,0,0,0,2,0,0,1,32,35
+production,7,Carlton,CAR,Harry Dean,5,1,6,4,0,0,0,0,0,1,0,2,0,1,1,27,23
+production,7,Carlton,CAR,Talor Byrne,2,3,5,0,0,0,1,0,0,0,0,2,0,1,2,11,18
