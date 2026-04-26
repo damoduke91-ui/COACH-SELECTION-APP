@@ -613,6 +613,7 @@ export default function ResultsPage() {
   const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [isLoadingPageData, setIsLoadingPageData] = useState(false);
+  const [autoSaveMessage, setAutoSaveMessage] = useState("");
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -1082,6 +1083,121 @@ export default function ResultsPage() {
     );
   }
 
+  useEffect(() => {
+    if (!loginSession || loginSession.role !== "admin") return;
+    if (fixtureMatches.length === 0) return;
+    if (roundSubmissions.length === 0) return;
+
+    let isCancelled = false;
+
+    async function autoSaveCompletedMatches() {
+      const savedLabels: string[] = [];
+
+      for (const match of fixtureMatches) {
+        if (!match.aflRound) continue;
+
+        const statsMap = buildStatsMapForRound(playerStats, match.aflRound);
+        const importedClubCodes = buildImportedClubSetForRound(playerStats, match.aflRound);
+
+        const coach1Submission =
+          submissionByRoundAndCoach.exact.get(`${match.roundNumber}-${match.coach1Id}`) ??
+          submissionByRoundAndCoach.latestByCoach.get(match.coach1Id) ??
+          null;
+
+        const coach2Submission =
+          submissionByRoundAndCoach.exact.get(`${match.roundNumber}-${match.coach2Id}`) ??
+          submissionByRoundAndCoach.latestByCoach.get(match.coach2Id) ??
+          null;
+
+        if (!coach1Submission || !coach2Submission) continue;
+
+        const coach1Rows = buildCoachBreakdownRows(
+          coach1Submission.team_data,
+          statsMap,
+          importedClubCodes,
+          buildPlayerClubLookup({ coachId: match.coach1Id, coachName: match.coach1Name })
+        );
+
+        const coach2Rows = buildCoachBreakdownRows(
+          coach2Submission.team_data,
+          statsMap,
+          importedClubCodes,
+          buildPlayerClubLookup({ coachId: match.coach2Id, coachName: match.coach2Name })
+        );
+
+        const coach1PendingPlayers = coach1Rows.filter(
+          (row) => row.selectedType === "X" && !row.played && !row.clubImported
+        ).length;
+
+        const coach2PendingPlayers = coach2Rows.filter(
+          (row) => row.selectedType === "X" && !row.played && !row.clubImported
+        ).length;
+
+        if (coach1PendingPlayers > 0 || coach2PendingPlayers > 0) continue;
+
+        const coach1Score = calculateTeamTotal(coach1Rows);
+        const coach2Score = calculateTeamTotal(coach2Rows);
+        const resultKey = buildResultKey(match.roundNumber, match.matchupIndex);
+        const existingResult = resultByRoundAndMatch.get(resultKey) ?? null;
+
+        const existingResultAlreadyMatches =
+          existingResult &&
+          existingResult.afl_round === match.aflRound &&
+          existingResult.coach_1_id === match.coach1Id &&
+          existingResult.coach_2_id === match.coach2Id &&
+          toNumber(existingResult.coach_1_score) === coach1Score &&
+          toNumber(existingResult.coach_2_score) === coach2Score;
+
+        if (existingResultAlreadyMatches) continue;
+
+        const payload = {
+          round_number: match.roundNumber,
+          afl_round: match.aflRound,
+          matchup_index: match.matchupIndex,
+          coach_1_id: match.coach1Id,
+          coach_1_name: match.coach1Name,
+          coach_1_score: coach1Score,
+          coach_2_id: match.coach2Id,
+          coach_2_name: match.coach2Name,
+          coach_2_score: coach2Score,
+          imported_at: new Date().toISOString(),
+        };
+
+        const { error } = await supabase
+          .from("super8_match_results")
+          .upsert(payload, { onConflict: "round_number,matchup_index" });
+
+        if (error) {
+          if (!isCancelled) {
+            setAutoSaveMessage(`Auto-save failed for Super 8 Round ${match.roundNumber}, Match ${match.matchupIndex}: ${error.message}`);
+          }
+          return;
+        }
+
+        savedLabels.push(`S8 R${match.roundNumber} Match ${match.matchupIndex}`);
+      }
+
+      if (!isCancelled && savedLabels.length > 0) {
+        setAutoSaveMessage(`Auto-saved final result${savedLabels.length === 1 ? "" : "s"}: ${savedLabels.join(", ")}.`);
+        await refreshResults();
+      }
+    }
+
+    void autoSaveCompletedMatches();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    fixtureMatches,
+    loginSession,
+    playerStats,
+    refreshResults,
+    resultByRoundAndMatch,
+    roundSubmissions.length,
+    submissionByRoundAndCoach,
+  ]);
+
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace("/login");
@@ -1142,6 +1258,12 @@ export default function ResultsPage() {
           {message ? (
             <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
               {message}
+            </div>
+          ) : null}
+
+          {autoSaveMessage ? (
+            <div className="mt-4 rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-100">
+              {autoSaveMessage}
             </div>
           ) : null}
         </section>
@@ -1278,6 +1400,14 @@ export default function ResultsPage() {
                     pendingPlayers: totalPendingPlayers,
                   });
 
+                  const savedResultMatchesLiveScore =
+                    Boolean(result) &&
+                    result?.afl_round === match.aflRound &&
+                    result?.coach_1_id === match.coach1Id &&
+                    result?.coach_2_id === match.coach2Id &&
+                    toNumber(result?.coach_1_score) === (coach1Details?.teamTotal ?? 0) &&
+                    toNumber(result?.coach_2_score) === (coach2Details?.teamTotal ?? 0);
+
                   return (
                     <div
                       key={match.key}
@@ -1315,8 +1445,12 @@ export default function ResultsPage() {
                           >
                             {outcome.isReadyToScore
                               ? totalPendingPlayers > 0
-                                ? "Live / pending"
-                                : "Live total"
+                                ? "LIVE / pending"
+                                : savedResultMatchesLiveScore
+                                  ? "FINAL / saved"
+                                  : loginSession.role === "admin"
+                                    ? "FINAL / saving"
+                                    : "FINAL / ready"
                               : "Waiting for teams"}
                           </span>
                         </div>
@@ -1329,8 +1463,9 @@ export default function ResultsPage() {
                         ) : null}
                         {result ? (
                           <div className="mt-2 text-xs text-white/45">
-                            Previous saved manual result: {result.coach_1_name} {formatScore(result.coach_1_score)} - {result.coach_2_name} {formatScore(result.coach_2_score)}
+                            Saved database result: {result.coach_1_name} {formatScore(result.coach_1_score)} - {result.coach_2_name} {formatScore(result.coach_2_score)}
                             {" "}• saved {formatTimestamp(result.imported_at)}
+                            {savedResultMatchesLiveScore ? " • matches live total" : " • live total has changed"}
                           </div>
                         ) : null}
                       </div>
@@ -1452,7 +1587,7 @@ export default function ResultsPage() {
                       </div>
 
                       <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/10 p-4 text-sm text-sky-100/80">
-                        Auto scoring is now displayed live from imported player stats. This page is not writing calculated totals back to the database yet.
+                        Auto scoring is displayed live from imported player stats. When admin views this page, completed matches with no pending selected players are automatically saved to the results table.
                       </div>
 
                     </div>
