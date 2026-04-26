@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { getPlayersForCoach } from "../../lib/playersByCoach";
 
 type LoginSession = {
   userId: string;
@@ -92,14 +93,22 @@ type AflPlayerRoundStatRow = {
   imported_at: string;
 };
 
+type PlayerClubInfo = {
+  club: string;
+  position: string;
+  number: number;
+};
+
 type PlayerBreakdownRow = {
   key: string;
   position: string;
   selectedType: string;
   playerName: string;
+  playerClub: string | null;
   stat: AflPlayerRoundStatRow | null;
   points: number | null;
   played: boolean;
+  clubImported: boolean;
   countsToTotal: boolean;
   replacedPlayerName: string | null;
 };
@@ -280,9 +289,57 @@ function buildStatsMapForRound(statsRows: AflPlayerRoundStatRow[], aflRound: num
   return map;
 }
 
+function buildImportedClubSetForRound(statsRows: AflPlayerRoundStatRow[], aflRound: number | null): Set<string> {
+  const clubs = new Set<string>();
+
+  if (!aflRound) return clubs;
+
+  for (const row of statsRows) {
+    if (row.afl_round !== aflRound) continue;
+
+    const club = row.afl_team_code.trim().toUpperCase();
+    if (club) clubs.add(club);
+  }
+
+  return clubs;
+}
+
+function buildPlayerClubLookup(params: {
+  coachId: number;
+  coachName: string;
+}): Map<string, PlayerClubInfo> {
+  const pool = getPlayersForCoach({ coachId: params.coachId, coachName: params.coachName });
+  const lookup = new Map<string, PlayerClubInfo>();
+
+  for (const [position, players] of Object.entries(pool)) {
+    for (const player of players) {
+      lookup.set(normalisePlayerName(player.name), {
+        club: player.club.trim().toUpperCase(),
+        position,
+        number: player.number,
+      });
+    }
+  }
+
+  return lookup;
+}
+
+function getPlayerClub(params: {
+  playerName: string;
+  stat: AflPlayerRoundStatRow | null;
+  playerLookup: Map<string, PlayerClubInfo>;
+}): string | null {
+  const fromLookup = params.playerLookup.get(normalisePlayerName(params.playerName))?.club ?? null;
+  const fromStat = params.stat?.afl_team_code?.trim().toUpperCase() || null;
+
+  return fromLookup || fromStat;
+}
+
 function buildCoachBreakdownRows(
   teamData: CoachTeamData | null | undefined,
-  statsMap: Map<string, AflPlayerRoundStatRow>
+  statsMap: Map<string, AflPlayerRoundStatRow>,
+  importedClubCodes: Set<string>,
+  playerLookup: Map<string, PlayerClubInfo>
 ): PlayerBreakdownRow[] {
   if (!teamData) return [];
 
@@ -300,18 +357,24 @@ function buildCoachBreakdownRows(
 
     const emergencyStats = emergencies.map((playerName, index) => {
       const stat = statsMap.get(normalisePlayerName(playerName)) ?? null;
+      const playerClub = getPlayerClub({ playerName, stat, playerLookup });
+      const clubImported = playerClub ? importedClubCodes.has(playerClub) : false;
 
       return {
         playerName,
         index,
         selectedType: `I${index + 1}`,
         stat,
+        playerClub,
         played: Boolean(stat),
+        clubImported,
       };
     });
 
     for (const playerName of onField) {
       const stat = statsMap.get(normalisePlayerName(playerName)) ?? null;
+      const playerClub = getPlayerClub({ playerName, stat, playerLookup });
+      const clubImported = playerClub ? importedClubCodes.has(playerClub) : false;
       const played = Boolean(stat);
 
       if (played) {
@@ -320,9 +383,11 @@ function buildCoachBreakdownRows(
           position,
           selectedType: "X",
           playerName,
+          playerClub,
           stat,
           points: calculatePlayerPoints(stat),
           played,
+          clubImported,
           countsToTotal: true,
           replacedPlayerName: null,
         });
@@ -330,21 +395,27 @@ function buildCoachBreakdownRows(
         continue;
       }
 
-      const replacement = emergencyStats.find((emergency) => {
-        if (!emergency.played || !emergency.stat) return false;
-        return !usedEmergencyNames.has(normalisePlayerName(emergency.playerName));
-      });
-
       rows.push({
         key: `${position}-X-${playerName}`,
         position,
         selectedType: "X",
         playerName,
+        playerClub,
         stat,
         points: null,
         played: false,
+        clubImported,
         countsToTotal: false,
         replacedPlayerName: null,
+      });
+
+      if (!clubImported) {
+        continue;
+      }
+
+      const replacement = emergencyStats.find((emergency) => {
+        if (!emergency.played || !emergency.stat) return false;
+        return !usedEmergencyNames.has(normalisePlayerName(emergency.playerName));
       });
 
       if (replacement?.stat) {
@@ -354,9 +425,11 @@ function buildCoachBreakdownRows(
           position,
           selectedType: replacement.selectedType,
           playerName: replacement.playerName,
+          playerClub: replacement.playerClub,
           stat: replacement.stat,
           points: calculatePlayerPoints(replacement.stat),
           played: true,
+          clubImported: replacement.clubImported,
           countsToTotal: true,
           replacedPlayerName: playerName,
         });
@@ -373,9 +446,11 @@ function buildCoachBreakdownRows(
         position,
         selectedType: emergency.selectedType,
         playerName: emergency.playerName,
+        playerClub: emergency.playerClub,
         stat: emergency.stat,
         points: calculatePlayerPoints(emergency.stat),
         played: emergency.played,
+        clubImported: emergency.clubImported,
         countsToTotal: false,
         replacedPlayerName: null,
       });
@@ -405,7 +480,15 @@ function getPlayingStatus(row: PlayerBreakdownRow): string {
     return "Played - emergency only";
   }
 
-  return "No stats yet";
+  if (row.clubImported) {
+    return "Did not play";
+  }
+
+  if (row.playerClub) {
+    return `${row.playerClub} pending`;
+  }
+
+  return "Pending - club unknown";
 }
 
 function getStatNumber(stat: AflPlayerRoundStatRow | null, key: keyof AflPlayerRoundStatRow): string {
@@ -1232,9 +1315,19 @@ export default function ResultsPage() {
                           const coachName = coachId === match.coach1Id ? match.coach1Name : match.coach2Name;
                           const submission = getCoachSubmission(match.roundNumber, coachId);
                           const statsMap = buildStatsMapForRound(playerStats, match.aflRound);
-                          const rows = buildCoachBreakdownRows(submission?.team_data, statsMap);
+                          const importedClubCodes = buildImportedClubSetForRound(playerStats, match.aflRound);
+                          const playerLookup = buildPlayerClubLookup({ coachId, coachName });
+                          const rows = buildCoachBreakdownRows(
+                            submission?.team_data,
+                            statsMap,
+                            importedClubCodes,
+                            playerLookup
+                          );
                           const teamTotal = calculateTeamTotal(rows);
                           const countedPlayers = rows.filter((row) => row.countsToTotal).length;
+                          const pendingPlayers = rows.filter(
+                            (row) => row.selectedType === "X" && !row.played && !row.clubImported
+                          ).length;
 
                           return (
                             <div
@@ -1257,6 +1350,9 @@ export default function ResultsPage() {
                                   </div>
                                   <div className="text-2xl font-bold text-white">{formatScore(teamTotal)}</div>
                                   <div className="text-xs text-white/50">{countedPlayers} counting players</div>
+                                  {pendingPlayers > 0 ? (
+                                    <div className="text-xs text-amber-100/70">{pendingPlayers} selected players pending</div>
+                                  ) : null}
                                 </div>
                               </div>
 
@@ -1310,8 +1406,8 @@ export default function ResultsPage() {
                                           </td>
                                           <td className="border-b border-white/5 px-2 py-2">
                                             <div className="font-semibold">{row.playerName}</div>
-                                            {row.stat?.afl_team_code ? (
-                                              <div className="text-[11px] text-white/40">{row.stat.afl_team_code}</div>
+                                            {row.playerClub ? (
+                                              <div className="text-[11px] text-white/40">{row.playerClub}</div>
                                             ) : null}
                                           </td>
                                           <td className="border-b border-white/5 px-2 py-2 text-right font-bold">
