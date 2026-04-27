@@ -253,10 +253,19 @@ export default function LadderPage() {
     }
 
     for (const match of results) {
-      const coach1Name = match.coach_1_name ?? "Unknown Team";
-      const coach2Name = match.coach_2_name ?? "Unknown Team";
-      const coach1Score = match.coach_1_score ?? 0;
-      const coach2Score = match.coach_2_score ?? 0;
+      const coach1Name = match.coach_1_name?.trim() || "Unknown Team";
+      const coach2Name = match.coach_2_name?.trim() || "Unknown Team";
+      const coach1Score = match.coach_1_score;
+      const coach2Score = match.coach_2_score;
+
+      if (
+        coach1Name === "Unknown Team" ||
+        coach2Name === "Unknown Team" ||
+        coach1Score === null ||
+        coach2Score === null
+      ) {
+        continue;
+      }
 
       const team1 = getOrCreateTeam(coach1Name);
       const team2 = getOrCreateTeam(coach2Name);
@@ -367,7 +376,7 @@ export default function LadderPage() {
             </div>
           ) : ladder.length === 0 ? (
             <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/70">
-              No ladder data found yet.
+              No completed match results found yet. The ladder will populate after completed results are saved from the Results page.
             </div>
           ) : (
             <div className="overflow-x-auto">
