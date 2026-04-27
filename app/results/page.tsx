@@ -279,6 +279,7 @@ function getResultOutcome(result: MatchResultRow | null) {
 }
 
 const POSITION_ORDER = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
+const EXPECTED_AFL_CLUB_COUNT = 18;
 
 function normalisePlayerName(value: string): string {
   return value.trim().toLowerCase();
@@ -316,6 +317,10 @@ function buildImportedClubSetForRound(statsRows: AflPlayerRoundStatRow[], aflRou
   }
 
   return clubs;
+}
+
+function getAflRoundCompletionLabel(importedClubCount: number): string {
+  return importedClubCount >= EXPECTED_AFL_CLUB_COUNT ? "FINAL" : "LIVE";
 }
 
 function buildPlayerClubLookup(params: {
@@ -1056,6 +1061,22 @@ export default function ResultsPage() {
     return Array.from(new Set(rounds)).sort((a, b) => a - b);
   }, [selectedRoundMatches]);
 
+  const selectedRoundImportedClubCodes = useMemo(() => {
+    const clubs = new Set<string>();
+
+    for (const aflRound of selectedRoundAflRounds) {
+      const importedClubs = buildImportedClubSetForRound(playerStats, aflRound);
+
+      for (const club of importedClubs) {
+        clubs.add(club);
+      }
+    }
+
+    return clubs;
+  }, [playerStats, selectedRoundAflRounds]);
+
+  const selectedRoundStatus = getAflRoundCompletionLabel(selectedRoundImportedClubCodes.size);
+
   const submissionByRoundAndCoach = useMemo(() => {
     const map = new Map<string, RoundSubmissionRow>();
     const latestByCoach = new Map<number, RoundSubmissionRow>();
@@ -1098,6 +1119,8 @@ export default function ResultsPage() {
 
         const statsMap = buildStatsMapForRound(playerStats, match.aflRound);
         const importedClubCodes = buildImportedClubSetForRound(playerStats, match.aflRound);
+
+        if (importedClubCodes.size < EXPECTED_AFL_CLUB_COUNT) continue;
 
         const coach1Submission =
           submissionByRoundAndCoach.exact.get(`${match.roundNumber}-${match.coach1Id}`) ??
@@ -1283,10 +1306,21 @@ export default function ResultsPage() {
             <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
               Selected Round
             </div>
-            <div className="mt-2 text-3xl font-bold">{selectedRound ?? "—"}</div>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <span className="text-3xl font-bold">{selectedRound ?? "—"}</span>
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-bold ${
+                  selectedRoundStatus === "FINAL"
+                    ? "border-green-400/30 bg-green-500/15 text-green-200"
+                    : "border-amber-400/30 bg-amber-500/15 text-amber-100"
+                }`}
+              >
+                {selectedRoundStatus}
+              </span>
+            </div>
             <div className="mt-1 text-sm text-white/70">
               {selectedRoundAflRounds.length > 0
-                ? `AFL Round${selectedRoundAflRounds.length === 1 ? "" : "s"} ${selectedRoundAflRounds.join(", ")}`
+                ? `AFL Round${selectedRoundAflRounds.length === 1 ? "" : "s"} ${selectedRoundAflRounds.join(", ")} • ${selectedRoundImportedClubCodes.size}/${EXPECTED_AFL_CLUB_COUNT} AFL clubs imported`
                 : "No AFL round linked yet"}
             </div>
           </div>
@@ -1358,6 +1392,7 @@ export default function ResultsPage() {
                   const isUserMatch = isUsersMatch(match, loginSession.coachId);
                   const statsMap = buildStatsMapForRound(playerStats, match.aflRound);
                   const importedClubCodes = buildImportedClubSetForRound(playerStats, match.aflRound);
+                  const isAflRoundComplete = importedClubCodes.size >= EXPECTED_AFL_CLUB_COUNT;
 
                   const coachDetails: CoachAutoScoreDetails[] = [match.coach1Id, match.coach2Id].map((coachId) => {
                     const coachName = coachId === match.coach1Id ? match.coach1Name : match.coach2Name;
@@ -1444,13 +1479,17 @@ export default function ResultsPage() {
                             }`}
                           >
                             {outcome.isReadyToScore
-                              ? totalPendingPlayers > 0
-                                ? "LIVE / pending"
-                                : savedResultMatchesLiveScore
-                                  ? "FINAL / saved"
-                                  : loginSession.role === "admin"
-                                    ? "FINAL / saving"
-                                    : "FINAL / ready"
+                              ? !isAflRoundComplete
+                                ? totalPendingPlayers > 0
+                                  ? "LIVE / pending"
+                                  : "LIVE / round open"
+                                : totalPendingPlayers > 0
+                                  ? "LIVE / pending"
+                                  : savedResultMatchesLiveScore
+                                    ? "FINAL / saved"
+                                    : loginSession.role === "admin"
+                                      ? "FINAL / saving"
+                                      : "FINAL / ready"
                               : "Waiting for teams"}
                           </span>
                         </div>
@@ -1587,7 +1626,7 @@ export default function ResultsPage() {
                       </div>
 
                       <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/10 p-4 text-sm text-sky-100/80">
-                        Auto scoring is displayed live from imported player stats. When admin views this page, completed matches with no pending selected players are automatically saved to the results table.
+                        Auto scoring is displayed live from imported player stats. When admin views this page, results are automatically saved only after the AFL round is complete and both teams have no pending selected players.
                       </div>
 
                     </div>
