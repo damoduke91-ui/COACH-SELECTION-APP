@@ -75,6 +75,11 @@ type MatchResultRow = {
   coach_2_score: number | null;
 };
 
+type AflPlayerRoundStatRow = {
+  afl_round: number | null;
+  afl_team_code: string | null;
+};
+
 type FixtureRow = {
   id: number;
   environment: "production" | "preview";
@@ -109,6 +114,7 @@ type LadderRow = {
 };
 
 const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
+const EXPECTED_AFL_CLUB_COUNT = 18;
 
 const DEFAULT_ON_FIELD_SLOTS: Record<PositionKey, number> = {
   KD: 2,
@@ -371,6 +377,28 @@ function formatResultForMatch(result: MatchResultRow | undefined): {
   };
 }
 
+function getImportedClubCodesForRound(
+  statsRows: AflPlayerRoundStatRow[],
+  aflRound: number | null
+): Set<string> {
+  const clubs = new Set<string>();
+
+  if (!aflRound) return clubs;
+
+  for (const row of statsRows) {
+    if (row.afl_round !== aflRound) continue;
+
+    const club = row.afl_team_code?.trim().toUpperCase() ?? "";
+    if (club) clubs.add(club);
+  }
+
+  return clubs;
+}
+
+function getRoundStatus(importedClubCount: number): "LIVE" | "FINAL" {
+  return importedClubCount >= EXPECTED_AFL_CLUB_COUNT ? "FINAL" : "LIVE";
+}
+
 function emptyTeamState(): TeamState {
   return {
     KD: { onField: [], emergencies: [] },
@@ -517,6 +545,7 @@ export default function DashboardPage() {
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [results, setResults] = useState<MatchResultRow[]>([]);
+  const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
   const [message, setMessage] = useState("");
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
@@ -645,6 +674,26 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     await refreshFixtureForRound(aflRound);
   }, [refreshCurrentRound, refreshFixtureForRound]);
 
+  const refreshPlayerStats = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("afl_player_round_stats")
+      .select("afl_round, afl_team_code")
+      .eq("environment", APP_ENV);
+
+    if (error) {
+      setMessage(`Player stats load failed: ${error.message}`);
+      setPlayerStats([]);
+      return;
+    }
+
+    const rows: AflPlayerRoundStatRow[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+      afl_round: typeof row.afl_round === "number" ? row.afl_round : Number(row.afl_round),
+      afl_team_code: typeof row.afl_team_code === "string" ? row.afl_team_code : null,
+    }));
+
+    setPlayerStats(rows);
+  }, []);
+
   const saveCurrentRound = useCallback(async () => {
     if (loginSession?.role !== "admin") {
       return;
@@ -736,7 +785,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 
       setLoginSession(nextSession);
       setIsAuthenticating(false);
-      await Promise.all([refreshDashboardData(), refreshDashboardFixture()]);
+      await Promise.all([refreshDashboardData(), refreshDashboardFixture(), refreshPlayerStats()]);
     }
 
     void bootstrapAuth();
@@ -767,7 +816,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 
         setLoginSession(nextSession);
         setIsAuthenticating(false);
-        await Promise.all([refreshDashboardData(), refreshDashboardFixture()]);
+        await Promise.all([refreshDashboardData(), refreshDashboardFixture(), refreshPlayerStats()]);
       })();
     });
 
@@ -775,7 +824,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [loadProfileForUser, refreshDashboardData, refreshDashboardFixture, router]);
+  }, [loadProfileForUser, refreshDashboardData, refreshDashboardFixture, refreshPlayerStats, router]);
 
   useEffect(() => {
   async function loadResults() {
@@ -837,12 +886,24 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           void refreshDashboardFixture();
         }
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "afl_player_round_stats",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshPlayerStats();
+        }
+      )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loginSession, refreshDashboardData, refreshDashboardFixture]);
+  }, [loginSession, refreshDashboardData, refreshDashboardFixture, refreshPlayerStats]);
 
   const ladder = useMemo(() => {
   const map = new Map<string, LadderRow>();
@@ -865,11 +926,20 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
   }
 
   results.forEach((match) => {
-    const t1 = getTeam(match.coach_1_name ?? "Unknown");
-    const t2 = getTeam(match.coach_2_name ?? "Unknown");
+    if (
+      match.coach_1_score === null ||
+      match.coach_2_score === null ||
+      !match.coach_1_name ||
+      !match.coach_2_name
+    ) {
+      return;
+    }
 
-    const s1 = match.coach_1_score ?? 0;
-    const s2 = match.coach_2_score ?? 0;
+    const t1 = getTeam(match.coach_1_name);
+    const t2 = getTeam(match.coach_2_name);
+
+    const s1 = match.coach_1_score;
+    const s2 = match.coach_2_score;
 
     t1.played++;
     t2.played++;
@@ -976,6 +1046,13 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     setIsExportingTeams(false);
   }
 }
+
+  const currentRoundImportedClubCodes = useMemo(() => {
+    return getImportedClubCodesForRound(playerStats, currentAflRound);
+  }, [currentAflRound, playerStats]);
+
+  const currentRoundStatus = getRoundStatus(currentRoundImportedClubCodes.size);
+
   const dashboardTitle = useMemo(() => {
     if (!loginSession) return "Dashboard";
 
@@ -1211,13 +1288,24 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
                   <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                    Live Setting
+                    Current Round Status
                   </div>
-                  <div className="mt-2 text-lg font-bold">
-                    {currentAflRound ?? "Not set"}
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <span className="text-lg font-bold">
+                      AFL Round {currentAflRound ?? "Not set"}
+                    </span>
+                    <span
+                      className={`rounded-full border px-3 py-1 text-xs font-bold ${
+                        currentRoundStatus === "FINAL"
+                          ? "border-green-400/30 bg-green-500/15 text-green-200"
+                          : "border-amber-400/30 bg-amber-500/15 text-amber-100"
+                      }`}
+                    >
+                      {currentRoundStatus}
+                    </span>
                   </div>
                   <div className="mt-1 text-sm text-white/70">
-                    Opponent screen reads from app_settings.current_afl_round
+                    {currentRoundImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} AFL clubs imported
                   </div>
                 </div>
               </div>
@@ -1361,7 +1449,7 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
             <h2 className="text-xl font-bold">Current Week Fixture</h2>
             <p className="mt-1 text-xs text-white/60">
               Super 8 Round {currentWeekFixture[0]?.competitionRound ?? "—"} / AFL Round{" "}
-              {currentAflRound ?? "—"}
+              {currentAflRound ?? "—"} • {currentRoundStatus} ({currentRoundImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} clubs)
             </p>
 
             <div className="mt-3 space-y-2">
