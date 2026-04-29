@@ -762,22 +762,40 @@ export default function ResultsPage() {
   }, []);
 
   const refreshPlayerStats = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("afl_player_round_stats")
-      .select(
-        "id, afl_round, afl_team_name, afl_team_code, player_name, k, hb, d, m, g, b, t, ho, ga, i50, cl, cg, r50, ff, fa, af, sc, imported_at"
-      )
-      .eq("environment", APP_ENV)
-      .order("afl_round", { ascending: true })
-      .order("player_name", { ascending: true });
+    const pageSize = 1000;
+    let from = 0;
+    let allRows: Record<string, unknown>[] = [];
 
-    if (error) {
-      setMessage(`Player stats load failed: ${error.message}`);
-      setPlayerStats([]);
-      return [];
+    while (true) {
+      const to = from + pageSize - 1;
+
+      const { data, error } = await supabase
+        .from("afl_player_round_stats")
+        .select(
+          "id, afl_round, afl_team_name, afl_team_code, player_name, k, hb, d, m, g, b, t, ho, ga, i50, cl, cg, r50, ff, fa, af, sc, imported_at"
+        )
+        .eq("environment", APP_ENV)
+        .order("afl_round", { ascending: true })
+        .order("player_name", { ascending: true })
+        .range(from, to);
+
+      if (error) {
+        setMessage(`Player stats load failed: ${error.message}`);
+        setPlayerStats([]);
+        return [];
+      }
+
+      const pageRows = (data ?? []) as Record<string, unknown>[];
+      allRows = [...allRows, ...pageRows];
+
+      if (pageRows.length < pageSize) {
+        break;
+      }
+
+      from += pageSize;
     }
 
-    const rows: AflPlayerRoundStatRow[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+    const rows: AflPlayerRoundStatRow[] = allRows.map((row) => ({
       id: toNumber(row.id),
       afl_round: toNumber(row.afl_round),
       afl_team_name: typeof row.afl_team_name === "string" ? row.afl_team_name : null,
@@ -1320,7 +1338,7 @@ export default function ResultsPage() {
             </div>
             <div className="mt-1 text-sm text-white/70">
               {selectedRoundAflRounds.length > 0
-                ? `AFL Round${selectedRoundAflRounds.length === 1 ? "" : "s"} ${selectedRoundAflRounds.join(", ")} • ${selectedRoundImportedClubCodes.size}/${EXPECTED_AFL_CLUB_COUNT} AFL clubs imported`
+                ? `AFL Round${selectedRoundAflRounds.length === 1 ? "" : "s"} ${selectedRoundAflRounds.join(", ")} • ${selectedRoundImportedClubCodes.size}/${EXPECTED_AFL_CLUB_COUNT} AFL clubs imported • ${playerStats.length} stat rows loaded`
                 : "No AFL round linked yet"}
             </div>
           </div>
