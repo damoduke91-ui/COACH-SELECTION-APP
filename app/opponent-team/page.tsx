@@ -3,13 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import * as coachConfigModule from "../../lib/coachConfig";
-import {
-  type CoachPlayerPool,
-  type PositionKey,
-  getPlayersForCoach,
-} from "../../lib/playersByCoach";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { getPlayersForCoach } from "../../lib/playersByCoach";
 
 type LoginSession = {
   userId: string;
@@ -26,40 +21,8 @@ type UserProfileRow = {
   coach_name: string | null;
 };
 
-type PositionState = {
-  onField: string[];
-  emergencies: string[];
-};
-
-type TeamState = Record<PositionKey, PositionState>;
-
-type SavedTeamRow = {
-  coach_id: number;
-  coach_name: string;
-  team_data: unknown;
-  is_submitted: boolean;
-  submitted_at: string | null;
-  updated_at: string | null;
-  environment: "production" | "preview";
-};
-
-type CoachConfigShape = {
-  id: number;
-  name: string;
-  slots: Record<PositionKey, number>;
-  emergencyLimits: Record<PositionKey, number>;
-};
-
-type PlayerLookupRow = {
-  name: string;
-  club: string;
-  number: number;
-  position: PositionKey;
-};
-
 type AppSettingsRow = {
-  environment: "production" | "preview";
-  current_afl_round: number | null;
+  current_afl_round: number | string | null;
 };
 
 type FixtureRow = {
@@ -74,128 +37,120 @@ type FixtureRow = {
   opponent_coach_name: string;
 };
 
-type TeamPanelProps = {
-  title: string;
-  subtitle: string;
-  team: TeamState;
-  lookup: Map<string, PlayerLookupRow>;
-  submitted: boolean;
-  updatedAt: string | null | undefined;
-  submittedAt?: string | null | undefined;
-  accentClass?: string;
+type TeamPositionData = {
+  onField?: string[];
+  emergencies?: string[];
 };
 
-const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
+type CoachTeamData = Record<string, TeamPositionData>;
 
-const DEFAULT_ON_FIELD_SLOTS: Record<PositionKey, number> = {
-  KD: 2,
-  DEF: 4,
-  MID: 5,
-  FOR: 4,
-  KF: 2,
-  RUC: 1,
+type RoundSubmissionRow = {
+  id: number;
+  coach_id: number;
+  coach_name: string;
+  round_number: number;
+  team_data: CoachTeamData;
+  submitted_at: string;
 };
 
-const DEFAULT_EMERGENCY_LIMITS: Record<PositionKey, number> = {
-  KD: 3,
-  DEF: 2,
-  MID: 0,
-  FOR: 2,
-  KF: 3,
-  RUC: 0,
+type AflPlayerRoundStatRow = {
+  id: number;
+  afl_round: number;
+  afl_team_name: string | null;
+  afl_team_code: string;
+  player_name: string;
+  k: number;
+  hb: number;
+  d: number;
+  m: number;
+  g: number;
+  b: number;
+  t: number;
+  ho: number;
+  ga: number;
+  i50: number;
+  cl: number;
+  cg: number;
+  r50: number;
+  ff: number;
+  fa: number;
+  af: number;
+  sc: number;
+  imported_at: string;
 };
 
-const FALLBACK_COACH_CONFIGS: CoachConfigShape[] = [
-  {
-    id: 1,
-    name: "Adrian Coach 1",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 2,
-    name: "Chris Coach 2",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 3,
-    name: "Damian Coach 3",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 4,
-    name: "Dane Coach 4",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 5,
-    name: "Josh Coach 5",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 6,
-    name: "Mark Coach 6",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 7,
-    name: "Rick Coach 7",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-  {
-    id: 8,
-    name: "Troy Coach 8",
-    slots: DEFAULT_ON_FIELD_SLOTS,
-    emergencyLimits: DEFAULT_EMERGENCY_LIMITS,
-  },
-];
+type PlayerClubInfo = {
+  club: string;
+  position: string;
+  number: number;
+};
 
-function emptyTeamState(): TeamState {
-  return {
-    KD: { onField: [], emergencies: [] },
-    DEF: { onField: [], emergencies: [] },
-    MID: { onField: [], emergencies: [] },
-    FOR: { onField: [], emergencies: [] },
-    KF: { onField: [], emergencies: [] },
-    RUC: { onField: [], emergencies: [] },
-  };
+type PlayerBreakdownRow = {
+  key: string;
+  position: string;
+  selectedType: string;
+  playerName: string;
+  playerClub: string | null;
+  stat: AflPlayerRoundStatRow | null;
+  points: number | null;
+  played: boolean;
+  clubImported: boolean;
+  countsToTotal: boolean;
+  replacedPlayerName: string | null;
+};
+
+type CoachAutoScoreDetails = {
+  coachId: number;
+  coachName: string;
+  submission: RoundSubmissionRow | null;
+  rows: PlayerBreakdownRow[];
+  teamTotal: number;
+  countedPlayers: number;
+  pendingPlayers: number;
+};
+
+type MatchAutoOutcome = {
+  label: string;
+  margin: number | null;
+  isDraw: boolean;
+  winnerName: string | null;
+  loserName: string | null;
+  isReadyToScore: boolean;
+};
+
+type FixtureMatch = {
+  key: string;
+  roundNumber: number;
+  aflRound: number | null;
+  matchupIndex: number;
+  coach1Id: number;
+  coach1Name: string;
+  coach2Id: number;
+  coach2Name: string;
+};
+
+function toNumber(value: unknown, fallback = 0): number {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
 }
 
-function sanitiseTeamState(input: unknown): TeamState {
-  const clean = emptyTeamState();
+function toNullableNumber(value: unknown): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
 
-  if (!input || typeof input !== "object") {
-    return clean;
+function formatScore(value: number | null | undefined): string {
+  const num = Number(value);
+
+  if (!Number.isFinite(num)) {
+    return "0";
   }
 
-  const obj = input as Record<string, unknown>;
-
-  for (const position of POSITIONS) {
-    const savedPosition = obj[position];
-
-    if (!savedPosition || typeof savedPosition !== "object") {
-      continue;
-    }
-
-    const positionObj = savedPosition as Record<string, unknown>;
-
-    clean[position] = {
-      onField: Array.isArray(positionObj.onField)
-        ? positionObj.onField.filter((value): value is string => typeof value === "string")
-        : [],
-      emergencies: Array.isArray(positionObj.emergencies)
-        ? positionObj.emergencies.filter((value): value is string => typeof value === "string")
-        : [],
-    };
+  if (Number.isInteger(num)) {
+    return String(num);
   }
 
-  return clean;
+  return num.toFixed(1);
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -214,127 +169,110 @@ function formatTimestamp(value: string | null | undefined): string {
   });
 }
 
-function toNumber(value: unknown, fallback: number): number {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : fallback;
+function sortFixtureRows(rows: FixtureRow[]): FixtureRow[] {
+  return [...rows].sort((a, b) => {
+    if (a.competition_round !== b.competition_round) {
+      return a.competition_round - b.competition_round;
+    }
+
+    if (a.afl_round !== b.afl_round) {
+      return a.afl_round - b.afl_round;
+    }
+
+    if (a.matchup_index !== b.matchup_index) {
+      return a.matchup_index - b.matchup_index;
+    }
+
+    return a.coach_id - b.coach_id;
+  });
 }
 
-function buildCoachConfig(rawCoach: unknown, fallbackId: number): CoachConfigShape {
-  const coach = rawCoach && typeof rawCoach === "object" ? rawCoach : {};
-  const coachRecord = coach as Record<string, unknown>;
-  const id = toNumber(coachRecord.id ?? coachRecord.coachId ?? fallbackId, fallbackId);
-  const name = String(
-    coachRecord.name ?? coachRecord.coachName ?? coachRecord.label ?? `Coach ${id}`
-  );
+function buildFixtureMatches(rows: FixtureRow[]): FixtureMatch[] {
+  const matchMap = new Map<string, FixtureMatch>();
 
-  const rawSlots =
-    coachRecord.slots ??
-    coachRecord.positionLimits ??
-    coachRecord.onFieldSlots ??
-    coachRecord.positions ??
-    {};
+  for (const row of sortFixtureRows(rows)) {
+    const coachIds = [row.coach_id, row.opponent_coach_id].sort((a, b) => a - b);
+    const key = `${row.competition_round}-${row.afl_round}-${row.matchup_index}-${coachIds.join("-")}`;
 
-  const rawEmergencyLimits =
-    coachRecord.emergencyLimits ??
-    coachRecord.emergencies ??
-    coachRecord.benchLimits ??
-    coachRecord.emergencySlots ??
-    {};
-
-  const slotsRecord =
-    rawSlots && typeof rawSlots === "object" ? (rawSlots as Record<string, unknown>) : {};
-  const emergencyLimitsRecord =
-    rawEmergencyLimits && typeof rawEmergencyLimits === "object"
-      ? (rawEmergencyLimits as Record<string, unknown>)
-      : {};
-
-  return {
-    id,
-    name,
-    slots: {
-      KD: toNumber(slotsRecord.KD, DEFAULT_ON_FIELD_SLOTS.KD),
-      DEF: toNumber(slotsRecord.DEF, DEFAULT_ON_FIELD_SLOTS.DEF),
-      MID: toNumber(slotsRecord.MID, DEFAULT_ON_FIELD_SLOTS.MID),
-      FOR: toNumber(slotsRecord.FOR, DEFAULT_ON_FIELD_SLOTS.FOR),
-      KF: toNumber(slotsRecord.KF, DEFAULT_ON_FIELD_SLOTS.KF),
-      RUC: toNumber(slotsRecord.RUC, DEFAULT_ON_FIELD_SLOTS.RUC),
-    },
-    emergencyLimits: {
-      KD: toNumber(emergencyLimitsRecord.KD, DEFAULT_EMERGENCY_LIMITS.KD),
-      DEF: toNumber(emergencyLimitsRecord.DEF, DEFAULT_EMERGENCY_LIMITS.DEF),
-      MID: toNumber(emergencyLimitsRecord.MID, DEFAULT_EMERGENCY_LIMITS.MID),
-      FOR: toNumber(emergencyLimitsRecord.FOR, DEFAULT_EMERGENCY_LIMITS.FOR),
-      KF: toNumber(emergencyLimitsRecord.KF, DEFAULT_EMERGENCY_LIMITS.KF),
-      RUC: toNumber(emergencyLimitsRecord.RUC, DEFAULT_EMERGENCY_LIMITS.RUC),
-    },
-  };
-}
-
-function normaliseCoachConfigs(): CoachConfigShape[] {
-  const mod = coachConfigModule as Record<string, unknown>;
-
-  const arrayCandidate =
-    mod.coachConfigs ??
-    mod.COACH_CONFIGS ??
-    mod.coaches ??
-    mod.COACHES ??
-    mod.default;
-
-  if (Array.isArray(arrayCandidate) && arrayCandidate.length > 0) {
-    return arrayCandidate.map((coach, index: number) => buildCoachConfig(coach, index + 1));
-  }
-
-  const objectCandidate =
-    mod.coachConfig ??
-    mod.COACH_CONFIG ??
-    mod.defaultCoachConfig ??
-    mod.default_coach_config;
-
-  if (objectCandidate && typeof objectCandidate === "object") {
-    const entries = Object.entries(objectCandidate as Record<string, unknown>);
-
-    if (entries.length > 0) {
-      return entries.map(([key, coach], index) => {
-        const coachRecord =
-          coach && typeof coach === "object" ? (coach as Record<string, unknown>) : {};
-
-        return buildCoachConfig(
-          {
-            id: coachRecord.id ?? coachRecord.coachId ?? key,
-            ...coachRecord,
-          },
-          index + 1
-        );
+    if (!matchMap.has(key)) {
+      matchMap.set(key, {
+        key,
+        roundNumber: row.competition_round,
+        aflRound: row.afl_round,
+        matchupIndex: row.matchup_index,
+        coach1Id: row.coach_id,
+        coach1Name: row.coach_name,
+        coach2Id: row.opponent_coach_id,
+        coach2Name: row.opponent_coach_name,
       });
     }
   }
 
-  return FALLBACK_COACH_CONFIGS;
-}
-
-function countSelectedPlayers(teamData: TeamState): number {
-  return POSITIONS.reduce((total, position) => {
-    return total + teamData[position].onField.length + teamData[position].emergencies.length;
-  }, 0);
-}
-
-function getCoachPool(selectedCoach: CoachConfigShape | undefined): CoachPlayerPool {
-  return getPlayersForCoach({
-    coachId: selectedCoach?.id,
-    coachName: selectedCoach?.name,
+  return Array.from(matchMap.values()).sort((a, b) => {
+    if (a.roundNumber !== b.roundNumber) return a.roundNumber - b.roundNumber;
+    if ((a.aflRound ?? 0) !== (b.aflRound ?? 0)) return (a.aflRound ?? 0) - (b.aflRound ?? 0);
+    return a.matchupIndex - b.matchupIndex;
   });
 }
 
-function buildPlayerLookup(pool: CoachPlayerPool): Map<string, PlayerLookupRow> {
-  const lookup = new Map<string, PlayerLookupRow>();
+const POSITION_ORDER = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
+const EXPECTED_AFL_CLUB_COUNT = 18;
 
-  for (const position of POSITIONS) {
-    for (const player of pool[position]) {
-      lookup.set(player.name, {
-        name: player.name,
-        club: player.club,
-        number: player.number,
+function normalisePlayerName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function calculatePlayerPoints(stat: AflPlayerRoundStatRow | null): number | null {
+  if (!stat) return null;
+
+  return stat.d * 3 + stat.m * 4 + stat.g * 6 + stat.b + stat.t * 4 + stat.ho + stat.ff - stat.fa;
+}
+
+function buildStatsMapForRound(statsRows: AflPlayerRoundStatRow[], aflRound: number | null): Map<string, AflPlayerRoundStatRow> {
+  const map = new Map<string, AflPlayerRoundStatRow>();
+
+  if (!aflRound) return map;
+
+  for (const row of statsRows) {
+    if (row.afl_round !== aflRound) continue;
+    map.set(normalisePlayerName(row.player_name), row);
+  }
+
+  return map;
+}
+
+function buildImportedClubSetForRound(statsRows: AflPlayerRoundStatRow[], aflRound: number | null): Set<string> {
+  const clubs = new Set<string>();
+
+  if (!aflRound) return clubs;
+
+  for (const row of statsRows) {
+    if (row.afl_round !== aflRound) continue;
+
+    const club = row.afl_team_code.trim().toUpperCase();
+    if (club) clubs.add(club);
+  }
+
+  return clubs;
+}
+
+function getAflRoundCompletionLabel(importedClubCount: number): string {
+  return importedClubCount >= EXPECTED_AFL_CLUB_COUNT ? "FINAL" : "LIVE";
+}
+
+function buildPlayerClubLookup(params: {
+  coachId: number;
+  coachName: string;
+}): Map<string, PlayerClubInfo> {
+  const pool = getPlayersForCoach({ coachId: params.coachId, coachName: params.coachName });
+  const lookup = new Map<string, PlayerClubInfo>();
+
+  for (const [position, players] of Object.entries(pool)) {
+    for (const player of players) {
+      lookup.set(normalisePlayerName(player.name), {
+        club: player.club.trim().toUpperCase(),
         position,
+        number: player.number,
       });
     }
   }
@@ -342,141 +280,452 @@ function buildPlayerLookup(pool: CoachPlayerPool): Map<string, PlayerLookupRow> 
   return lookup;
 }
 
-function renderPlayerLine(playerName: string, lookup: Map<string, PlayerLookupRow>) {
-  const player = lookup.get(playerName);
+function getPlayerClub(params: {
+  playerName: string;
+  stat: AflPlayerRoundStatRow | null;
+  playerLookup: Map<string, PlayerClubInfo>;
+}): string | null {
+  const fromLookup = params.playerLookup.get(normalisePlayerName(params.playerName))?.club ?? null;
+  const fromStat = params.stat?.afl_team_code?.trim().toUpperCase() || null;
 
-  if (!player) {
-    return playerName;
-  }
-
-  return `${player.number}. ${player.name} (${player.club})`;
+  return fromLookup || fromStat;
 }
 
-function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
-  const row = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+function buildCoachBreakdownRows(
+  teamData: CoachTeamData | null | undefined,
+  statsMap: Map<string, AflPlayerRoundStatRow>,
+  importedClubCodes: Set<string>,
+  playerLookup: Map<string, PlayerClubInfo>
+): PlayerBreakdownRow[] {
+  if (!teamData) return [];
+
+  const usedEmergencyNames = new Set<string>();
+  const rows: PlayerBreakdownRow[] = [];
+
+  const positionKeys = Array.from(
+    new Set([...POSITION_ORDER, ...Object.keys(teamData)])
+  ).filter((position) => Boolean(teamData[position]));
+
+  for (const position of positionKeys) {
+    const positionData = teamData[position] ?? {};
+    const onField = Array.isArray(positionData.onField) ? positionData.onField : [];
+    const emergencies = Array.isArray(positionData.emergencies) ? positionData.emergencies : [];
+
+    const emergencyStats = emergencies.map((playerName, index) => {
+      const stat = statsMap.get(normalisePlayerName(playerName)) ?? null;
+      const playerClub = getPlayerClub({ playerName, stat, playerLookup });
+      const clubImported = playerClub ? importedClubCodes.has(playerClub) : false;
+
+      return {
+        playerName,
+        index,
+        selectedType: `I${index + 1}`,
+        stat,
+        playerClub,
+        played: Boolean(stat),
+        clubImported,
+      };
+    });
+
+    for (const playerName of onField) {
+      const stat = statsMap.get(normalisePlayerName(playerName)) ?? null;
+      const playerClub = getPlayerClub({ playerName, stat, playerLookup });
+      const clubImported = playerClub ? importedClubCodes.has(playerClub) : false;
+      const played = Boolean(stat);
+
+      if (played) {
+        rows.push({
+          key: `${position}-X-${playerName}`,
+          position,
+          selectedType: "X",
+          playerName,
+          playerClub,
+          stat,
+          points: calculatePlayerPoints(stat),
+          played,
+          clubImported,
+          countsToTotal: true,
+          replacedPlayerName: null,
+        });
+
+        continue;
+      }
+
+      rows.push({
+        key: `${position}-X-${playerName}`,
+        position,
+        selectedType: "X",
+        playerName,
+        playerClub,
+        stat,
+        points: null,
+        played: false,
+        clubImported,
+        countsToTotal: false,
+        replacedPlayerName: null,
+      });
+
+      if (!clubImported) {
+        continue;
+      }
+
+      const replacement = emergencyStats.find((emergency) => {
+        if (!emergency.played || !emergency.stat) return false;
+        return !usedEmergencyNames.has(normalisePlayerName(emergency.playerName));
+      });
+
+      if (replacement?.stat) {
+        usedEmergencyNames.add(normalisePlayerName(replacement.playerName));
+        rows.push({
+          key: `${position}-${replacement.selectedType}-${replacement.playerName}-replacement`,
+          position,
+          selectedType: replacement.selectedType,
+          playerName: replacement.playerName,
+          playerClub: replacement.playerClub,
+          stat: replacement.stat,
+          points: calculatePlayerPoints(replacement.stat),
+          played: true,
+          clubImported: replacement.clubImported,
+          countsToTotal: true,
+          replacedPlayerName: playerName,
+        });
+      }
+    }
+
+    for (const emergency of emergencyStats) {
+      const emergencyKey = normalisePlayerName(emergency.playerName);
+
+      if (usedEmergencyNames.has(emergencyKey)) continue;
+
+      rows.push({
+        key: `${position}-${emergency.selectedType}-${emergency.playerName}`,
+        position,
+        selectedType: emergency.selectedType,
+        playerName: emergency.playerName,
+        playerClub: emergency.playerClub,
+        stat: emergency.stat,
+        points: calculatePlayerPoints(emergency.stat),
+        played: emergency.played,
+        clubImported: emergency.clubImported,
+        countsToTotal: false,
+        replacedPlayerName: null,
+      });
+    }
+  }
+
+  return rows;
+}
+
+function calculateTeamTotal(rows: PlayerBreakdownRow[]): number {
+  return rows.reduce((total, row) => {
+    if (!row.countsToTotal || row.points === null) return total;
+    return total + row.points;
+  }, 0);
+}
+
+function getAutoMatchOutcome(params: {
+  coach1Name: string;
+  coach1Total: number;
+  coach1HasSubmission: boolean;
+  coach2Name: string;
+  coach2Total: number;
+  coach2HasSubmission: boolean;
+  pendingPlayers: number;
+}): MatchAutoOutcome {
+  const isReadyToScore = params.coach1HasSubmission && params.coach2HasSubmission;
+
+  if (!isReadyToScore) {
+    return {
+      label: "Waiting for submitted teams",
+      margin: null,
+      isDraw: false,
+      winnerName: null,
+      loserName: null,
+      isReadyToScore: false,
+    };
+  }
+
+  const pendingLabel =
+    params.pendingPlayers > 0
+      ? ` (${params.pendingPlayers} selected player${params.pendingPlayers === 1 ? "" : "s"} pending)`
+      : "";
+
+  if (params.coach1Total === params.coach2Total) {
+    return {
+      label: `${params.coach1Name} ${formatScore(params.coach1Total)} drew with ${params.coach2Name} ${formatScore(params.coach2Total)}${pendingLabel}`,
+      margin: 0,
+      isDraw: true,
+      winnerName: null,
+      loserName: null,
+      isReadyToScore: true,
+    };
+  }
+
+  const coach1Won = params.coach1Total > params.coach2Total;
+  const winnerName = coach1Won ? params.coach1Name : params.coach2Name;
+  const loserName = coach1Won ? params.coach2Name : params.coach1Name;
+  const winnerScore = coach1Won ? params.coach1Total : params.coach2Total;
+  const loserScore = coach1Won ? params.coach2Total : params.coach1Total;
+  const margin = Math.abs(params.coach1Total - params.coach2Total);
 
   return {
-    environment: APP_ENV,
-    current_afl_round:
-      typeof row.current_afl_round === "number"
-        ? row.current_afl_round
-        : typeof row.current_afl_round === "string"
-          ? Number(row.current_afl_round)
-          : null,
+    label: `${winnerName} ${formatScore(winnerScore)} def. ${loserName} ${formatScore(loserScore)}${pendingLabel}`,
+    margin,
+    isDraw: false,
+    winnerName,
+    loserName,
+    isReadyToScore: true,
   };
 }
 
-function sortFixtureRows(rows: FixtureRow[]): FixtureRow[] {
-  return [...rows].sort((a, b) => {
-    if (a.competition_round !== b.competition_round) {
-      return a.competition_round - b.competition_round;
-    }
+function getPlayingStatus(row: PlayerBreakdownRow): string {
+  if (row.countsToTotal && row.replacedPlayerName) {
+    return `Counts for ${row.replacedPlayerName}`;
+  }
 
-    if (a.matchup_index !== b.matchup_index) {
-      return a.matchup_index - b.matchup_index;
-    }
+  if (row.countsToTotal) {
+    return "Counts";
+  }
 
-    return a.opponent_coach_id - b.opponent_coach_id;
-  });
+  if (row.played) {
+    return "Played - emergency only";
+  }
+
+  if (row.clubImported) {
+    return "Did not play";
+  }
+
+  if (row.playerClub) {
+    return `${row.playerClub} pending`;
+  }
+
+  return "Pending - club unknown";
 }
 
-function TeamPanel({
-  title,
-  subtitle,
-  team,
-  lookup,
-  submitted,
-  updatedAt,
-  submittedAt,
+function getStatNumber(stat: AflPlayerRoundStatRow | null, key: keyof AflPlayerRoundStatRow): string {
+  if (!stat) return "—";
+  const value = stat[key];
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return "—";
+}
+
+function parseTeamData(value: unknown): CoachTeamData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const output: CoachTeamData = {};
+
+  for (const [position, rawPositionData] of Object.entries(value as Record<string, unknown>)) {
+    if (!rawPositionData || typeof rawPositionData !== "object" || Array.isArray(rawPositionData)) {
+      output[position] = { onField: [], emergencies: [] };
+      continue;
+    }
+
+    const positionData = rawPositionData as Record<string, unknown>;
+
+    output[position] = {
+      onField: Array.isArray(positionData.onField)
+        ? positionData.onField.filter((player): player is string => typeof player === "string")
+        : [],
+      emergencies: Array.isArray(positionData.emergencies)
+        ? positionData.emergencies.filter((player): player is string => typeof player === "string")
+        : [],
+    };
+  }
+
+  return output;
+}
+
+
+
+type MatchView = {
+  key: string;
+  fixture: FixtureRow;
+  roundNumber: number;
+  aflRound: number;
+  matchupIndex: number;
+  selectedCoachId: number;
+  selectedCoachName: string;
+  opponentCoachId: number;
+  opponentCoachName: string;
+};
+
+type CoachLivePanelProps = {
+  coachId: number;
+  coachName: string;
+  submission: RoundSubmissionRow | null;
+  rows: PlayerBreakdownRow[];
+  total: number;
+  pendingPlayers: number;
+  countedPlayers: number;
+  accentClass?: string;
+};
+
+function buildMatchViewForCoach(row: FixtureRow, selectedCoachId: number): MatchView | null {
+  if (row.coach_id === selectedCoachId) {
+    return {
+      key: `${row.id}-${row.coach_id}-${row.opponent_coach_id}`,
+      fixture: row,
+      roundNumber: row.competition_round,
+      aflRound: row.afl_round,
+      matchupIndex: row.matchup_index,
+      selectedCoachId: row.coach_id,
+      selectedCoachName: row.coach_name,
+      opponentCoachId: row.opponent_coach_id,
+      opponentCoachName: row.opponent_coach_name,
+    };
+  }
+
+  if (row.opponent_coach_id === selectedCoachId) {
+    return {
+      key: `${row.id}-${row.opponent_coach_id}-${row.coach_id}`,
+      fixture: row,
+      roundNumber: row.competition_round,
+      aflRound: row.afl_round,
+      matchupIndex: row.matchup_index,
+      selectedCoachId: row.opponent_coach_id,
+      selectedCoachName: row.opponent_coach_name,
+      opponentCoachId: row.coach_id,
+      opponentCoachName: row.coach_name,
+    };
+  }
+
+  return null;
+}
+
+function getMarginLabel(teamAName: string, teamATotal: number, teamBName: string, teamBTotal: number, pendingPlayers: number): string {
+  const pendingSuffix = pendingPlayers > 0 ? ` • ${pendingPlayers} pending` : "";
+
+  if (teamATotal === teamBTotal) {
+    return `${teamAName} and ${teamBName} are tied on ${formatScore(teamATotal)}${pendingSuffix}`;
+  }
+
+  const teamAIsLeading = teamATotal > teamBTotal;
+  const leaderName = teamAIsLeading ? teamAName : teamBName;
+  const trailerName = teamAIsLeading ? teamBName : teamAName;
+  const margin = Math.abs(teamATotal - teamBTotal);
+
+  return `${leaderName} leads ${trailerName} by ${formatScore(margin)}${pendingSuffix}`;
+}
+
+function CompactStatLine({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="rounded border border-white/10 bg-black/25 px-1.5 py-0.5 text-[10px] text-white/70">
+      <span className="text-white/35">{label}</span> {value}
+    </span>
+  );
+}
+
+function CoachLivePanel({
+  coachId,
+  coachName,
+  submission,
+  rows,
+  total,
+  pendingPlayers,
+  countedPlayers,
   accentClass = "border-white/10",
-}: TeamPanelProps) {
+}: CoachLivePanelProps) {
+  const groupedRows = POSITION_ORDER.map((position) => ({
+    position,
+    rows: rows.filter((row) => row.position === position),
+  })).filter((group) => group.rows.length > 0);
+
   return (
     <section className={`rounded-2xl border bg-white/5 p-3 ${accentClass}`}>
-      <div className="border-b border-white/10 pb-3">
-        <h2 className="text-lg font-bold">{title}</h2>
-        <p className="mt-1 text-xs text-white/65">{subtitle}</p>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-white/65">
-          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
-            Players: {countSelectedPlayers(team)}
+      <div className="flex flex-col gap-2 border-b border-white/10 pb-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-lg font-bold leading-tight">{coachName}</h3>
+          <div className="mt-1 text-[11px] text-white/50">Coach ID {coachId}</div>
+          <div className="mt-1 text-[11px] text-white/50">
+            Snapshot: {submission ? formatTimestamp(submission.submitted_at) : "No submitted snapshot"}
           </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
-            Submitted: {submitted ? "Yes" : "No"}
-          </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
-            Updated: {formatTimestamp(updatedAt)}
-          </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
-            Submitted At: {formatTimestamp(submittedAt)}
+        </div>
+
+        <div className="rounded-xl border border-green-400/25 bg-green-500/10 px-3 py-2 text-right">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-green-200/80">Live Total</div>
+          <div className="text-3xl font-black leading-none text-green-100">{formatScore(total)}</div>
+          <div className="mt-1 text-[11px] text-white/60">
+            {countedPlayers} counting • {pendingPlayers} pending
           </div>
         </div>
       </div>
 
-      <div className="mt-4 space-y-2">
-        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-white/45">
-            On Field
-          </div>
-
-          <div className="space-y-2">
-            {POSITIONS.map((position) => (
-              <div key={`${position}-onfield`} className="rounded-lg border border-white/10 bg-neutral-900/60 p-2.5">
-                <div className="mb-1 text-xs font-bold text-white">
-                  {position} On Field players
-                </div>
-
-                <div className="space-y-1">
-                  {team[position].onField.length > 0 ? (
-                    team[position].onField.map((playerName) => (
-                      <div
-                        key={`${position}-on-${playerName}`}
-                        className="rounded-md border border-white/10 bg-neutral-900 px-2 py-1.5 text-xs text-white"
-                      >
-                        {renderPlayerLine(playerName, lookup)}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rounded-md border border-dashed border-white/10 px-2 py-1.5 text-xs text-white/45">
-                      None selected
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+      {!submission ? (
+        <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-xs text-amber-100">
+          No round submission snapshot was found for this coach. Once the team is submitted/snapshotted for the round, live stats will show here.
         </div>
+      ) : null}
 
-        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-white/45">
-            Emergencies
+      <div className="mt-3 space-y-3">
+        {groupedRows.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-white/10 p-3 text-xs text-white/45">
+            No selected players found.
           </div>
-
-          <div className="space-y-2">
-            {POSITIONS.map((position) => (
-              <div key={`${position}-emergencies`} className="rounded-lg border border-white/10 bg-neutral-900/60 p-2.5">
-                <div className="mb-1 text-xs font-bold text-white">
-                  {position} Emergencies players
-                </div>
-
-                <div className="space-y-1">
-                  {team[position].emergencies.length > 0 ? (
-                    team[position].emergencies.map((playerName) => (
-                      <div
-                        key={`${position}-emg-${playerName}`}
-                        className="rounded-md border border-white/10 bg-neutral-900 px-2 py-1.5 text-xs text-white"
-                      >
-                        {renderPlayerLine(playerName, lookup)}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rounded-md border border-dashed border-white/10 px-2 py-1.5 text-xs text-white/45">
-                      None selected
-                    </div>
-                  )}
-                </div>
+        ) : (
+          groupedRows.map((group) => (
+            <div key={`${coachId}-${group.position}`} className="rounded-xl border border-white/10 bg-black/20 p-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <div className="text-xs font-black uppercase tracking-wide text-white/70">{group.position}</div>
+                <div className="text-[10px] text-white/35">{group.rows.length} rows</div>
               </div>
-            ))}
-          </div>
-        </div>
+
+              <div className="space-y-1">
+                {group.rows.map((row) => (
+                  <div
+                    key={row.key}
+                    className={`rounded-lg border px-2 py-1.5 text-[11px] ${
+                      row.countsToTotal
+                        ? "border-green-400/25 bg-green-500/10 text-white"
+                        : row.played
+                          ? "border-white/10 bg-white/[0.03] text-white/70"
+                          : "border-white/10 bg-black/15 text-white/40"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span
+                        className={`rounded-md border px-1.5 py-0.5 text-[10px] font-black ${
+                          row.countsToTotal
+                            ? "border-green-400/30 bg-green-500/15 text-green-100"
+                            : "border-white/10 bg-white/5 text-white/55"
+                        }`}
+                      >
+                        {row.selectedType}
+                      </span>
+
+                      <span className="min-w-[155px] flex-1 font-bold text-white">
+                        {row.playerName}
+                        {row.playerClub ? <span className="ml-1 font-normal text-white/40">({row.playerClub})</span> : null}
+                      </span>
+
+                      <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-2 py-0.5 text-[11px] font-black text-violet-100">
+                        {row.points === null ? "—" : formatScore(row.points)} pts
+                      </span>
+
+                      <CompactStatLine label="D" value={getStatNumber(row.stat, "d")} />
+                      <CompactStatLine label="M" value={getStatNumber(row.stat, "m")} />
+                      <CompactStatLine label="G" value={getStatNumber(row.stat, "g")} />
+                      <CompactStatLine label="B" value={getStatNumber(row.stat, "b")} />
+                      <CompactStatLine label="T" value={getStatNumber(row.stat, "t")} />
+                      <CompactStatLine label="HO" value={getStatNumber(row.stat, "ho")} />
+                      <CompactStatLine label="FF" value={getStatNumber(row.stat, "ff")} />
+                      <CompactStatLine label="FA" value={getStatNumber(row.stat, "fa")} />
+
+                      <span className="ml-auto rounded border border-white/10 bg-black/25 px-1.5 py-0.5 text-[10px] text-white/60">
+                        {getPlayingStatus(row)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </section>
   );
@@ -484,17 +733,16 @@ function TeamPanel({
 
 export default function OpponentTeamPage() {
   const router = useRouter();
-  const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
-  const [selectedCoachId, setSelectedCoachId] = useState<number>(coachConfigs[0]?.id ?? 1);
-  const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
-  const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
-  const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
-  const [isLoadingTeams, setIsLoadingTeams] = useState(true);
-  const [isLoadingFixture, setIsLoadingFixture] = useState(true);
   const [message, setMessage] = useState("");
+  const [selectedCoachId, setSelectedCoachId] = useState<number | null>(null);
+  const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
+  const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
+  const [roundSubmissions, setRoundSubmissions] = useState<RoundSubmissionRow[]>([]);
+  const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
+  const [isLoadingPageData, setIsLoadingPageData] = useState(false);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -535,7 +783,7 @@ export default function OpponentTeamPage() {
   const refreshCurrentRound = useCallback(async () => {
     const { data, error } = await supabase
       .from("app_settings")
-      .select("environment, current_afl_round")
+      .select("current_afl_round")
       .eq("environment", APP_ENV)
       .maybeSingle();
 
@@ -545,45 +793,17 @@ export default function OpponentTeamPage() {
       return null;
     }
 
-    const settings = normaliseAppSettingsRow(data);
-    setCurrentAflRound(settings.current_afl_round);
+    const row = data as AppSettingsRow | null;
+    const round = toNullableNumber(row?.current_afl_round ?? null);
 
-    return settings.current_afl_round;
+    setCurrentAflRound(round);
+    return round;
   }, []);
 
-  const refreshTeams = useCallback(async () => {
-    setIsLoadingTeams(true);
-
-    const { data, error } = await supabase
-      .from("coach_team_selections")
-      .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
-      .eq("environment", APP_ENV);
-
-    if (error) {
-      setMessage(`Team load failed: ${error.message}`);
-      setIsLoadingTeams(false);
-      return;
-    }
-
-    const nextMap: Record<number, SavedTeamRow> = {};
-
-    for (const row of (data ?? []) as SavedTeamRow[]) {
-      nextMap[row.coach_id] = row;
-    }
-
-    setTeamRowsByCoachId(nextMap);
-    setIsLoadingTeams(false);
-  }, []);
-
-  const refreshFixture = useCallback(async () => {
-    setIsLoadingFixture(true);
-
-    const aflRound = await refreshCurrentRound();
-
-    if (!aflRound || !Number.isFinite(aflRound)) {
+  const refreshFixtureRows = useCallback(async (aflRound: number | null) => {
+    if (!aflRound) {
       setFixtureRows([]);
-      setIsLoadingFixture(false);
-      return;
+      return [];
     }
 
     const { data, error } = await supabase
@@ -592,18 +812,129 @@ export default function OpponentTeamPage() {
         "id, environment, competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
       )
       .eq("environment", APP_ENV)
-      .eq("afl_round", aflRound);
+      .eq("afl_round", aflRound)
+      .order("competition_round", { ascending: true })
+      .order("matchup_index", { ascending: true })
+      .order("coach_id", { ascending: true });
 
     if (error) {
       setMessage(`Fixture load failed: ${error.message}`);
       setFixtureRows([]);
-      setIsLoadingFixture(false);
-      return;
+      return [];
     }
 
-    setFixtureRows(sortFixtureRows((data ?? []) as FixtureRow[]));
-    setIsLoadingFixture(false);
-  }, [refreshCurrentRound]);
+    const rows = sortFixtureRows((data ?? []) as FixtureRow[]);
+    setFixtureRows(rows);
+    return rows;
+  }, []);
+
+  const refreshRoundSubmissions = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("round_submissions")
+      .select("id, coach_id, coach_name, round_number, team_data, submitted_at")
+      .eq("environment", APP_ENV)
+      .eq("is_submitted", true)
+      .order("round_number", { ascending: false })
+      .order("submitted_at", { ascending: false });
+
+    if (error) {
+      setMessage(`Round submissions load failed: ${error.message}`);
+      setRoundSubmissions([]);
+      return [];
+    }
+
+    const rows: RoundSubmissionRow[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+      id: toNumber(row.id),
+      coach_id: toNumber(row.coach_id),
+      coach_name: typeof row.coach_name === "string" ? row.coach_name : "Unknown Coach",
+      round_number: toNumber(row.round_number),
+      team_data: parseTeamData(row.team_data),
+      submitted_at: typeof row.submitted_at === "string" ? row.submitted_at : "",
+    }));
+
+    setRoundSubmissions(rows);
+    return rows;
+  }, []);
+
+  const refreshPlayerStats = useCallback(async (aflRound: number | null) => {
+    if (!aflRound) {
+      setPlayerStats([]);
+      return [];
+    }
+
+    const pageSize = 1000;
+    let from = 0;
+    let allRows: Record<string, unknown>[] = [];
+
+    while (true) {
+      const to = from + pageSize - 1;
+
+      const { data, error } = await supabase
+        .from("afl_player_round_stats")
+        .select(
+          "id, afl_round, afl_team_name, afl_team_code, player_name, k, hb, d, m, g, b, t, ho, ga, i50, cl, cg, r50, ff, fa, af, sc, imported_at"
+        )
+        .eq("environment", APP_ENV)
+        .eq("afl_round", aflRound)
+        .order("player_name", { ascending: true })
+        .range(from, to);
+
+      if (error) {
+        setMessage(`Player stats load failed: ${error.message}`);
+        setPlayerStats([]);
+        return [];
+      }
+
+      const pageRows = (data ?? []) as Record<string, unknown>[];
+      allRows = [...allRows, ...pageRows];
+
+      if (pageRows.length < pageSize) break;
+      from += pageSize;
+    }
+
+    const rows: AflPlayerRoundStatRow[] = allRows.map((row) => ({
+      id: toNumber(row.id),
+      afl_round: toNumber(row.afl_round),
+      afl_team_name: typeof row.afl_team_name === "string" ? row.afl_team_name : null,
+      afl_team_code: typeof row.afl_team_code === "string" ? row.afl_team_code : "",
+      player_name: typeof row.player_name === "string" ? row.player_name : "",
+      k: toNumber(row.k),
+      hb: toNumber(row.hb),
+      d: toNumber(row.d),
+      m: toNumber(row.m),
+      g: toNumber(row.g),
+      b: toNumber(row.b),
+      t: toNumber(row.t),
+      ho: toNumber(row.ho),
+      ga: toNumber(row.ga),
+      i50: toNumber(row.i50),
+      cl: toNumber(row.cl),
+      cg: toNumber(row.cg),
+      r50: toNumber(row.r50),
+      ff: toNumber(row.ff),
+      fa: toNumber(row.fa),
+      af: toNumber(row.af),
+      sc: toNumber(row.sc),
+      imported_at: typeof row.imported_at === "string" ? row.imported_at : "",
+    }));
+
+    setPlayerStats(rows);
+    return rows;
+  }, []);
+
+  const refreshPageData = useCallback(async () => {
+    setIsLoadingPageData(true);
+    setMessage("");
+
+    const aflRound = await refreshCurrentRound();
+    await Promise.all([
+      refreshFixtureRows(aflRound),
+      refreshRoundSubmissions(),
+      refreshPlayerStats(aflRound),
+    ]);
+
+    setIsLoadingPageData(false);
+  }, [refreshCurrentRound, refreshFixtureRows, refreshPlayerStats, refreshRoundSubmissions]);
 
   useEffect(() => {
     let isMounted = true;
@@ -644,13 +975,8 @@ export default function OpponentTeamPage() {
       }
 
       setLoginSession(nextSession);
-
-      if (nextSession.role === "coach" && nextSession.coachId) {
-        setSelectedCoachId(nextSession.coachId);
-      }
-
+      setSelectedCoachId(nextSession.role === "coach" ? nextSession.coachId : nextSession.coachId ?? null);
       setIsAuthenticating(false);
-      await Promise.all([refreshTeams(), refreshFixture()]);
     }
 
     void bootstrapAuth();
@@ -680,13 +1006,8 @@ export default function OpponentTeamPage() {
         }
 
         setLoginSession(nextSession);
-
-        if (nextSession.role === "coach" && nextSession.coachId) {
-          setSelectedCoachId(nextSession.coachId);
-        }
-
+        setSelectedCoachId(nextSession.role === "coach" ? nextSession.coachId : nextSession.coachId ?? null);
         setIsAuthenticating(false);
-        await Promise.all([refreshTeams(), refreshFixture()]);
       })();
     });
 
@@ -694,29 +1015,18 @@ export default function OpponentTeamPage() {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [loadProfileForUser, refreshFixture, refreshTeams, router]);
+  }, [loadProfileForUser, router]);
+
+  useEffect(() => {
+    if (!loginSession) return;
+    void refreshPageData();
+  }, [loginSession, refreshPageData]);
 
   useEffect(() => {
     if (!loginSession) return;
 
-    const teamChannel = supabase
-      .channel(`opponent-team-selections-${APP_ENV}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "coach_team_selections",
-          filter: `environment=eq.${APP_ENV}`,
-        },
-        () => {
-          void refreshTeams();
-        }
-      )
-      .subscribe();
-
-    const fixtureChannel = supabase
-      .channel(`opponent-fixture-${APP_ENV}`)
+    const channel = supabase
+      .channel(`opponent-live-${APP_ENV}`)
       .on(
         "postgres_changes",
         {
@@ -726,7 +1036,7 @@ export default function OpponentTeamPage() {
           filter: `environment=eq.${APP_ENV}`,
         },
         () => {
-          void refreshFixture();
+          void refreshPageData();
         }
       )
       .on(
@@ -738,106 +1048,161 @@ export default function OpponentTeamPage() {
           filter: `environment=eq.${APP_ENV}`,
         },
         () => {
-          void refreshFixture();
+          void refreshPageData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "round_submissions",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshPageData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "afl_player_round_stats",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshPageData();
         }
       )
       .subscribe();
 
     return () => {
-      void supabase.removeChannel(teamChannel);
-      void supabase.removeChannel(fixtureChannel);
+      void supabase.removeChannel(channel);
     };
-  }, [loginSession, refreshFixture, refreshTeams]);
+  }, [loginSession, refreshPageData]);
+
+  const availableCoaches = useMemo(() => {
+    const map = new Map<number, string>();
+
+    for (const row of fixtureRows) {
+      map.set(row.coach_id, row.coach_name);
+      map.set(row.opponent_coach_id, row.opponent_coach_name);
+    }
+
+    for (const submission of roundSubmissions) {
+      if (!map.has(submission.coach_id)) {
+        map.set(submission.coach_id, submission.coach_name);
+      }
+    }
+
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.id - b.id);
+  }, [fixtureRows, roundSubmissions]);
 
   useEffect(() => {
-    if (!loginSession) return;
+    if (selectedCoachId || availableCoaches.length === 0) return;
 
-    if (loginSession.role === "coach" && loginSession.coachId) {
+    if (loginSession?.role === "coach" && loginSession.coachId) {
       setSelectedCoachId(loginSession.coachId);
+      return;
     }
-  }, [loginSession]);
+
+    setSelectedCoachId(availableCoaches[0].id);
+  }, [availableCoaches, loginSession, selectedCoachId]);
+
+  const selectedCoachName = useMemo(() => {
+    if (!selectedCoachId) return "—";
+    return availableCoaches.find((coach) => coach.id === selectedCoachId)?.name ?? `Coach ${selectedCoachId}`;
+  }, [availableCoaches, selectedCoachId]);
+
+  const selectedCoachMatchViews = useMemo(() => {
+    if (!selectedCoachId) return [];
+
+    const seen = new Set<string>();
+    const matches: MatchView[] = [];
+
+    for (const row of fixtureRows) {
+      const view = buildMatchViewForCoach(row, selectedCoachId);
+      if (!view) continue;
+
+      const pairKey = `${view.roundNumber}-${view.aflRound}-${view.matchupIndex}-${[view.selectedCoachId, view.opponentCoachId].sort((a, b) => a - b).join("-")}`;
+      if (seen.has(pairKey)) continue;
+
+      seen.add(pairKey);
+      matches.push(view);
+    }
+
+    return matches.sort((a, b) => {
+      if (a.roundNumber !== b.roundNumber) return a.roundNumber - b.roundNumber;
+      return a.matchupIndex - b.matchupIndex;
+    });
+  }, [fixtureRows, selectedCoachId]);
+
+  const submissionByRoundAndCoach = useMemo(() => {
+    const exact = new Map<string, RoundSubmissionRow>();
+    const latestByCoach = new Map<number, RoundSubmissionRow>();
+
+    for (const submission of roundSubmissions) {
+      const exactKey = `${submission.round_number}-${submission.coach_id}`;
+      if (!exact.has(exactKey)) {
+        exact.set(exactKey, submission);
+      }
+
+      const latest = latestByCoach.get(submission.coach_id);
+      if (!latest || new Date(submission.submitted_at).getTime() > new Date(latest.submitted_at).getTime()) {
+        latestByCoach.set(submission.coach_id, submission);
+      }
+    }
+
+    return { exact, latestByCoach };
+  }, [roundSubmissions]);
+
+  function getCoachSubmission(roundNumber: number, coachId: number): RoundSubmissionRow | null {
+    return (
+      submissionByRoundAndCoach.exact.get(`${roundNumber}-${coachId}`) ??
+      submissionByRoundAndCoach.latestByCoach.get(coachId) ??
+      null
+    );
+  }
+
+  const currentImportedClubCodes = useMemo(
+    () => buildImportedClubSetForRound(playerStats, currentAflRound),
+    [currentAflRound, playerStats]
+  );
+
+  const currentRoundStatus = getAflRoundCompletionLabel(currentImportedClubCodes.size);
+  const canChangeCoach = loginSession?.role === "admin";
 
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace("/login");
   }
 
-  const selectedCoach =
-    coachConfigs.find((coach) => coach.id === selectedCoachId) ?? coachConfigs[0] ?? null;
-
-  const canChangeCoach = loginSession?.role === "admin";
-
-  const selectedCoachPool = useMemo(
-    () => getCoachPool(selectedCoach ?? undefined),
-    [selectedCoach]
-  );
-
-  const selectedCoachLookup = useMemo(
-    () => buildPlayerLookup(selectedCoachPool),
-    [selectedCoachPool]
-  );
-
-  const selectedCoachRow = selectedCoach ? teamRowsByCoachId[selectedCoach.id] ?? null : null;
-  const selectedCoachTeam = useMemo(
-    () => sanitiseTeamState(selectedCoachRow?.team_data),
-    [selectedCoachRow]
-  );
-
-  const selectedCoachFixtureRows = useMemo(() => {
-    if (!selectedCoach) return [];
-    return sortFixtureRows(fixtureRows.filter((row) => row.coach_id === selectedCoach.id));
-  }, [fixtureRows, selectedCoach]);
-
-  const opponentPanels = useMemo(() => {
-    return selectedCoachFixtureRows.map((fixtureRow) => {
-      const opponentCoach = coachConfigs.find(
-        (coach) => coach.id === fixtureRow.opponent_coach_id
-      );
-      const opponentCoachRow = teamRowsByCoachId[fixtureRow.opponent_coach_id] ?? null;
-      const opponentCoachTeam = sanitiseTeamState(opponentCoachRow?.team_data);
-      const opponentCoachPool = getCoachPool(opponentCoach);
-      const opponentCoachLookup = buildPlayerLookup(opponentCoachPool);
-
-      return {
-        fixtureRow,
-        opponentCoachRow,
-        opponentCoachTeam,
-        opponentCoachLookup,
-      };
-    });
-  }, [coachConfigs, selectedCoachFixtureRows, teamRowsByCoachId]);
-
-  const isLoadingPage = isLoadingTeams || isLoadingFixture;
-  const comparisonGridClass =
-    opponentPanels.length >= 2
-      ? "grid gap-3 xl:grid-cols-3"
-      : "grid gap-3 xl:grid-cols-2";
-
   if (isAuthenticating) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
-        <div className="mx-auto max-w-[1800px] rounded-2xl border border-white/10 bg-white/5 p-6">
+        <div className="mx-auto max-w-[1900px] rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="text-lg font-semibold">Checking session...</div>
         </div>
       </main>
     );
   }
 
-  if (!loginSession) {
-    return null;
-  }
+  if (!loginSession) return null;
 
   return (
-    <main className="min-h-screen bg-neutral-950 px-4 py-5 text-white">
-      <div className="mx-auto max-w-[1800px] space-y-4">
+    <main className="min-h-screen bg-neutral-950 px-3 py-4 text-white sm:px-4">
+      <div className="mx-auto max-w-[1900px] space-y-4">
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h1 className="text-2xl font-bold">Opponent Team</h1>
+              <h1 className="text-2xl font-black">Opponent Team</h1>
               <p className="mt-1 text-sm text-white/70">
-                Compact matchup view for the current AFL week.
+                Live matchup view from submitted round snapshots and imported AFL player stats.
               </p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-white/60">
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-white/60">
                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
                   Signed in as {loginSession.coachName}
                 </span>
@@ -845,10 +1210,19 @@ export default function OpponentTeamPage() {
                   Role: {loginSession.role}
                 </span>
                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
-                  Environment: {APP_ENV}
+                  AFL Round: {currentAflRound ?? "Not set"}
+                </span>
+                <span
+                  className={`rounded-full border px-3 py-1 font-bold ${
+                    currentRoundStatus === "FINAL"
+                      ? "border-green-400/30 bg-green-500/15 text-green-200"
+                      : "border-amber-400/30 bg-amber-500/15 text-amber-100"
+                  }`}
+                >
+                  {currentRoundStatus} • {currentImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} clubs
                 </span>
                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
-                  Current AFL Round: {currentAflRound ?? "Not set"}
+                  Stat rows: {playerStats.length}
                 </span>
               </div>
             </div>
@@ -856,9 +1230,7 @@ export default function OpponentTeamPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  void Promise.all([refreshTeams(), refreshFixture()]);
-                }}
+                onClick={() => void refreshPageData()}
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
               >
                 Refresh
@@ -882,112 +1254,169 @@ export default function OpponentTeamPage() {
           </div>
 
           {message ? (
-            <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
               {message}
             </div>
           ) : null}
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="grid gap-3 lg:grid-cols-3">
-            <div>
-              <div className="mb-2 text-sm font-medium text-white/80">Coach</div>
-              {canChangeCoach ? (
-                <select
-                  value={selectedCoachId}
-                  onChange={(e) => setSelectedCoachId(Number(e.target.value))}
-                  className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
-                >
-                  {coachConfigs.map((coach) => (
-                    <option key={coach.id} value={coach.id}>
-                      {coach.name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white">
-                  {selectedCoach?.name ?? "—"}
-                </div>
-              )}
-            </div>
+        <section className="grid gap-3 lg:grid-cols-[minmax(260px,420px)_1fr_1fr]">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <label className="text-xs font-bold uppercase tracking-wide text-white/50" htmlFor="coach-select">
+              Coach
+            </label>
+            {canChangeCoach ? (
+              <select
+                id="coach-select"
+                value={selectedCoachId ?? ""}
+                onChange={(event) => setSelectedCoachId(Number(event.target.value))}
+                className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-2 text-sm font-semibold text-white outline-none"
+              >
+                {availableCoaches.map((coach) => (
+                  <option key={coach.id} value={coach.id}>
+                    {coach.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="mt-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm font-semibold">
+                {selectedCoachName}
+              </div>
+            )}
+          </div>
 
-            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                Selected Coach
-              </div>
-              <div className="mt-2 text-lg font-bold">{selectedCoach?.name ?? "—"}</div>
-              <div className="mt-1 text-sm text-white/70">
-                Players selected: {countSelectedPlayers(selectedCoachTeam)}
-              </div>
-              <div className="mt-1 text-sm text-white/70">
-                Submitted: {selectedCoachRow?.is_submitted ? "Yes" : "No"}
-              </div>
-              <div className="mt-1 text-xs text-white/50">
-                Last updated: {formatTimestamp(selectedCoachRow?.updated_at)}
-              </div>
+          <div className="rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4">
+            <div className="text-xs font-bold uppercase tracking-wide text-violet-200/80">Selected Coach</div>
+            <div className="mt-1 text-2xl font-black">{selectedCoachName}</div>
+            <div className="mt-1 text-sm text-white/70">
+              {selectedCoachMatchViews.length} current matchup{selectedCoachMatchViews.length === 1 ? "" : "s"}
             </div>
+          </div>
 
-            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                Weekly Opponents
-              </div>
-              <div className="mt-2 text-lg font-bold">
-                {selectedCoachFixtureRows.length > 0
-                  ? `${selectedCoachFixtureRows.length} matchup${
-                      selectedCoachFixtureRows.length === 1 ? "" : "s"
-                    }`
-                  : "No matchup found"}
-              </div>
-              <div className="mt-1 text-sm text-white/70">
-                {selectedCoachFixtureRows.length > 0
-                  ? selectedCoachFixtureRows
-                      .map((row) => `R${row.competition_round} vs ${row.opponent_coach_name}`)
-                      .join(" • ")
-                  : "Check current_afl_round and season_fixture"}
-              </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs font-bold uppercase tracking-wide text-white/50">Weekly Opponent</div>
+            <div className="mt-1 text-2xl font-black">
+              {selectedCoachMatchViews.length > 0
+                ? selectedCoachMatchViews.map((match) => match.opponentCoachName).join(" + ")
+                : "—"}
+            </div>
+            <div className="mt-1 text-sm text-white/70">
+              {selectedCoachMatchViews.length > 0
+                ? selectedCoachMatchViews
+                    .map((match) => `S8 R${match.roundNumber} • AFL R${match.aflRound}`)
+                    .join(" • ")
+                : "No fixture found for current AFL round"}
             </div>
           </div>
         </section>
 
-        {selectedCoachFixtureRows.length === 0 && !isLoadingPage ? (
-          <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-5 text-sm text-white/60">
-            No opponent rows were found for this coach in AFL Round {currentAflRound ?? "—"}.
+        {isLoadingPageData ? (
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
+            Loading live opponent data...
           </section>
         ) : null}
 
-        <section className={comparisonGridClass}>
-          <TeamPanel
-            title={selectedCoach?.name ?? "Selected Coach"}
-            subtitle="Your team for the current AFL week."
-            team={selectedCoachTeam}
-            lookup={selectedCoachLookup}
-            submitted={Boolean(selectedCoachRow?.is_submitted)}
-            updatedAt={selectedCoachRow?.updated_at}
-            submittedAt={selectedCoachRow?.submitted_at}
-            accentClass="border-violet-500/30"
-          />
+        {!isLoadingPageData && selectedCoachMatchViews.length === 0 ? (
+          <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-5 text-sm text-white/60">
+            No opponent rows were found for {selectedCoachName} in AFL Round {currentAflRound ?? "—"}.
+          </section>
+        ) : null}
 
-          {opponentPanels.map((panel) => (
-            <TeamPanel
-              key={panel.fixtureRow.id}
-              title={panel.fixtureRow.opponent_coach_name}
-              subtitle={`Competition Round ${panel.fixtureRow.competition_round} • AFL Round ${panel.fixtureRow.afl_round}`}
-              team={panel.opponentCoachTeam}
-              lookup={panel.opponentCoachLookup}
-              submitted={Boolean(panel.opponentCoachRow?.is_submitted)}
-              updatedAt={panel.opponentCoachRow?.updated_at}
-              submittedAt={panel.opponentCoachRow?.submitted_at}
-              accentClass="border-white/10"
-            />
-          ))}
-        </section>
+        <div className="space-y-4">
+          {selectedCoachMatchViews.map((match) => {
+            const statsMap = buildStatsMapForRound(playerStats, match.aflRound);
+            const importedClubCodes = buildImportedClubSetForRound(playerStats, match.aflRound);
 
-        <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-4 text-sm text-white/60">
-          {isLoadingPage
-            ? "Loading team selections and fixture..."
-            : opponentPanels.length > 1
-              ? "Double round detected automatically. Teams are shown side by side in a compact layout."
-              : "Opponent team page is using a more compact layout with On Field players shown first by position, followed by Emergencies in the same position order."}
+            const selectedSubmission = getCoachSubmission(match.roundNumber, match.selectedCoachId);
+            const opponentSubmission = getCoachSubmission(match.roundNumber, match.opponentCoachId);
+
+            const selectedRows = buildCoachBreakdownRows(
+              selectedSubmission?.team_data,
+              statsMap,
+              importedClubCodes,
+              buildPlayerClubLookup({ coachId: match.selectedCoachId, coachName: match.selectedCoachName })
+            );
+
+            const opponentRows = buildCoachBreakdownRows(
+              opponentSubmission?.team_data,
+              statsMap,
+              importedClubCodes,
+              buildPlayerClubLookup({ coachId: match.opponentCoachId, coachName: match.opponentCoachName })
+            );
+
+            const selectedTotal = calculateTeamTotal(selectedRows);
+            const opponentTotal = calculateTeamTotal(opponentRows);
+            const selectedPending = selectedRows.filter((row) => row.selectedType === "X" && !row.played && !row.clubImported).length;
+            const opponentPending = opponentRows.filter((row) => row.selectedType === "X" && !row.played && !row.clubImported).length;
+            const totalPending = selectedPending + opponentPending;
+            const selectedCounting = selectedRows.filter((row) => row.countsToTotal).length;
+            const opponentCounting = opponentRows.filter((row) => row.countsToTotal).length;
+            const marginLabel = getMarginLabel(
+              match.selectedCoachName,
+              selectedTotal,
+              match.opponentCoachName,
+              opponentTotal,
+              totalPending
+            );
+
+            return (
+              <section key={match.key} className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                <div className="mb-3 grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+                  <div className="rounded-xl border border-violet-400/20 bg-violet-500/10 p-3">
+                    <div className="text-xs font-bold uppercase tracking-wide text-violet-200/80">
+                      {match.selectedCoachName}
+                    </div>
+                    <div className="mt-1 text-3xl font-black">{formatScore(selectedTotal)}</div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-center">
+                    <div className="text-xs font-bold uppercase tracking-wide text-white/45">
+                      S8 R{match.roundNumber} • AFL R{match.aflRound} • Match {match.matchupIndex}
+                    </div>
+                    <div className="mt-1 text-sm font-bold text-white">{marginLabel}</div>
+                    <div className="mt-1 text-[11px] text-white/45">
+                      {importedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} AFL clubs imported
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-right">
+                    <div className="text-xs font-bold uppercase tracking-wide text-white/50">
+                      {match.opponentCoachName}
+                    </div>
+                    <div className="mt-1 text-3xl font-black">{formatScore(opponentTotal)}</div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <CoachLivePanel
+                    coachId={match.selectedCoachId}
+                    coachName={match.selectedCoachName}
+                    submission={selectedSubmission}
+                    rows={selectedRows}
+                    total={selectedTotal}
+                    pendingPlayers={selectedPending}
+                    countedPlayers={selectedCounting}
+                    accentClass="border-violet-500/30"
+                  />
+
+                  <CoachLivePanel
+                    coachId={match.opponentCoachId}
+                    coachName={match.opponentCoachName}
+                    submission={opponentSubmission}
+                    rows={opponentRows}
+                    total={opponentTotal}
+                    pendingPlayers={opponentPending}
+                    countedPlayers={opponentCounting}
+                    accentClass="border-white/10"
+                  />
+                </div>
+              </section>
+            );
+          })}
+        </div>
+
+        <section className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-3 text-xs text-white/55">
+          This page uses round submission snapshots, so the matchup reflects the team locked/submitted for that Super 8 round. Live scores update when AFL stats rows are imported.
         </section>
       </div>
     </main>
