@@ -1281,7 +1281,7 @@ export default function OpponentTeamPage() {
           <div className="grid gap-3 xl:grid-cols-[1fr_auto_1fr] xl:items-center">
             <div />
 
-            <h1 className="text-center text-2xl font-black">Opponent Team</h1>
+            <h1 className="text-center text-2xl font-black">LiveScores</h1>
 
             <div className="flex flex-wrap justify-center gap-2 xl:justify-end">
               <button
