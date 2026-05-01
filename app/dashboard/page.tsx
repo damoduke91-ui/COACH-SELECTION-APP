@@ -1091,6 +1091,50 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 }, [currentWeekFixture, loginSession?.coachName]);
   const nextWeekFixture = useMemo(() => buildDashboardFixtureMatches(nextFixtureRows), [nextFixtureRows]);
 
+  const opponentCardData = useMemo(() => {
+    if (!loginSession?.coachId || fixtureRows.length === 0) {
+      return {
+        opponentName: "Opponent",
+        score: null as string | null,
+        isLive: false,
+      };
+    }
+
+    const match = fixtureRows.find((row) => row.coach_id === loginSession.coachId);
+
+    if (!match) {
+      return {
+        opponentName: "Opponent",
+        score: null as string | null,
+        isLive: false,
+      };
+    }
+
+    const result = results.find(
+      (row) =>
+        row.round_number === match.competition_round &&
+        row.matchup_index === match.matchup_index
+    );
+
+    let score: string | null = null;
+
+    if (
+      result &&
+      result.coach_1_score !== null &&
+      result.coach_2_score !== null
+    ) {
+      score = `${result.coach_1_score}–${result.coach_2_score}`;
+    }
+
+    const importedClubs = currentRoundImportedClubCodes.size;
+    const isLive = importedClubs > 0 && importedClubs < EXPECTED_AFL_CLUB_COUNT;
+
+    return {
+      opponentName: match.opponent_coach_name,
+      score,
+      isLive,
+    };
+  }, [fixtureRows, loginSession?.coachId, results, currentRoundImportedClubCodes]);
   const fixtureCardDescription = useMemo(() => {
   const currentSuper8Round = currentWeekFixture[0]?.competitionRound ?? null;
 
@@ -1175,7 +1219,23 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
             href="/opponent-team"
             className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10"
           >
-            <div className="text-lg font-bold">See Opponent&apos;s Team / Live Scores</div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="text-lg font-bold leading-snug">
+                View {opponentCardData.opponentName} Team / Live Scores
+              </div>
+
+              {opponentCardData.isLive ? (
+                <span className="shrink-0 rounded-full border border-green-400/30 bg-green-500/15 px-2 py-0.5 text-[10px] font-bold text-green-300">
+                  LIVE
+                </span>
+              ) : null}
+            </div>
+
+            {opponentCardData.score ? (
+              <div className="mt-2 text-sm font-semibold text-white/70">
+                {opponentCardData.score}
+              </div>
+            ) : null}
           </Link>
 
           <Link
