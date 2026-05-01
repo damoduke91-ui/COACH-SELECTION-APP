@@ -1355,11 +1355,6 @@ export default function OpponentTeamPage() {
 
                     <div className="text-center">
                       <div className="text-[11px] font-bold uppercase tracking-wide text-white/30">vs</div>
-                      {!isTied ? (
-                        <div className="mt-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-black text-white/70">
-                          {formatScore(scoreMargin)}
-                        </div>
-                      ) : null}
                     </div>
 
                     <div className={`min-w-[190px] rounded-xl border px-4 py-3 text-center ${
