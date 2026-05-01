@@ -1206,14 +1206,13 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           </Link>
 
           <Link
-            href="/opponent-team"
-            className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10"
-          >
-            <div className="text-lg font-bold">See Opponent&apos;s Team / Live Scores</div>
-            <div className="mt-2 text-sm text-white/75">
-              {opponentTeamCardDescription}
-            </div>
-          </Link>
+  href="/opponent-team"
+  className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10"
+>
+  <div className="text-lg font-bold">
+    See Opponent&apos;s Team / Live Scores
+  </div>
+</Link>
 
           <Link
             href="/fixture"
