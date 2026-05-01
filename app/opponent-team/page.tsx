@@ -1251,7 +1251,7 @@ export default function OpponentTeamPage() {
           <div className="grid gap-3 xl:grid-cols-[1fr_auto_1fr] xl:items-center">
             <div />
 
-            <h1 className="text-center text-2xl font-black">LiveScores</h1>
+            <h1 className="text-center text-2xl font-black">Live Scores</h1>
 
             <div className="flex flex-wrap justify-center gap-2 xl:justify-end">
               <button
@@ -1362,8 +1362,8 @@ export default function OpponentTeamPage() {
                     Super 8 Round {match.roundNumber}
                   </div>
 
-                  <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto_1fr] md:items-center">
-                    <div className={`rounded-xl border p-3 md:text-left ${
+                  <div className="mt-2 flex flex-col items-center justify-center gap-2 md:flex-row md:gap-6">
+                    <div className={`min-w-[180px] rounded-xl border p-3 text-center ${
                       selectedIsLeading
                         ? "border-green-400/30 bg-green-500/10"
                         : "border-white/10 bg-white/5"
@@ -1376,9 +1376,7 @@ export default function OpponentTeamPage() {
                       </div>
                     </div>
 
-                    <div className="hidden md:block" aria-hidden="true" />
-
-                    <div className={`rounded-xl border p-3 md:text-right ${
+                    <div className={`min-w-[180px] rounded-xl border p-3 text-center ${
                       opponentIsLeading
                         ? "border-green-400/30 bg-green-500/10"
                         : "border-white/10 bg-white/5"
