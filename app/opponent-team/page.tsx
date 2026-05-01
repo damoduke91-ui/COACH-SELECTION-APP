@@ -452,7 +452,7 @@ function getAutoMatchOutcome(params: {
 
   if (params.coach1Total === params.coach2Total) {
     return {
-      label: `${params.coach1Name} ${formatScore(params.coach1Total)} drew with ${params.coach2Name} ${formatScore(params.coach2Total)}${pendingLabel}`,
+      label: `${params.coach1Name} ${formatScore(params.coach1Total)} drew with ${params.coach2Name} ${formatScore(params.coach2Total)}`,
       margin: 0,
       isDraw: true,
       winnerName: null,
@@ -469,7 +469,7 @@ function getAutoMatchOutcome(params: {
   const margin = Math.abs(params.coach1Total - params.coach2Total);
 
   return {
-    label: `${winnerName} ${formatScore(winnerScore)} def. ${loserName} ${formatScore(loserScore)}${pendingLabel}`,
+    label: `${winnerName} ${formatScore(winnerScore)} def. ${loserName} ${formatScore(loserScore)}`,
     margin,
     isDraw: false,
     winnerName,
@@ -1295,11 +1295,11 @@ export default function OpponentTeamPage() {
 
                   <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-center">
                     <div className="text-xs font-bold uppercase tracking-wide text-white/45">
-                      S8 R{match.roundNumber} • AFL R{match.aflRound} • Match {match.matchupIndex}
+                      Super 8 Round {match.roundNumber}
                     </div>
                     <div className="mt-1 text-sm font-bold text-white">{marginLabel}</div>
                     <div className="mt-1 text-[11px] text-white/45">
-                      {importedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} AFL clubs imported
+
                     </div>
                   </div>
 
