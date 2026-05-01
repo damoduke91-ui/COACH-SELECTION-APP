@@ -478,30 +478,6 @@ function getAutoMatchOutcome(params: {
   };
 }
 
-function getPlayingStatus(row: PlayerBreakdownRow): string {
-  if (row.countsToTotal && row.replacedPlayerName) {
-    return `Counts for ${row.replacedPlayerName}`;
-  }
-
-  if (row.countsToTotal) {
-    return "Counts";
-  }
-
-  if (row.played) {
-    return "Played - emergency only";
-  }
-
-  if (row.clubImported) {
-    return "Did not play";
-  }
-
-  if (row.playerClub) {
-    return `${row.playerClub} pending`;
-  }
-
-  return "Pending - club unknown";
-}
-
 function getStatNumber(stat: AflPlayerRoundStatRow | null, key: keyof AflPlayerRoundStatRow): string {
   if (!stat) return "—";
   const value = stat[key];
@@ -669,10 +645,6 @@ function PlayerBreakdownCard({
         <CompactStatLine label="HO" value={getStatNumber(row.stat, "ho")} />
         <CompactStatLine label="FF" value={getStatNumber(row.stat, "ff")} />
         <CompactStatLine label="FA" value={getStatNumber(row.stat, "fa")} />
-
-        <span className="ml-auto rounded border border-white/10 bg-black/25 px-1.5 py-0.5 text-[10px] text-white/60">
-          {getPlayingStatus(row)}
-        </span>
       </div>
     </div>
   );
