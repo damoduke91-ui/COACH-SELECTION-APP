@@ -1361,20 +1361,6 @@ export default function OpponentTeamPage() {
             const opponentIsLeading = opponentTotal > selectedTotal;
             const isTied = selectedTotal === opponentTotal;
             const isRoundComplete = importedClubCodes.size >= EXPECTED_AFL_CLUB_COUNT;
-            const scoreActionLabel = isTied
-              ? "draw"
-              : isRoundComplete
-                ? selectedIsLeading
-                  ? "def."
-                  : "lost"
-                : selectedIsLeading
-                  ? "leads"
-                  : "trails";
-            const marginDisplay = isTied
-              ? "Draw"
-              : selectedIsLeading
-                ? `+${formatScore(scoreMargin)}`
-                : `-${formatScore(scoreMargin)}`;
             const winnerName = selectedIsLeading ? match.selectedCoachName : match.opponentCoachName;
             const loserName = selectedIsLeading ? match.opponentCoachName : match.selectedCoachName;
             const leaderSummary = isTied
@@ -1424,12 +1410,7 @@ export default function OpponentTeamPage() {
                       </div>
                     </div>
 
-                    <div className="px-4">
-                      <div className="text-lg font-black text-white">{scoreActionLabel}</div>
-                      <div className="mt-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-white/70">
-                        {marginDisplay}
-                      </div>
-                    </div>
+                    <div className="hidden md:block" aria-hidden="true" />
 
                     <div className={`rounded-xl border p-3 md:text-right ${
                       opponentIsLeading
