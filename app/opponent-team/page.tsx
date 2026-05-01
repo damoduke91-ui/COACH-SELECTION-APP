@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
 
@@ -628,22 +628,17 @@ function getRowsTotal(rows: PlayerBreakdownRow[]): number {
 
 function PlayerBreakdownCard({
   row,
-  isFirstPending,
 }: {
   row: PlayerBreakdownRow;
-  isFirstPending: boolean;
 }) {
   return (
     <div
-      data-first-pending={isFirstPending ? "true" : undefined}
       className={`rounded-lg border px-2 py-1.5 text-[11px] ${
-        isFirstPending
-          ? "border-amber-300/50 bg-amber-500/15 text-white shadow-[0_0_0_1px_rgba(252,211,77,0.25)]"
-          : row.countsToTotal
-            ? "border-green-400/25 bg-green-500/10 text-white"
-            : row.played
-              ? "border-white/10 bg-white/[0.03] text-white/70"
-              : "border-white/10 bg-black/15 text-white/40"
+        row.countsToTotal
+          ? "border-green-400/25 bg-green-500/10 text-white"
+          : row.played
+            ? "border-white/10 bg-white/[0.03] text-white/70"
+            : "border-white/10 bg-black/15 text-white/40"
       }`}
     >
       <div className="flex flex-wrap items-center gap-1.5">
@@ -687,12 +682,10 @@ function PositionGroup({
   coachId,
   position,
   rows,
-  firstPendingKey,
 }: {
   coachId: number;
   position: string;
   rows: PlayerBreakdownRow[];
-  firstPendingKey: string | null;
 }) {
   const [showEmergencies, setShowEmergencies] = useState(false);
   const onFieldRows = rows.filter((row) => row.selectedType === "X" || row.countsToTotal);
@@ -715,7 +708,6 @@ function PositionGroup({
             <PlayerBreakdownCard
               key={`${coachId}-${row.key}`}
               row={row}
-              isFirstPending={firstPendingKey === row.key}
             />
           ))
         ) : (
@@ -740,7 +732,6 @@ function PositionGroup({
                   <PlayerBreakdownCard
                     key={`${coachId}-${row.key}`}
                     row={row}
-                    isFirstPending={firstPendingKey === row.key}
                   />
                 ))}
               </div>
@@ -757,8 +748,7 @@ function CoachLivePanel({
   submission,
   rows,
   accentClass = "border-white/10",
-  firstPendingKey,
-}: CoachLivePanelProps & { firstPendingKey: string | null }) {
+}: CoachLivePanelProps) {
   const groupedRows = POSITION_ORDER.map((position) => ({
     position,
     rows: rows.filter((row) => row.position === position),
@@ -784,7 +774,6 @@ function CoachLivePanel({
               coachId={coachId}
               position={group.position}
               rows={group.rows}
-              firstPendingKey={firstPendingKey}
             />
           ))
         )}
@@ -805,7 +794,6 @@ export default function OpponentTeamPage() {
   const [roundSubmissions, setRoundSubmissions] = useState<RoundSubmissionRow[]>([]);
   const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
   const [isLoadingPageData, setIsLoadingPageData] = useState(false);
-  const hasAutoScrolledToPendingRef = useRef(false);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -1203,24 +1191,6 @@ export default function OpponentTeamPage() {
     });
   }, [fixtureRows, selectedCoachId]);
 
-  useEffect(() => {
-    hasAutoScrolledToPendingRef.current = false;
-  }, [currentAflRound, selectedCoachId]);
-
-  useEffect(() => {
-    if (isLoadingPageData || hasAutoScrolledToPendingRef.current) return;
-
-    const timer = window.setTimeout(() => {
-      const firstPendingElement = document.querySelector('[data-first-pending="true"]');
-
-      if (firstPendingElement instanceof HTMLElement) {
-        hasAutoScrolledToPendingRef.current = true;
-        firstPendingElement.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [isLoadingPageData, playerStats.length, roundSubmissions.length, selectedCoachMatchViews.length]);
 
   const submissionByRoundAndCoach = useMemo(() => {
     const exact = new Map<string, RoundSubmissionRow>();
@@ -1374,10 +1344,6 @@ export default function OpponentTeamPage() {
             const selectedProgressPercent = totalPointsInMatch > 0
               ? Math.min(100, Math.max(0, (selectedTotal / totalPointsInMatch) * 100))
               : 50;
-            const firstPendingKey =
-              selectedRows.find((row) => row.selectedType === "X" && !row.played && !row.clubImported)?.key ??
-              opponentRows.find((row) => row.selectedType === "X" && !row.played && !row.clubImported)?.key ??
-              null;
             const positionComparisons = POSITION_ORDER.map((position) => {
               const selectedPositionTotal = getRowsTotal(selectedRows.filter((row) => row.position === position));
               const opponentPositionTotal = getRowsTotal(opponentRows.filter((row) => row.position === position));
@@ -1469,7 +1435,6 @@ export default function OpponentTeamPage() {
                     pendingPlayers={selectedPending}
                     countedPlayers={selectedCounting}
                     accentClass="border-violet-500/30"
-                    firstPendingKey={firstPendingKey}
                   />
 
                   <CoachLivePanel
@@ -1481,7 +1446,6 @@ export default function OpponentTeamPage() {
                     pendingPlayers={opponentPending}
                     countedPlayers={opponentCounting}
                     accentClass="border-white/10"
-                    firstPendingKey={firstPendingKey}
                   />
                 </div>
               </section>
