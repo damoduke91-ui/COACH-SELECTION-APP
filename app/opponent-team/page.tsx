@@ -1196,38 +1196,12 @@ export default function OpponentTeamPage() {
     <main className="min-h-screen bg-neutral-950 px-3 py-4 text-white sm:px-4">
       <div className="mx-auto max-w-[1900px] space-y-4">
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <h1 className="text-2xl font-black">Opponent Team</h1>
-              <p className="mt-1 text-sm text-white/70">
-                Live matchup view from submitted round snapshots and imported AFL player stats.
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-white/60">
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
-                  Signed in as {loginSession.coachName}
-                </span>
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
-                  Role: {loginSession.role}
-                </span>
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
-                  AFL Round: {currentAflRound ?? "Not set"}
-                </span>
-                <span
-                  className={`rounded-full border px-3 py-1 font-bold ${
-                    currentRoundStatus === "FINAL"
-                      ? "border-green-400/30 bg-green-500/15 text-green-200"
-                      : "border-amber-400/30 bg-amber-500/15 text-amber-100"
-                  }`}
-                >
-                  {currentRoundStatus} • {currentImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} clubs
-                </span>
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
-                  Stat rows: {playerStats.length}
-                </span>
-              </div>
-            </div>
+          <div className="grid gap-3 xl:grid-cols-[1fr_auto_1fr] xl:items-center">
+            <div />
 
-            <div className="flex flex-wrap gap-2">
+            <h1 className="text-center text-2xl font-black">Opponent Team</h1>
+
+            <div className="flex flex-wrap justify-center gap-2 xl:justify-end">
               <button
                 type="button"
                 onClick={() => void refreshPageData()}
@@ -1258,56 +1232,6 @@ export default function OpponentTeamPage() {
               {message}
             </div>
           ) : null}
-        </section>
-
-        <section className="grid gap-3 lg:grid-cols-[minmax(260px,420px)_1fr_1fr]">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <label className="text-xs font-bold uppercase tracking-wide text-white/50" htmlFor="coach-select">
-              Coach
-            </label>
-            {canChangeCoach ? (
-              <select
-                id="coach-select"
-                value={selectedCoachId ?? ""}
-                onChange={(event) => setSelectedCoachId(Number(event.target.value))}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-2 text-sm font-semibold text-white outline-none"
-              >
-                {availableCoaches.map((coach) => (
-                  <option key={coach.id} value={coach.id}>
-                    {coach.name}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <div className="mt-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm font-semibold">
-                {selectedCoachName}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4">
-            <div className="text-xs font-bold uppercase tracking-wide text-violet-200/80">Selected Coach</div>
-            <div className="mt-1 text-2xl font-black">{selectedCoachName}</div>
-            <div className="mt-1 text-sm text-white/70">
-              {selectedCoachMatchViews.length} current matchup{selectedCoachMatchViews.length === 1 ? "" : "s"}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="text-xs font-bold uppercase tracking-wide text-white/50">Weekly Opponent</div>
-            <div className="mt-1 text-2xl font-black">
-              {selectedCoachMatchViews.length > 0
-                ? selectedCoachMatchViews.map((match) => match.opponentCoachName).join(" + ")
-                : "—"}
-            </div>
-            <div className="mt-1 text-sm text-white/70">
-              {selectedCoachMatchViews.length > 0
-                ? selectedCoachMatchViews
-                    .map((match) => `S8 R${match.roundNumber} • AFL R${match.aflRound}`)
-                    .join(" • ")
-                : "No fixture found for current AFL round"}
-            </div>
-          </div>
         </section>
 
         {isLoadingPageData ? (
