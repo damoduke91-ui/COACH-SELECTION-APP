@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
 
@@ -619,109 +619,173 @@ function CompactStatLine({ label, value }: { label: string; value: string }) {
   );
 }
 
+function getRowsTotal(rows: PlayerBreakdownRow[]): number {
+  return rows.reduce((total, row) => {
+    if (!row.countsToTotal || row.points === null) return total;
+    return total + row.points;
+  }, 0);
+}
+
+function PlayerBreakdownCard({
+  row,
+  isFirstPending,
+}: {
+  row: PlayerBreakdownRow;
+  isFirstPending: boolean;
+}) {
+  return (
+    <div
+      data-first-pending={isFirstPending ? "true" : undefined}
+      className={`rounded-lg border px-2 py-1.5 text-[11px] ${
+        isFirstPending
+          ? "border-amber-300/50 bg-amber-500/15 text-white shadow-[0_0_0_1px_rgba(252,211,77,0.25)]"
+          : row.countsToTotal
+            ? "border-green-400/25 bg-green-500/10 text-white"
+            : row.played
+              ? "border-white/10 bg-white/[0.03] text-white/70"
+              : "border-white/10 bg-black/15 text-white/40"
+      }`}
+    >
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span
+          className={`rounded-md border px-1.5 py-0.5 text-[10px] font-black ${
+            row.countsToTotal
+              ? "border-green-400/30 bg-green-500/15 text-green-100"
+              : "border-white/10 bg-white/5 text-white/55"
+          }`}
+        >
+          {row.selectedType}
+        </span>
+
+        <span className="min-w-[140px] flex-1 font-bold text-white">
+          {row.playerName}
+          {row.playerClub ? <span className="ml-1 font-normal text-white/40">({row.playerClub})</span> : null}
+        </span>
+
+        <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-2 py-0.5 text-[11px] font-black text-violet-100">
+          {row.points === null ? "—" : formatScore(row.points)} pts
+        </span>
+
+        <CompactStatLine label="D" value={getStatNumber(row.stat, "d")} />
+        <CompactStatLine label="M" value={getStatNumber(row.stat, "m")} />
+        <CompactStatLine label="G" value={getStatNumber(row.stat, "g")} />
+        <CompactStatLine label="B" value={getStatNumber(row.stat, "b")} />
+        <CompactStatLine label="T" value={getStatNumber(row.stat, "t")} />
+        <CompactStatLine label="HO" value={getStatNumber(row.stat, "ho")} />
+        <CompactStatLine label="FF" value={getStatNumber(row.stat, "ff")} />
+        <CompactStatLine label="FA" value={getStatNumber(row.stat, "fa")} />
+
+        <span className="ml-auto rounded border border-white/10 bg-black/25 px-1.5 py-0.5 text-[10px] text-white/60">
+          {getPlayingStatus(row)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PositionGroup({
+  coachId,
+  position,
+  rows,
+  firstPendingKey,
+}: {
+  coachId: number;
+  position: string;
+  rows: PlayerBreakdownRow[];
+  firstPendingKey: string | null;
+}) {
+  const [showEmergencies, setShowEmergencies] = useState(false);
+  const onFieldRows = rows.filter((row) => row.selectedType === "X" || row.countsToTotal);
+  const emergencyRows = rows.filter((row) => row.selectedType !== "X" && !row.countsToTotal);
+  const positionTotal = getRowsTotal(rows);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-white/10 bg-neutral-950/95 px-2.5 py-1.5 backdrop-blur">
+        <div className="text-xs font-black uppercase tracking-wide text-white/80">{position}</div>
+        <div className="text-[10px] font-bold text-white/45">
+          {formatScore(positionTotal)} pts • {onFieldRows.length} field
+          {emergencyRows.length > 0 ? ` • ${emergencyRows.length} emergency` : ""}
+        </div>
+      </div>
+
+      <div className="space-y-1 p-2">
+        {onFieldRows.length > 0 ? (
+          onFieldRows.map((row) => (
+            <PlayerBreakdownCard
+              key={`${coachId}-${row.key}`}
+              row={row}
+              isFirstPending={firstPendingKey === row.key}
+            />
+          ))
+        ) : (
+          <div className="rounded-lg border border-dashed border-white/10 px-2 py-1.5 text-[11px] text-white/40">
+            No on-field players.
+          </div>
+        )}
+
+        {emergencyRows.length > 0 ? (
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setShowEmergencies((value) => !value)}
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1 text-left text-[11px] font-bold text-white/60 hover:bg-white/[0.06]"
+            >
+              {showEmergencies ? "Hide" : "Show"} {position} emergencies ({emergencyRows.length})
+            </button>
+
+            {showEmergencies ? (
+              <div className="mt-1 space-y-1">
+                {emergencyRows.map((row) => (
+                  <PlayerBreakdownCard
+                    key={`${coachId}-${row.key}`}
+                    row={row}
+                    isFirstPending={firstPendingKey === row.key}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function CoachLivePanel({
   coachId,
-  coachName,
   submission,
   rows,
-  total,
-  pendingPlayers,
-  countedPlayers,
   accentClass = "border-white/10",
-}: CoachLivePanelProps) {
+  firstPendingKey,
+}: CoachLivePanelProps & { firstPendingKey: string | null }) {
   const groupedRows = POSITION_ORDER.map((position) => ({
     position,
     rows: rows.filter((row) => row.position === position),
   })).filter((group) => group.rows.length > 0);
 
   return (
-    <section className={`rounded-2xl border bg-white/5 p-3 ${accentClass}`}>
-      <div className="flex flex-col gap-2 border-b border-white/10 pb-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3 className="text-lg font-bold leading-tight">{coachName}</h3>
-          <div className="mt-1 text-[11px] text-white/50">Coach ID {coachId}</div>
-          <div className="mt-1 text-[11px] text-white/50">
-            Snapshot: {submission ? formatTimestamp(submission.submitted_at) : "No submitted snapshot"}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-green-400/25 bg-green-500/10 px-3 py-2 text-right">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-green-200/80">Live Total</div>
-          <div className="text-3xl font-black leading-none text-green-100">{formatScore(total)}</div>
-          <div className="mt-1 text-[11px] text-white/60">
-            {countedPlayers} counting • {pendingPlayers} pending
-          </div>
-        </div>
-      </div>
-
+    <section className={`rounded-xl border bg-white/5 p-2 ${accentClass}`}>
       {!submission ? (
-        <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-xs text-amber-100">
+        <div className="mb-2 rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-xs text-amber-100">
           No round submission snapshot was found for this coach. Once the team is submitted/snapshotted for the round, live stats will show here.
         </div>
       ) : null}
 
-      <div className="mt-3 space-y-3">
+      <div className="space-y-2">
         {groupedRows.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/10 p-3 text-xs text-white/45">
             No selected players found.
           </div>
         ) : (
           groupedRows.map((group) => (
-            <div key={`${coachId}-${group.position}`} className="rounded-xl border border-white/10 bg-black/20 p-2">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <div className="text-xs font-black uppercase tracking-wide text-white/70">{group.position}</div>
-                <div className="text-[10px] text-white/35">{group.rows.length} rows</div>
-              </div>
-
-              <div className="space-y-1">
-                {group.rows.map((row) => (
-                  <div
-                    key={row.key}
-                    className={`rounded-lg border px-2 py-1.5 text-[11px] ${
-                      row.countsToTotal
-                        ? "border-green-400/25 bg-green-500/10 text-white"
-                        : row.played
-                          ? "border-white/10 bg-white/[0.03] text-white/70"
-                          : "border-white/10 bg-black/15 text-white/40"
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span
-                        className={`rounded-md border px-1.5 py-0.5 text-[10px] font-black ${
-                          row.countsToTotal
-                            ? "border-green-400/30 bg-green-500/15 text-green-100"
-                            : "border-white/10 bg-white/5 text-white/55"
-                        }`}
-                      >
-                        {row.selectedType}
-                      </span>
-
-                      <span className="min-w-[155px] flex-1 font-bold text-white">
-                        {row.playerName}
-                        {row.playerClub ? <span className="ml-1 font-normal text-white/40">({row.playerClub})</span> : null}
-                      </span>
-
-                      <span className="rounded-md border border-violet-400/25 bg-violet-500/10 px-2 py-0.5 text-[11px] font-black text-violet-100">
-                        {row.points === null ? "—" : formatScore(row.points)} pts
-                      </span>
-
-                      <CompactStatLine label="D" value={getStatNumber(row.stat, "d")} />
-                      <CompactStatLine label="M" value={getStatNumber(row.stat, "m")} />
-                      <CompactStatLine label="G" value={getStatNumber(row.stat, "g")} />
-                      <CompactStatLine label="B" value={getStatNumber(row.stat, "b")} />
-                      <CompactStatLine label="T" value={getStatNumber(row.stat, "t")} />
-                      <CompactStatLine label="HO" value={getStatNumber(row.stat, "ho")} />
-                      <CompactStatLine label="FF" value={getStatNumber(row.stat, "ff")} />
-                      <CompactStatLine label="FA" value={getStatNumber(row.stat, "fa")} />
-
-                      <span className="ml-auto rounded border border-white/10 bg-black/25 px-1.5 py-0.5 text-[10px] text-white/60">
-                        {getPlayingStatus(row)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <PositionGroup
+              key={`${coachId}-${group.position}`}
+              coachId={coachId}
+              position={group.position}
+              rows={group.rows}
+              firstPendingKey={firstPendingKey}
+            />
           ))
         )}
       </div>
@@ -741,6 +805,7 @@ export default function OpponentTeamPage() {
   const [roundSubmissions, setRoundSubmissions] = useState<RoundSubmissionRow[]>([]);
   const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
   const [isLoadingPageData, setIsLoadingPageData] = useState(false);
+  const hasAutoScrolledToPendingRef = useRef(false);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -1138,6 +1203,25 @@ export default function OpponentTeamPage() {
     });
   }, [fixtureRows, selectedCoachId]);
 
+  useEffect(() => {
+    hasAutoScrolledToPendingRef.current = false;
+  }, [currentAflRound, selectedCoachId]);
+
+  useEffect(() => {
+    if (isLoadingPageData || hasAutoScrolledToPendingRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      const firstPendingElement = document.querySelector('[data-first-pending="true"]');
+
+      if (firstPendingElement instanceof HTMLElement) {
+        hasAutoScrolledToPendingRef.current = true;
+        firstPendingElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [isLoadingPageData, playerStats.length, roundSubmissions.length, selectedCoachMatchViews.length]);
+
   const submissionByRoundAndCoach = useMemo(() => {
     const exact = new Map<string, RoundSubmissionRow>();
     const latestByCoach = new Map<number, RoundSubmissionRow>();
@@ -1272,18 +1356,52 @@ export default function OpponentTeamPage() {
             const opponentPending = opponentRows.filter((row) => row.selectedType === "X" && !row.played && !row.clubImported).length;
             const selectedCounting = selectedRows.filter((row) => row.countsToTotal).length;
             const opponentCounting = opponentRows.filter((row) => row.countsToTotal).length;
-            const marginLabel = getMarginLabel(
-              match.selectedCoachName,
-              selectedTotal,
-              match.opponentCoachName,
-              opponentTotal
-            );
             const scoreMargin = Math.abs(selectedTotal - opponentTotal);
             const selectedIsLeading = selectedTotal > opponentTotal;
             const opponentIsLeading = opponentTotal > selectedTotal;
             const isTied = selectedTotal === opponentTotal;
-            const scoreActionLabel = isTied ? "draw" : selectedIsLeading ? "def." : "trails";
-            const marginDisplay = isTied ? "Draw" : `+${formatScore(scoreMargin)}`;
+            const isRoundComplete = importedClubCodes.size >= EXPECTED_AFL_CLUB_COUNT;
+            const scoreActionLabel = isTied
+              ? "draw"
+              : isRoundComplete
+                ? selectedIsLeading
+                  ? "def."
+                  : "lost"
+                : selectedIsLeading
+                  ? "leads"
+                  : "trails";
+            const marginDisplay = isTied
+              ? "Draw"
+              : selectedIsLeading
+                ? `+${formatScore(scoreMargin)}`
+                : `-${formatScore(scoreMargin)}`;
+            const winnerName = selectedIsLeading ? match.selectedCoachName : match.opponentCoachName;
+            const loserName = selectedIsLeading ? match.opponentCoachName : match.selectedCoachName;
+            const leaderSummary = isTied
+              ? isRoundComplete
+                ? `${match.selectedCoachName} drew with ${match.opponentCoachName}`
+                : `${match.selectedCoachName} and ${match.opponentCoachName} are tied`
+              : isRoundComplete
+                ? `${winnerName} def. ${loserName} by ${formatScore(scoreMargin)}`
+                : `${winnerName} leads ${loserName} by ${formatScore(scoreMargin)}`;
+            const totalPointsInMatch = selectedTotal + opponentTotal;
+            const selectedProgressPercent = totalPointsInMatch > 0
+              ? Math.min(100, Math.max(0, (selectedTotal / totalPointsInMatch) * 100))
+              : 50;
+            const firstPendingKey =
+              selectedRows.find((row) => row.selectedType === "X" && !row.played && !row.clubImported)?.key ??
+              opponentRows.find((row) => row.selectedType === "X" && !row.played && !row.clubImported)?.key ??
+              null;
+            const positionComparisons = POSITION_ORDER.map((position) => {
+              const selectedPositionTotal = getRowsTotal(selectedRows.filter((row) => row.position === position));
+              const opponentPositionTotal = getRowsTotal(opponentRows.filter((row) => row.position === position));
+
+              return {
+                position,
+                selectedPositionTotal,
+                opponentPositionTotal,
+              };
+            });
 
             return (
               <section key={match.key} className="rounded-2xl border border-white/10 bg-white/5 p-3">
@@ -1327,7 +1445,37 @@ export default function OpponentTeamPage() {
                     </div>
                   </div>
 
-                  <div className="mt-2 text-sm font-bold text-white/80">{marginLabel}</div>
+                  <div className="mt-2 text-sm font-bold text-white/80">{leaderSummary}</div>
+
+                  <div className="mt-3 overflow-hidden rounded-full border border-white/10 bg-white/5">
+                    <div className="flex h-3 w-full">
+                      <div
+                        className={`h-full ${selectedIsLeading ? "bg-green-500/70" : "bg-white/25"}`}
+                        style={{ width: `${selectedProgressPercent}%` }}
+                      />
+                      <div
+                        className={`h-full ${opponentIsLeading ? "bg-green-500/70" : "bg-white/25"}`}
+                        style={{ width: `${100 - selectedProgressPercent}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-white/50 md:grid-cols-6">
+                    {positionComparisons.map((comparison) => (
+                      <div key={comparison.position} className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1.5">
+                        <div className="font-black text-white/70">{comparison.position}</div>
+                        <div className="mt-0.5 flex items-center justify-between gap-2">
+                          <span className={comparison.selectedPositionTotal >= comparison.opponentPositionTotal ? "font-bold text-green-100" : "text-white/55"}>
+                            {formatScore(comparison.selectedPositionTotal)}
+                          </span>
+                          <span className="text-white/25">v</span>
+                          <span className={comparison.opponentPositionTotal > comparison.selectedPositionTotal ? "font-bold text-green-100" : "text-white/55"}>
+                            {formatScore(comparison.opponentPositionTotal)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="grid gap-3 xl:grid-cols-2">
@@ -1340,6 +1488,7 @@ export default function OpponentTeamPage() {
                     pendingPlayers={selectedPending}
                     countedPlayers={selectedCounting}
                     accentClass="border-violet-500/30"
+                    firstPendingKey={firstPendingKey}
                   />
 
                   <CoachLivePanel
@@ -1351,6 +1500,7 @@ export default function OpponentTeamPage() {
                     pendingPlayers={opponentPending}
                     countedPlayers={opponentCounting}
                     accentClass="border-white/10"
+                    firstPendingKey={firstPendingKey}
                   />
                 </div>
               </section>
