@@ -1331,49 +1331,58 @@ export default function OpponentTeamPage() {
 
             return (
               <section key={match.key} className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="mb-3 rounded-xl border border-white/10 bg-black/30 p-3 text-center">
-                  <div className="text-xs font-bold uppercase tracking-wide text-white/45">
+                <div className="mb-3 rounded-xl border border-white/10 bg-black/40 px-4 py-3">
+                  <div className="mb-2 text-center text-[11px] font-bold uppercase tracking-wide text-white/40">
                     Super 8 Round {match.roundNumber}
                   </div>
 
-                  <div className="mt-2 flex flex-col items-center justify-center gap-2 md:flex-row md:gap-6">
-                    <div className={`min-w-[180px] rounded-xl border p-3 text-center ${
+                  <div className="flex flex-col items-center justify-center gap-3 md:flex-row md:gap-6">
+                    <div className={`min-w-[190px] rounded-xl border px-4 py-3 text-center ${
                       selectedIsLeading
                         ? "border-green-400/30 bg-green-500/10"
                         : "border-white/10 bg-white/5"
                     }`}>
-                      <div className="text-xs font-bold uppercase tracking-wide text-white/55">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-white/50">
                         {match.selectedCoachName}
                       </div>
-                      <div className={`mt-1 text-4xl font-black leading-none ${selectedIsLeading ? "text-green-100" : "text-white"}`}>
+                      <div className={`mt-1 text-5xl font-black leading-none ${selectedIsLeading ? "text-green-100" : "text-white"}`}>
                         {formatScore(selectedTotal)}
                       </div>
-                      <div className="mt-1 text-xs font-semibold text-white/60">
+                      <div className="mt-1 text-[11px] font-semibold text-white/55">
                         {selectedCounting} player{selectedCounting === 1 ? "" : "s"} • Avg {selectedAverage}
                       </div>
                     </div>
 
-                    <div className={`min-w-[180px] rounded-xl border p-3 text-center ${
+                    <div className="text-center">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-white/30">vs</div>
+                      {!isTied ? (
+                        <div className="mt-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-black text-white/70">
+                          {formatScore(scoreMargin)}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className={`min-w-[190px] rounded-xl border px-4 py-3 text-center ${
                       opponentIsLeading
                         ? "border-green-400/30 bg-green-500/10"
                         : "border-white/10 bg-white/5"
                     }`}>
-                      <div className="text-xs font-bold uppercase tracking-wide text-white/55">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-white/50">
                         {match.opponentCoachName}
                       </div>
-                      <div className={`mt-1 text-4xl font-black leading-none ${opponentIsLeading ? "text-green-100" : "text-white"}`}>
+                      <div className={`mt-1 text-5xl font-black leading-none ${opponentIsLeading ? "text-green-100" : "text-white"}`}>
                         {formatScore(opponentTotal)}
                       </div>
-                      <div className="mt-1 text-xs font-semibold text-white/60">
+                      <div className="mt-1 text-[11px] font-semibold text-white/55">
                         {opponentCounting} player{opponentCounting === 1 ? "" : "s"} • Avg {opponentAverage}
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-2 text-sm font-bold text-white/80">{leaderSummary}</div>
+                  <div className="mt-2 text-center text-xs font-bold text-white/65">{leaderSummary}</div>
 
                   <div className="mt-3 overflow-hidden rounded-full border border-white/10 bg-white/5">
-                    <div className="flex h-3 w-full">
+                    <div className="flex h-2.5 w-full">
                       <div
                         className={`h-full ${selectedIsLeading ? "bg-green-500/70" : "bg-white/25"}`}
                         style={{ width: `${selectedProgressPercent}%` }}
