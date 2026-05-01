@@ -1326,6 +1326,8 @@ export default function OpponentTeamPage() {
             const opponentPending = opponentRows.filter((row) => row.selectedType === "X" && !row.played && !row.clubImported).length;
             const selectedCounting = selectedRows.filter((row) => row.countsToTotal).length;
             const opponentCounting = opponentRows.filter((row) => row.countsToTotal).length;
+            const selectedAverage = selectedCounting > 0 ? selectedTotal / selectedCounting : 0;
+            const opponentAverage = opponentCounting > 0 ? opponentTotal / opponentCounting : 0;
             const scoreMargin = Math.abs(selectedTotal - opponentTotal);
             const selectedIsLeading = selectedTotal > opponentTotal;
             const opponentIsLeading = opponentTotal > selectedTotal;
@@ -1391,6 +1393,15 @@ export default function OpponentTeamPage() {
                   </div>
 
                   <div className="mt-2 text-sm font-bold text-white/80">{leaderSummary}</div>
+
+                  <div className="mt-2 grid gap-2 text-[11px] text-white/65 md:grid-cols-2">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                      <span className="font-bold text-white/85">{match.selectedCoachName}</span>: {formatScore(selectedTotal)} from {selectedCounting} player{selectedCounting === 1 ? "" : "s"} • Avg {formatScore(selectedAverage)}
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                      <span className="font-bold text-white/85">{match.opponentCoachName}</span>: {formatScore(opponentTotal)} from {opponentCounting} player{opponentCounting === 1 ? "" : "s"} • Avg {formatScore(opponentAverage)}
+                    </div>
+                  </div>
 
                   <div className="mt-3 overflow-hidden rounded-full border border-white/10 bg-white/5">
                     <div className="flex h-3 w-full">
