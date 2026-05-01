@@ -1091,40 +1091,6 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 }, [currentWeekFixture, loginSession?.coachName]);
   const nextWeekFixture = useMemo(() => buildDashboardFixtureMatches(nextFixtureRows), [nextFixtureRows]);
 
-  const opponentTeamCardDescription = useMemo(() => {
-  const currentSuper8Round = currentWeekFixture[0]?.competitionRound ?? null;
-
-  if (!currentSuper8Round) {
-    return "View your opponent’s team";
-  }
-
-  if (loginSession?.role === "coach" && loginSession.coachId) {
-    const opponentNames = Array.from(
-      new Set(
-        fixtureRows
-          .filter((row) => row.coach_id === loginSession.coachId)
-          .map((row) => row.opponent_coach_name)
-          .filter((name) => name.trim().length > 0)
-      )
-    );
-
-    if (opponentNames.length === 1) {
-      return `Super 8 Round ${currentSuper8Round}: view ${opponentNames[0]}’s team`;
-    }
-
-    if (opponentNames.length > 1) {
-      return `Super 8 Round ${currentSuper8Round}: view ${opponentNames.join(" and ")} teams`;
-    }
-  }
-
-  if (currentWeekFixture.length > 0) {
-    return `Super 8 Round ${currentSuper8Round}: view all opponent teams`;
-  }
-
-  return `Super 8 Round ${currentSuper8Round}: view your opponent’s team`;
-}, [currentWeekFixture, fixtureRows, loginSession]);
-
-
   const fixtureCardDescription = useMemo(() => {
   const currentSuper8Round = currentWeekFixture[0]?.competitionRound ?? null;
 
@@ -1206,13 +1172,11 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
           </Link>
 
           <Link
-  href="/opponent-team"
-  className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10"
->
-  <div className="text-lg font-bold">
-    See Opponent&apos;s Team / Live Scores
-  </div>
-</Link>
+            href="/opponent-team"
+            className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10"
+          >
+            <div className="text-lg font-bold">See Opponent&apos;s Team / Live Scores</div>
+          </Link>
 
           <Link
             href="/fixture"
