@@ -452,7 +452,7 @@ function getAutoMatchOutcome(params: {
 
   if (params.coach1Total === params.coach2Total) {
     return {
-      label: `${params.coach1Name} ${formatScore(params.coach1Total)} drew with ${params.coach2Name} ${formatScore(params.coach2Total)}`,
+      label: `${params.coach1Name} ${formatScore(params.coach1Total)} drew with ${params.coach2Name} ${formatScore(params.coach2Total)}${pendingLabel}`,
       margin: 0,
       isDraw: true,
       winnerName: null,
@@ -469,7 +469,7 @@ function getAutoMatchOutcome(params: {
   const margin = Math.abs(params.coach1Total - params.coach2Total);
 
   return {
-    label: `${winnerName} ${formatScore(winnerScore)} def. ${loserName} ${formatScore(loserScore)}`,
+    label: `${winnerName} ${formatScore(winnerScore)} def. ${loserName} ${formatScore(loserScore)}${pendingLabel}`,
     margin,
     isDraw: false,
     winnerName,
@@ -598,11 +598,9 @@ function buildMatchViewForCoach(row: FixtureRow, selectedCoachId: number): Match
   return null;
 }
 
-function getMarginLabel(teamAName: string, teamATotal: number, teamBName: string, teamBTotal: number, pendingPlayers: number): string {
-  const pendingSuffix = pendingPlayers > 0 ? ` • ${pendingPlayers} pending` : "";
-
+function getMarginLabel(teamAName: string, teamATotal: number, teamBName: string, teamBTotal: number): string {
   if (teamATotal === teamBTotal) {
-    return `${teamAName} and ${teamBName} are tied on ${formatScore(teamATotal)}${pendingSuffix}`;
+    return `${teamAName} and ${teamBName} are tied on ${formatScore(teamATotal)}`;
   }
 
   const teamAIsLeading = teamATotal > teamBTotal;
@@ -610,7 +608,7 @@ function getMarginLabel(teamAName: string, teamATotal: number, teamBName: string
   const trailerName = teamAIsLeading ? teamBName : teamAName;
   const margin = Math.abs(teamATotal - teamBTotal);
 
-  return `${leaderName} leads ${trailerName} by ${formatScore(margin)}${pendingSuffix}`;
+  return `${leaderName} leads ${trailerName} by ${formatScore(margin)}`;
 }
 
 function CompactStatLine({ label, value }: { label: string; value: string }) {
@@ -1272,43 +1270,64 @@ export default function OpponentTeamPage() {
             const opponentTotal = calculateTeamTotal(opponentRows);
             const selectedPending = selectedRows.filter((row) => row.selectedType === "X" && !row.played && !row.clubImported).length;
             const opponentPending = opponentRows.filter((row) => row.selectedType === "X" && !row.played && !row.clubImported).length;
-            const totalPending = selectedPending + opponentPending;
             const selectedCounting = selectedRows.filter((row) => row.countsToTotal).length;
             const opponentCounting = opponentRows.filter((row) => row.countsToTotal).length;
             const marginLabel = getMarginLabel(
               match.selectedCoachName,
               selectedTotal,
               match.opponentCoachName,
-              opponentTotal,
-              totalPending
+              opponentTotal
             );
+            const scoreMargin = Math.abs(selectedTotal - opponentTotal);
+            const selectedIsLeading = selectedTotal > opponentTotal;
+            const opponentIsLeading = opponentTotal > selectedTotal;
+            const isTied = selectedTotal === opponentTotal;
+            const scoreActionLabel = isTied ? "draw" : selectedIsLeading ? "def." : "trails";
+            const marginDisplay = isTied ? "Draw" : `+${formatScore(scoreMargin)}`;
 
             return (
               <section key={match.key} className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="mb-3 grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-                  <div className="rounded-xl border border-violet-400/20 bg-violet-500/10 p-3">
-                    <div className="text-xs font-bold uppercase tracking-wide text-violet-200/80">
-                      {match.selectedCoachName}
-                    </div>
-                    <div className="mt-1 text-3xl font-black">{formatScore(selectedTotal)}</div>
+                <div className="mb-3 rounded-xl border border-white/10 bg-black/30 p-3 text-center">
+                  <div className="text-xs font-bold uppercase tracking-wide text-white/45">
+                    Super 8 Round {match.roundNumber}
                   </div>
 
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-center">
-                    <div className="text-xs font-bold uppercase tracking-wide text-white/45">
-                      Super 8 Round {match.roundNumber}
+                  <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto_1fr] md:items-center">
+                    <div className={`rounded-xl border p-3 md:text-left ${
+                      selectedIsLeading
+                        ? "border-green-400/30 bg-green-500/10"
+                        : "border-white/10 bg-white/5"
+                    }`}>
+                      <div className="text-xs font-bold uppercase tracking-wide text-white/55">
+                        {match.selectedCoachName}
+                      </div>
+                      <div className={`mt-1 text-4xl font-black leading-none ${selectedIsLeading ? "text-green-100" : "text-white"}`}>
+                        {formatScore(selectedTotal)}
+                      </div>
                     </div>
-                    <div className="mt-1 text-sm font-bold text-white">{marginLabel}</div>
-                    <div className="mt-1 text-[11px] text-white/45">
 
+                    <div className="px-4">
+                      <div className="text-lg font-black text-white">{scoreActionLabel}</div>
+                      <div className="mt-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-white/70">
+                        {marginDisplay}
+                      </div>
+                    </div>
+
+                    <div className={`rounded-xl border p-3 md:text-right ${
+                      opponentIsLeading
+                        ? "border-green-400/30 bg-green-500/10"
+                        : "border-white/10 bg-white/5"
+                    }`}>
+                      <div className="text-xs font-bold uppercase tracking-wide text-white/55">
+                        {match.opponentCoachName}
+                      </div>
+                      <div className={`mt-1 text-4xl font-black leading-none ${opponentIsLeading ? "text-green-100" : "text-white"}`}>
+                        {formatScore(opponentTotal)}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-right">
-                    <div className="text-xs font-bold uppercase tracking-wide text-white/50">
-                      {match.opponentCoachName}
-                    </div>
-                    <div className="mt-1 text-3xl font-black">{formatScore(opponentTotal)}</div>
-                  </div>
+                  <div className="mt-2 text-sm font-bold text-white/80">{marginLabel}</div>
                 </div>
 
                 <div className="grid gap-3 xl:grid-cols-2">
