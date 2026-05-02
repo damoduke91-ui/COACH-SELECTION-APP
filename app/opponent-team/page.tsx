@@ -607,14 +607,18 @@ function PlayerBreakdownCard({
 }: {
   row: PlayerBreakdownRow;
 }) {
+  const isDnp = !row.played && row.clubImported;
+
   return (
     <div
       className={`rounded-lg border px-2 py-1.5 text-[11px] ${
         row.countsToTotal
           ? "border-green-400/25 bg-green-500/10 text-white"
-          : row.played
-            ? "border-white/10 bg-white/[0.03] text-white/70"
-            : "border-white/10 bg-black/15 text-white/40"
+          : isDnp
+            ? "border-red-400/35 bg-red-500/10 text-red-50"
+            : row.played
+              ? "border-white/10 bg-white/[0.03] text-white/70"
+              : "border-white/10 bg-black/15 text-white/40"
       }`}
     >
       <div className="flex flex-wrap items-center gap-1.5">
@@ -622,10 +626,12 @@ function PlayerBreakdownCard({
           className={`rounded-md border px-1.5 py-0.5 text-[10px] font-black ${
             row.countsToTotal
               ? "border-green-400/30 bg-green-500/15 text-green-100"
-              : "border-white/10 bg-white/5 text-white/55"
+              : isDnp
+                ? "border-red-400/40 bg-red-500/20 text-red-100"
+                : "border-white/10 bg-white/5 text-white/55"
           }`}
         >
-          {row.selectedType}
+          {isDnp ? `${row.selectedType} DNP` : row.selectedType}
         </span>
 
         <span className="min-w-[140px] flex-1 font-bold text-white">

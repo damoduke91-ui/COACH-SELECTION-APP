@@ -1,0 +1,93 @@
+﻿environment,afl_round,afl_team_name,afl_team_code,player_name,k,hb,d,m,g,b,t,ho,ga,i50,cl,cg,r50,ff,fa,af,sc
+production,8,Geelong,GEE,Max Holmes,19,10,29,4,2,0,2,0,1,6,4,2,5,1,1,107,149
+production,8,Geelong,GEE,Bailey Smith,14,12,26,0,0,1,1,0,1,3,6,2,4,3,1,71,97
+production,8,Geelong,GEE,Zach Guthrie,13,9,22,4,1,0,1,0,0,3,1,2,4,0,1,76,93
+production,8,Geelong,GEE,Tanner Bruhn,10,12,22,6,0,0,7,0,0,5,0,5,4,1,0,101,72
+production,8,Geelong,GEE,Jeremy Cameron,15,4,19,8,3,3,1,0,4,3,1,7,0,1,3,94,96
+production,8,Geelong,GEE,Tom Atkins,9,10,19,2,0,0,5,0,0,3,3,5,1,1,1,71,73
+production,8,Geelong,GEE,Oisin Mullin,7,11,18,4,0,0,6,0,1,1,4,3,1,3,2,76,72
+production,8,Geelong,GEE,Shaun Mannagh,12,6,18,1,4,1,1,0,1,7,4,0,0,0,0,80,112
+production,8,Geelong,GEE,James Worpel,10,7,17,2,1,0,5,0,0,8,6,5,1,3,3,70,77
+production,8,Geelong,GEE,Jack Martin,9,7,16,7,2,0,2,0,0,0,1,0,0,0,0,82,77
+production,8,Geelong,GEE,Mark O'Connor,7,8,15,4,0,0,0,0,1,3,0,4,1,0,3,40,51
+production,8,Geelong,GEE,Jake Kolodjashnij,8,6,14,5,0,0,0,0,0,1,0,2,1,1,0,52,49
+production,8,Geelong,GEE,Jack Bowes,6,8,14,2,1,0,1,0,0,1,1,3,1,3,1,50,50
+production,8,Geelong,GEE,Thomas Stewart,10,4,14,5,0,0,0,0,0,0,0,3,3,0,1,50,53
+production,8,Geelong,GEE,Bradley Close,5,9,14,2,0,1,1,0,2,4,0,0,0,2,0,46,59
+production,8,Geelong,GEE,Oliver Henry,8,6,14,3,1,1,5,0,0,4,1,1,0,1,0,73,71
+production,8,Geelong,GEE,Ollie Dempsey,6,8,14,4,1,1,3,0,0,1,0,1,0,0,1,62,79
+production,8,Geelong,GEE,Sam De Koning,5,8,13,3,0,0,0,14,0,2,3,5,0,1,1,52,60
+production,8,Geelong,GEE,Connor O'Sullivan,6,6,12,4,0,0,1,0,0,1,0,4,5,0,2,40,41
+production,8,Geelong,GEE,Lawson Humphries,9,3,12,5,1,0,3,0,0,0,0,2,5,2,0,68,71
+production,8,Geelong,GEE,Patrick Dangerfield,4,7,11,1,1,0,2,0,0,2,1,2,0,4,1,44,56
+production,8,Geelong,GEE,Shannon Neale,7,3,10,5,3,0,4,6,1,1,1,1,0,0,0,82,97
+production,8,Geelong,GEE,Mitchell Edwards,4,4,8,0,0,0,2,20,0,1,2,4,1,0,4,36,34
+production,8,North Melbourne,NTH,Tristan Xerri,14,16,30,1,0,1,7,23,1,5,14,5,2,8,2,131,164
+production,8,North Melbourne,NTH,Luke D-Uniacke,12,12,24,2,0,0,5,0,1,9,6,4,2,2,3,79,112
+production,8,North Melbourne,NTH,Colby McKercher,15,8,23,5,2,0,2,0,1,3,0,4,2,0,2,90,85
+production,8,North Melbourne,NTH,Jy Simpkin,14,7,21,2,2,0,1,0,1,6,3,6,0,1,2,73,74
+production,8,North Melbourne,NTH,Finn O'Sullivan,9,12,21,1,0,0,6,0,2,4,4,3,0,0,0,78,75
+production,8,North Melbourne,NTH,Harry Sheezel,10,10,20,5,1,0,4,0,0,2,3,4,0,2,3,80,81
+production,8,North Melbourne,NTH,Luke Parker,12,7,19,6,0,0,0,0,0,1,1,1,3,2,1,67,66
+production,8,North Melbourne,NTH,Caleb Daniel,9,10,19,1,0,0,6,0,0,1,2,2,4,0,1,71,77
+production,8,North Melbourne,NTH,Luke McDonald,8,9,17,3,0,0,0,0,0,3,0,3,2,2,3,44,65
+production,8,North Melbourne,NTH,Paul Curtis,9,8,17,3,1,2,5,0,1,3,1,4,1,1,0,81,79
+production,8,North Melbourne,NTH,Tom Blamires,7,10,17,4,0,0,2,0,0,1,0,2,5,1,0,62,59
+production,8,North Melbourne,NTH,Cameron Zurhaar,8,8,16,2,0,0,2,0,0,1,0,1,1,1,0,55,69
+production,8,North Melbourne,NTH,Dylan Stephens,10,6,16,3,0,0,0,0,1,3,2,4,2,1,2,46,54
+production,8,North Melbourne,NTH,Jack Darling,6,9,15,2,3,0,0,1,1,2,2,3,1,1,1,59,76
+production,8,North Melbourne,NTH,Aidan Corr,5,9,14,5,0,0,1,0,0,0,0,3,2,0,2,46,61
+production,8,North Melbourne,NTH,Charlie Comben,8,6,14,6,0,0,0,0,0,1,1,4,5,0,2,48,70
+production,8,North Melbourne,NTH,Griffin Logue,6,7,13,2,0,0,2,0,0,0,0,1,4,0,0,46,55
+production,8,North Melbourne,NTH,Charlie Spargo,2,7,9,1,0,0,1,0,1,1,0,2,1,0,0,27,35
+production,8,North Melbourne,NTH,Nick Larkey,4,5,9,4,1,1,2,0,0,1,0,1,0,1,0,50,50
+production,8,North Melbourne,NTH,Cooper Trembath,5,4,9,4,0,1,1,4,0,1,0,4,0,0,2,38,39
+production,8,North Melbourne,NTH,Tom Powell,4,4,8,3,0,0,5,0,0,1,0,0,0,0,0,49,63
+production,8,North Melbourne,NTH,Zane Duursma,4,4,8,2,3,0,2,0,0,1,0,1,0,1,0,53,71
+production,8,North Melbourne,NTH,Lachy Dovaston,2,6,8,1,0,1,1,0,0,0,2,1,0,2,0,28,30
+production,8,Richmond,RIC,Jack Ross,8,21,29,4,0,0,5,0,0,2,11,3,5,1,0,99,129
+production,8,Richmond,RIC,Kane McAuliffe,18,10,28,3,1,0,4,0,1,6,4,9,5,0,2,99,115
+production,8,Richmond,RIC,Jayden Short,16,7,23,6,0,0,1,0,0,2,0,2,6,1,1,82,90
+production,8,Richmond,RIC,Tom Brown,18,5,23,10,0,0,1,0,1,1,0,1,8,1,0,99,112
+production,8,Richmond,RIC,Sam Cumming,11,12,23,1,0,0,6,0,1,6,2,5,1,2,0,86,80
+production,8,Richmond,RIC,Jacob Hopper,10,10,20,2,0,0,2,0,1,3,5,9,0,2,3,57,49
+production,8,Richmond,RIC,Noah Balta,14,6,20,6,3,0,2,20,0,3,6,3,2,4,1,119,152
+production,8,Richmond,RIC,Nick Vlastuin,12,7,19,9,0,0,0,0,0,0,0,2,6,2,0,79,78
+production,8,Richmond,RIC,James Trezise,11,7,18,8,0,0,3,0,0,1,0,1,4,1,0,84,65
+production,8,Richmond,RIC,Seth Campbell,10,7,17,4,3,2,5,0,1,4,1,0,0,0,0,96,119
+production,8,Richmond,RIC,Tyler Sonsie,9,7,16,5,1,1,1,0,0,2,1,1,0,1,0,68,83
+production,8,Richmond,RIC,Nathan Broad,10,5,15,7,0,0,0,0,0,0,1,2,3,0,0,61,73
+production,8,Richmond,RIC,Thomas Burton,8,7,15,0,0,0,0,0,1,5,0,2,0,0,1,35,64
+production,8,Richmond,RIC,Tom Lynch,9,4,13,4,1,3,2,0,2,2,2,3,0,0,1,61,69
+production,8,Richmond,RIC,Mykelti Lefau,6,5,11,5,1,2,0,0,0,2,0,3,0,3,0,54,41
+production,8,Richmond,RIC,Steely Green,7,3,10,3,2,0,2,0,1,3,1,3,0,1,2,51,65
+production,8,Richmond,RIC,Campbell Gray,7,2,9,3,0,0,1,0,0,1,0,1,4,0,1,35,61
+production,8,Richmond,RIC,Patrick Retschko,6,3,9,2,0,0,5,0,1,2,1,1,3,1,0,51,56
+production,8,Richmond,RIC,Samuel Grlj,6,3,9,2,0,0,4,0,0,1,0,3,1,1,1,44,34
+production,8,Richmond,RIC,Oliver H-Brown,2,6,8,0,0,0,0,15,0,1,3,4,0,1,2,28,33
+production,8,Richmond,RIC,Jonty Faull,7,0,7,4,3,0,2,0,0,1,0,0,0,0,0,59,72
+production,8,Richmond,RIC,Ben Miller,5,1,6,2,0,0,3,0,0,0,0,1,2,1,1,33,47
+production,8,Richmond,RIC,Dion Prestia,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+production,8,West Coast,WCE,Tim Kelly,12,18,30,3,1,0,2,0,1,7,7,2,1,2,1,94,121
+production,8,West Coast,WCE,Harley Reid,12,14,26,2,2,1,4,0,0,4,10,11,1,0,5,84,101
+production,8,West Coast,WCE,Tom McCarthy,18,5,23,10,0,0,1,0,0,0,1,2,5,0,0,98,108
+production,8,West Coast,WCE,Elliot Yeo,10,10,20,1,1,1,11,0,1,5,7,4,1,3,1,104,104
+production,8,West Coast,WCE,Liam Baker,13,7,20,3,0,0,3,0,1,7,1,3,3,4,1,75,77
+production,8,West Coast,WCE,Jake Waterman,15,4,19,11,3,1,2,0,0,2,0,4,0,3,0,116,105
+production,8,West Coast,WCE,Ryan Maric,12,6,18,6,1,0,3,0,0,3,0,1,0,0,0,84,81
+production,8,West Coast,WCE,Hamish Davis,8,10,18,3,0,0,0,0,1,4,1,1,1,0,0,53,65
+production,8,West Coast,WCE,Willem Duursma,9,9,18,1,1,1,5,0,1,4,3,3,1,0,0,75,93
+production,8,West Coast,WCE,Josh Lindsay,10,7,17,4,0,0,1,0,0,1,1,2,2,0,0,60,68
+production,8,West Coast,WCE,Milan Murdock,10,6,16,7,0,0,1,0,1,5,1,2,2,0,2,61,61
+production,8,West Coast,WCE,Liam Duggan,7,7,14,7,0,0,3,0,0,0,0,2,3,1,2,63,53
+production,8,West Coast,WCE,Tylar Young,12,2,14,9,0,0,0,0,0,2,0,2,4,0,1,64,77
+production,8,West Coast,WCE,Matt Owies,9,3,12,6,1,2,2,0,0,2,0,3,0,1,1,65,69
+production,8,West Coast,WCE,Bailey J. Williams,6,6,12,0,1,0,4,28,0,4,2,5,1,1,4,69,86
+production,8,West Coast,WCE,Harry Schoenberg,8,4,12,3,0,1,0,0,0,3,1,4,1,0,1,39,29
+production,8,West Coast,WCE,Brady Hough,7,5,12,6,0,0,2,0,0,0,0,1,3,0,0,57,67
+production,8,West Coast,WCE,Reuben Ginbey,6,5,11,3,0,0,3,0,0,2,1,2,1,0,0,49,65
+production,8,West Coast,WCE,Cooper D-Tytler,4,7,11,1,0,0,7,4,0,3,2,3,1,1,1,59,48
+production,8,West Coast,WCE,Elijah Hewett,3,5,8,0,0,0,2,0,1,2,1,3,0,0,2,21,28
+production,8,West Coast,WCE,Malakai Champion,3,5,8,0,1,0,2,0,0,2,0,3,0,0,1,30,39
+production,8,West Coast,WCE,Tom Cole,4,3,7,5,0,0,0,0,0,0,0,0,0,0,0,33,24
+production,8,West Coast,WCE,Jobe Shanahan,4,0,4,4,1,1,0,0,0,2,0,0,0,0,0,31,44
