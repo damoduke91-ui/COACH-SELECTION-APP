@@ -608,9 +608,11 @@ function PlayerBreakdownCard({
   row: PlayerBreakdownRow;
 }) {
   const isDnp = !row.played && row.clubImported;
+  const dnpTooltip = isDnp ? "Did Not Play" : undefined;
 
   return (
     <div
+      title={dnpTooltip}
       className={`rounded-lg border px-2 py-1.5 text-[11px] ${
         row.countsToTotal
           ? "border-green-400/25 bg-green-500/10 text-white"
@@ -623,6 +625,8 @@ function PlayerBreakdownCard({
     >
       <div className="flex flex-wrap items-center gap-1.5">
         <span
+          title={dnpTooltip}
+          aria-label={isDnp ? `${row.selectedType} Did Not Play` : row.selectedType}
           className={`rounded-md border px-1.5 py-0.5 text-[10px] font-black ${
             row.countsToTotal
               ? "border-green-400/30 bg-green-500/15 text-green-100"
