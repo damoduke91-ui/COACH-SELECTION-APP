@@ -1,0 +1,93 @@
+﻿environment,afl_round,afl_team_name,afl_team_code,player_name,k,hb,d,m,g,b,t,ho,ga,i50,cl,cg,r50,ff,fa,af,sc
+production,8,Adelaide,ADE,Wayne Milera,16,13,29,6,0,0,4,0,0,1,3,0,6,2,0,110,122
+production,8,Adelaide,ADE,Sam Berry,18,11,29,3,0,0,19,0,0,7,4,5,2,1,2,156,171
+production,8,Adelaide,ADE,James Peatling,13,12,25,2,0,0,5,0,0,6,4,4,2,2,1,88,91
+production,8,Adelaide,ADE,Izak Rankine,15,8,23,3,1,0,5,0,0,3,5,7,2,1,2,91,89
+production,8,Adelaide,ADE,Josh Worrell,14,8,22,4,0,0,3,0,0,1,1,3,4,3,1,82,89
+production,8,Adelaide,ADE,Jake Soligo,12,10,22,3,0,2,4,0,2,4,5,3,1,0,2,77,82
+production,8,Adelaide,ADE,Brayden Cook,13,8,21,7,1,0,3,0,1,4,4,4,0,1,1,92,94
+production,8,Adelaide,ADE,Ben Keays,10,8,18,6,3,0,5,0,1,3,0,3,1,0,2,96,111
+production,8,Adelaide,ADE,Alex N-Bullen,10,7,17,6,0,0,6,0,0,6,2,0,2,1,0,87,98
+production,8,Adelaide,ADE,Rory Laird,7,9,16,0,0,0,4,0,0,3,0,1,1,1,1,53,60
+production,8,Adelaide,ADE,Josh Rachele,10,3,13,2,2,3,4,0,1,2,1,4,0,1,1,71,70
+production,8,Adelaide,ADE,Luke Pedlar,4,8,12,3,1,0,4,0,0,2,0,4,0,0,1,56,45
+production,8,Adelaide,ADE,Isaac Cumming,3,8,11,1,0,0,1,0,1,1,1,1,1,0,1,29,55
+production,8,Adelaide,ADE,Lachlan McAndrew,6,5,11,2,0,0,4,33,0,3,3,2,1,1,1,81,92
+production,8,Adelaide,ADE,Riley Thilthorpe,5,5,10,2,1,2,2,2,0,2,1,2,0,2,1,48,58
+production,8,Adelaide,ADE,Zac Taylor,6,4,10,4,0,1,4,0,1,1,0,2,0,0,2,49,43
+production,8,Adelaide,ADE,Toby Murray,9,1,10,9,2,0,1,3,0,3,0,2,0,1,1,73,72
+production,8,Adelaide,ADE,James Borlase,7,2,9,4,0,0,1,0,0,0,0,0,3,2,0,43,55
+production,8,Adelaide,ADE,Max Michalanney,4,5,9,2,0,0,0,0,0,3,0,1,1,0,0,28,36
+production,8,Adelaide,ADE,Daniel Curtin,6,3,9,4,0,1,1,0,3,2,0,3,0,0,0,41,49
+production,8,Adelaide,ADE,Jordon Butts,7,1,8,4,0,0,0,0,0,1,0,0,1,1,0,36,45
+production,8,Adelaide,ADE,Hugh Bond,3,2,5,1,0,0,1,0,0,1,0,1,0,0,1,17,17
+production,8,Adelaide,ADE,Taylor Walker,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,-1
+production,8,Fremantle,FRE,Shai Bolton,14,16,30,2,1,1,3,0,2,8,9,3,1,0,2,93,134
+production,8,Fremantle,FRE,Luke Ryan,20,2,22,8,0,0,3,0,0,2,0,1,4,2,1,99,119
+production,8,Fremantle,FRE,Andrew Brayshaw,12,10,22,3,1,0,8,0,0,4,6,3,1,1,1,101,81
+production,8,Fremantle,FRE,Jordan Clark,15,7,22,5,0,0,2,0,0,4,3,5,3,0,3,73,85
+production,8,Fremantle,FRE,Murphy Reid,10,12,22,3,1,0,3,0,1,4,3,2,1,1,0,82,76
+production,8,Fremantle,FRE,Karl Worner,16,5,21,8,0,0,2,0,0,6,1,1,5,2,0,92,98
+production,8,Fremantle,FRE,Hayden Young,10,10,20,1,3,0,7,0,0,3,3,3,2,0,1,96,104
+production,8,Fremantle,FRE,Corey Wagner,11,8,19,2,0,0,0,0,1,2,1,4,6,0,1,52,62
+production,8,Fremantle,FRE,Luke Jackson,8,10,18,3,1,2,8,36,0,5,3,4,0,3,1,129,143
+production,8,Fremantle,FRE,Caleb Serong,11,6,17,0,0,0,8,0,0,5,4,3,1,1,1,75,63
+production,8,Fremantle,FRE,Josh Treacy,12,5,17,8,3,3,2,0,2,4,0,5,0,2,2,95,105
+production,8,Fremantle,FRE,Heath Chapman,7,8,15,5,1,0,3,0,0,1,0,2,2,0,1,67,76
+production,8,Fremantle,FRE,Neil Erasmus,11,4,15,4,1,0,4,0,1,2,4,5,3,1,1,73,60
+production,8,Fremantle,FRE,Brennan Cox,8,5,13,2,0,0,3,0,0,3,0,2,3,0,1,49,66
+production,8,Fremantle,FRE,Sam Switkowski,7,5,12,3,3,0,3,0,0,1,1,2,0,0,1,67,74
+production,8,Fremantle,FRE,Jye Amiss,8,4,12,4,0,3,3,0,1,0,0,1,0,0,0,59,43
+production,8,Fremantle,FRE,Matt Johnson,2,9,11,0,0,0,1,0,0,2,2,6,2,0,4,16,27
+production,8,Fremantle,FRE,Jeremy Sharp,7,3,10,4,0,0,1,0,0,3,0,2,0,0,0,43,41
+production,8,Fremantle,FRE,Michael Frederick,6,3,9,3,1,0,3,0,0,2,1,1,1,0,1,48,56
+production,8,Fremantle,FRE,Mason Cox,7,1,8,2,0,2,3,25,0,0,2,0,1,2,0,70,68
+production,8,Fremantle,FRE,Alex Pearce,3,4,7,4,0,0,3,0,0,0,0,2,1,0,2,35,34
+production,8,Fremantle,FRE,Isaiah Dudley,2,4,6,0,1,0,2,0,2,0,1,2,0,1,1,26,34
+production,8,Fremantle,FRE,Patrick Voss,2,3,5,1,0,0,3,0,0,2,1,3,0,1,2,22,21
+production,8,Port Adelaide,PTA,Oliver Wines,9,21,30,6,1,0,7,0,1,3,7,5,1,3,2,118,126
+production,8,Port Adelaide,PTA,Zak Butters,15,15,30,3,1,0,6,0,0,5,4,7,3,1,1,112,113
+production,8,Port Adelaide,PTA,Miles Bergman,14,9,23,11,0,0,2,0,0,1,1,1,5,0,0,101,93
+production,8,Port Adelaide,PTA,Logan Evans,16,7,23,7,0,0,1,0,0,2,0,1,6,1,0,88,98
+production,8,Port Adelaide,PTA,Darcy B-Jones,15,7,22,8,0,0,2,0,0,0,0,2,6,1,0,92,86
+production,8,Port Adelaide,PTA,Aliir Aliir,16,5,21,14,0,0,0,0,0,0,0,6,6,0,2,94,103
+production,8,Port Adelaide,PTA,Willem Drew,14,6,20,4,0,0,6,0,1,3,4,5,2,1,1,88,69
+production,8,Port Adelaide,PTA,Jason H-Francis,10,10,20,2,0,0,3,0,1,5,7,2,1,1,1,66,75
+production,8,Port Adelaide,PTA,Jordon Sweet,8,9,17,3,0,1,4,36,0,2,5,4,1,2,2,100,116
+production,8,Port Adelaide,PTA,Jacob Wehr,15,2,17,5,0,2,2,0,1,6,2,3,1,0,0,74,71
+production,8,Port Adelaide,PTA,Christian Moraes,7,8,15,4,0,0,6,0,0,1,1,2,1,1,0,74,57
+production,8,Port Adelaide,PTA,Josh Lai,13,2,15,5,0,0,1,0,0,1,0,0,3,2,0,64,68
+production,8,Port Adelaide,PTA,Jase Burgoyne,10,4,14,3,0,0,2,0,1,3,2,1,2,2,1,54,60
+production,8,Port Adelaide,PTA,Jack Whitlock,7,7,14,4,1,1,0,0,1,0,0,3,0,0,0,54,64
+production,8,Port Adelaide,PTA,Kane Farrell,11,1,12,6,0,0,2,0,1,1,1,3,4,1,1,59,55
+production,8,Port Adelaide,PTA,Mitch Georgiades,8,3,11,6,3,3,2,0,0,0,0,7,0,0,5,62,61
+production,8,Port Adelaide,PTA,Joe Berry,3,8,11,3,2,0,0,0,0,0,1,2,0,0,1,43,60
+production,8,Port Adelaide,PTA,Joe Richards,7,3,10,2,0,1,6,0,0,3,2,1,2,0,0,58,49
+production,8,Port Adelaide,PTA,Lachlan Jones,4,4,8,2,0,0,5,0,0,0,0,0,2,3,0,49,66
+production,8,Port Adelaide,PTA,Todd Marshall,7,0,7,2,0,0,1,0,0,0,0,1,2,0,1,28,41
+production,8,Port Adelaide,PTA,Corey Durdin,5,1,6,1,2,1,5,0,1,1,0,1,0,2,0,55,54
+production,8,Port Adelaide,PTA,Dante Visentini,3,2,5,0,1,0,1,19,0,0,1,3,0,0,2,36,44
+production,8,Port Adelaide,PTA,Ewan Mackinlay,2,3,5,2,0,0,5,0,0,1,1,1,0,0,0,38,30
+production,8,Western Bulldogs,WBU,Marcus Bontempelli,16,17,33,4,2,1,2,0,2,6,6,6,3,0,3,106,118
+production,8,Western Bulldogs,WBU,Bailey Dale,23,9,32,7,0,0,5,0,2,2,2,1,9,1,0,129,141
+production,8,Western Bulldogs,WBU,Matthew Kennedy,17,13,30,4,0,0,5,0,0,3,9,5,3,2,0,111,96
+production,8,Western Bulldogs,WBU,Ed Richards,18,7,25,3,1,0,6,0,0,6,7,2,4,1,1,105,117
+production,8,Western Bulldogs,WBU,Ryley Sanders,6,19,25,2,1,0,5,0,0,2,2,1,0,1,1,86,85
+production,8,Western Bulldogs,WBU,Joel Freijah,10,9,19,4,0,1,5,0,2,4,6,2,1,1,0,82,97
+production,8,Western Bulldogs,WBU,Buku Khamis,9,9,18,8,0,0,1,0,1,0,0,0,6,1,0,74,86
+production,8,Western Bulldogs,WBU,Rhylee West,9,8,17,4,2,0,4,0,0,5,2,1,0,1,0,84,101
+production,8,Western Bulldogs,WBU,Nicholas Coffield,12,4,16,10,0,0,0,0,0,1,0,3,2,0,2,68,50
+production,8,Western Bulldogs,WBU,Bailey Williams,8,7,15,1,0,0,1,0,0,1,0,5,1,2,0,47,26
+production,8,Western Bulldogs,WBU,Timothy English,8,7,15,3,0,0,3,21,1,2,1,2,2,1,1,78,87
+production,8,Western Bulldogs,WBU,Arthur Jones,6,9,15,3,1,2,1,0,2,2,0,1,0,3,1,57,58
+production,8,Western Bulldogs,WBU,Lachlan Bramble,10,4,14,4,1,0,1,0,0,2,0,0,3,0,0,60,68
+production,8,Western Bulldogs,WBU,Jedd Busslinger,10,3,13,6,0,0,0,0,0,1,0,2,4,2,2,50,96
+production,8,Western Bulldogs,WBU,Harvey Gallagher,9,4,13,3,0,2,0,0,0,3,1,0,1,2,0,48,51
+production,8,Western Bulldogs,WBU,Michael Sellwood,5,8,13,0,0,0,3,0,0,1,0,2,4,2,0,45,59
+production,8,Western Bulldogs,WBU,Laitham Vandermeer,7,5,12,3,1,0,1,0,0,4,1,1,0,0,1,47,46
+production,8,Western Bulldogs,WBU,Lachlan McNeil,8,3,11,4,2,0,4,0,0,3,0,3,1,2,1,69,57
+production,8,Western Bulldogs,WBU,Will Lewis,5,6,11,1,2,1,1,0,0,0,0,2,0,4,2,45,55
+production,8,Western Bulldogs,WBU,Aaron Naughton,4,5,9,4,2,1,2,0,1,2,0,2,0,1,1,53,67
+production,8,Western Bulldogs,WBU,Josh Dolan,2,5,7,1,0,0,3,0,0,1,0,1,0,0,0,31,20
+production,8,Western Bulldogs,WBU,Sam Davidson,4,2,6,2,0,0,5,0,1,0,0,0,0,0,0,42,47
+production,8,Western Bulldogs,WBU,Louis Emmett,1,1,2,0,0,0,0,2,0,1,0,1,0,0,1,4,1

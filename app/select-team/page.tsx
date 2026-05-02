@@ -84,6 +84,7 @@ type AppSettingsRow = {
   lockout_timezone?: string | null;
   lockout_at?: string | null;
   current_afl_round?: number | null;
+  current_super8_round?: number | null;
 };
 
 type RoundSubmissionRow = {
@@ -491,6 +492,12 @@ function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
         : Number.isFinite(Number(row.current_afl_round))
           ? Number(row.current_afl_round)
           : null,
+    current_super8_round:
+      typeof row.current_super8_round === "number"
+        ? row.current_super8_round
+        : Number.isFinite(Number(row.current_super8_round))
+          ? Number(row.current_super8_round)
+          : null,
   };
 }
 
@@ -779,6 +786,7 @@ export default function SelectTeamPage() {
   );
   const [lockoutScheduleAt, setLockoutScheduleAt] = useState<string | null>(null);
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
+  const [currentSuper8Round, setCurrentSuper8Round] = useState<number | null>(null);
   const [isTogglingLockout, setIsTogglingLockout] = useState(false);
   const [isSavingLockoutSchedule, setIsSavingLockoutSchedule] = useState(false);
   const [lockoutClockTick, setLockoutClockTick] = useState(() => Date.now());
@@ -1038,6 +1046,11 @@ export default function SelectTeamPage() {
         ? row.current_afl_round
         : null
     );
+    setCurrentSuper8Round(
+      typeof row.current_super8_round === "number" && Number.isFinite(row.current_super8_round)
+        ? row.current_super8_round
+        : null
+    );
   }, []);
 
   const refreshAppSettings = useCallback(async () => {
@@ -1045,6 +1058,40 @@ export default function SelectTeamPage() {
     applyAppSettings(settings);
     setLockoutClockTick(Date.now());
   }, [applyAppSettings]);
+
+  const getSnapshotRoundNumber = useCallback(async (): Promise<number> => {
+    if (
+      typeof currentSuper8Round === "number" &&
+      Number.isFinite(currentSuper8Round) &&
+      currentSuper8Round > 0
+    ) {
+      return currentSuper8Round;
+    }
+
+    if (
+      typeof currentAflRound === "number" &&
+      Number.isFinite(currentAflRound) &&
+      currentAflRound > 0
+    ) {
+      const { data, error } = await supabase
+        .from("season_fixture")
+        .select("competition_round")
+        .eq("environment", APP_ENV)
+        .eq("afl_round", currentAflRound)
+        .order("competition_round", { ascending: false })
+        .limit(1);
+
+      if (!error) {
+        const fixtureRound = Number(data?.[0]?.competition_round ?? 0);
+
+        if (Number.isFinite(fixtureRound) && fixtureRound > 0) {
+          return fixtureRound;
+        }
+      }
+    }
+
+    return 1;
+  }, [currentAflRound, currentSuper8Round]);
 
   const createScheduledLockoutSnapshot = useCallback(async () => {
     if (!lockoutScheduleAt) {
@@ -1062,29 +1109,7 @@ export default function SelectTeamPage() {
     snapshotInFlightRef.current = true;
 
     try {
-      const { data: existingSnapshotRows, error: existingSnapshotError } = await supabase
-        .from("round_submissions")
-        .select("round_number")
-        .eq("environment", APP_ENV)
-        .eq("lockout_at", lockoutScheduleAt)
-        .limit(1);
-
-      if (existingSnapshotError) {
-        setSubmitMessage(`Auto snapshot check failed: ${existingSnapshotError.message}`);
-        return;
-      }
-
-      const existingRoundNumber = Number(existingSnapshotRows?.[0]?.round_number ?? 0);
-
-      if (existingSnapshotRows && existingSnapshotRows.length > 0 && existingRoundNumber > 0) {
-        lastSnapshotLockoutAtRef.current = lockoutScheduleAt;
-        return;
-      }
-
-      const snapshotRoundNumber =
-        typeof currentAflRound === "number" && Number.isFinite(currentAflRound) && currentAflRound > 0
-          ? currentAflRound
-          : 1;
+      const snapshotRoundNumber = await getSnapshotRoundNumber();
 
       const { data: selectionRows, error: selectionError } = await supabase
         .from("coach_team_selections")
@@ -1123,21 +1148,21 @@ export default function SelectTeamPage() {
         };
       });
 
-      const { error: insertError } = await supabase
+      const { error: upsertError } = await supabase
         .from("round_submissions")
-        .upsert(snapshotRows, { onConflict: "environment,lockout_at,coach_id" });
+        .upsert(snapshotRows, { onConflict: "coach_id,round_number" });
 
-      if (insertError) {
-        setSubmitMessage(`Auto snapshot save failed: ${insertError.message}`);
+      if (upsertError) {
+        setSubmitMessage(`Auto snapshot save failed: ${upsertError.message}`);
         return;
       }
 
       lastSnapshotLockoutAtRef.current = lockoutScheduleAt;
-            setSubmitMessage(`Scheduled lockout snapshot created for round ${snapshotRoundNumber}.`);
+      setSubmitMessage(`Scheduled lockout snapshot created for Super 8 round ${snapshotRoundNumber}.`);
     } finally {
       snapshotInFlightRef.current = false;
     }
-   }, [coachConfigs, currentAflRound, lockoutScheduleAt]);
+  }, [coachConfigs, currentAflRound, getSnapshotRoundNumber, lockoutScheduleAt]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1877,24 +1902,7 @@ export default function SelectTeamPage() {
       }
 
       if (isSubmitting) {
-        const { data: latestRoundRows, error: latestRoundError } = await supabase
-          .from("round_submissions")
-          .select("round_number")
-          .eq("environment", APP_ENV)
-          .order("round_number", { ascending: false })
-          .limit(1);
-
-        if (latestRoundError) {
-          setSubmitMessage(`Team submitted, but snapshot round lookup failed: ${latestRoundError.message}`);
-          setIsSavingTeam(false);
-          return;
-        }
-
-        const latestRoundNumber = Number(latestRoundRows?.[0]?.round_number ?? 0);
-        const snapshotRoundNumber =
-          Number.isFinite(latestRoundNumber) && latestRoundNumber > 0
-            ? latestRoundNumber + 1
-            : 1;
+        const snapshotRoundNumber = await getSnapshotRoundNumber();
 
         const snapshotPayload = {
           coach_id: coach.id,
@@ -1906,13 +1914,13 @@ export default function SelectTeamPage() {
           environment: APP_ENV,
           round_number: snapshotRoundNumber,
           afl_round: currentAflRound,
-          lockout_at: nowIso,
+          lockout_at: lockoutScheduleAt ?? nowIso,
           snapshot_created_at: nowIso,
         };
 
         const { error: snapshotError } = await supabase
           .from("round_submissions")
-          .insert(snapshotPayload);
+          .upsert(snapshotPayload, { onConflict: "coach_id,round_number" });
 
         if (snapshotError) {
           setSubmitMessage(`Team submitted, but snapshot save failed: ${snapshotError.message}`);
@@ -1955,6 +1963,7 @@ export default function SelectTeamPage() {
       coachMetaById,
       dirtyCoachIds,
       getCoachChangeVersion,
+      getSnapshotRoundNumber,
       isAdmin,
       isTeamLocked,
       loginSession,
@@ -1962,6 +1971,7 @@ export default function SelectTeamPage() {
       setCoachDirtyState,
       submittedCoachIds,
       currentAflRound,
+      lockoutScheduleAt,
     ]
   );
 
