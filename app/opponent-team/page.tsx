@@ -222,6 +222,11 @@ function normalisePlayerName(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function normaliseClubCode(value: string | null | undefined): string {
+  const club = value?.trim().toUpperCase() ?? "";
+  return club === "BRL" ? "BRI" : club;
+}
+
 function calculatePlayerPoints(stat: AflPlayerRoundStatRow | null): number | null {
   if (!stat) return null;
 
@@ -249,7 +254,7 @@ function buildImportedClubSetForRound(statsRows: AflPlayerRoundStatRow[], aflRou
   for (const row of statsRows) {
     if (row.afl_round !== aflRound) continue;
 
-    const club = row.afl_team_code.trim().toUpperCase();
+    const club = normaliseClubCode(row.afl_team_code);
     if (club) clubs.add(club);
   }
 
@@ -270,7 +275,7 @@ function buildPlayerClubLookup(params: {
   for (const [position, players] of Object.entries(pool)) {
     for (const player of players) {
       lookup.set(normalisePlayerName(player.name), {
-        club: player.club.trim().toUpperCase(),
+        club: normaliseClubCode(player.club),
         position,
         number: player.number,
       });
@@ -286,7 +291,7 @@ function getPlayerClub(params: {
   playerLookup: Map<string, PlayerClubInfo>;
 }): string | null {
   const fromLookup = params.playerLookup.get(normalisePlayerName(params.playerName))?.club ?? null;
-  const fromStat = params.stat?.afl_team_code?.trim().toUpperCase() || null;
+  const fromStat = normaliseClubCode(params.stat?.afl_team_code) || null;
 
   return fromLookup || fromStat;
 }
