@@ -1024,13 +1024,36 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
     XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
 
+    const allCoachRows: {
+      Coach: string;
+      "No.": number | string;
+      Pos_2: string;
+      Club: string;
+      "Player Name": string;
+      Selected: string;
+    }[] = [];
+
     for (const coach of coachConfigs) {
       const coachTeam = sanitiseTeamState(teamRowsByCoachId[coach.id]?.team_data);
       const rows = buildExportRowsForCoach(coach.id, coachTeam, poolsByCoach);
       const worksheet = XLSX.utils.json_to_sheet(rows);
 
       XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(coach.name));
+
+      rows.forEach((row) => {
+        allCoachRows.push({
+          Coach: coach.name,
+          "No.": row["Player No."],
+          Pos_2: row.Position,
+          Club: row.Club,
+          "Player Name": row["Player Name"],
+          Selected: row.Selected,
+        });
+      });
     }
+
+    const allCoachesSheet = XLSX.utils.json_to_sheet(allCoachRows);
+    XLSX.utils.book_append_sheet(workbook, allCoachesSheet, "ALL_Coaches");
 
     const now = new Date();
     const fileName = `coach-team-selections-${APP_ENV}-${now
