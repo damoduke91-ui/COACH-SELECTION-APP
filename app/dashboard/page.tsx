@@ -555,6 +555,8 @@ export default function DashboardPage() {
 const [roundInput, setRoundInput] = useState("1");
 const [isSavingRound, setIsSavingRound] = useState(false);
 const [isExportingTeams, setIsExportingTeams] = useState(false);
+const [snapshotRoundInput, setSnapshotRoundInput] = useState("8");
+const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
     const { data, error } = await supabase
@@ -985,7 +987,117 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     router.replace("/login");
   }
 
-  async function handleExportTeamsXlsx() {
+  
+async function handleExportSnapshotRoundXlsx() {
+  if (loginSession?.role !== "admin") {
+    setMessage("Only admin can export snapshot rounds.");
+    return;
+  }
+
+  const parsedRound = Number(snapshotRoundInput);
+
+  if (!Number.isInteger(parsedRound) || parsedRound < 1) {
+    setMessage("Please enter a valid Super 8 round.");
+    return;
+  }
+
+  setIsExportingSnapshot(true);
+
+  try {
+    const { data, error } = await supabase
+      .from("round_submissions")
+      .select("coach_id, coach_name, team_data")
+      .eq("environment", APP_ENV)
+      .eq("round_number", parsedRound);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const snapshotRows = data ?? [];
+
+    const poolsByCoach: Record<number, ReturnType<typeof getPlayersForCoach>> = {};
+
+    for (const coach of coachConfigs) {
+      poolsByCoach[coach.id] = getPlayersForCoach({
+        coachId: coach.id,
+        coachName: coach.name,
+      });
+    }
+
+    const workbook = XLSX.utils.book_new();
+
+    const allCoachRows: {
+      Coach: string;
+      "No.": number | string;
+      Pos_2: string;
+      Club: string;
+      "Player Name": string;
+      Selected: string;
+    }[] = [];
+
+    for (const coach of coachConfigs) {
+      const snapshotRow = snapshotRows.find(
+        (row) => row.coach_id === coach.id
+      );
+
+      const coachTeam = sanitiseTeamState(snapshotRow?.team_data);
+
+      const rows = buildExportRowsForCoach(
+        coach.id,
+        coachTeam,
+        poolsByCoach
+      );
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        safeSheetName(coach.name)
+      );
+
+      rows.forEach((row) => {
+        allCoachRows.push({
+          Coach: coach.name,
+          "No.": row["Player No."],
+          Pos_2: row.Position,
+          Club: row.Club,
+          "Player Name": row["Player Name"],
+          Selected: row.Selected,
+        });
+      });
+    }
+
+    const allCoachesSheet = XLSX.utils.json_to_sheet(allCoachRows);
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      allCoachesSheet,
+      "ALL_Coaches"
+    );
+
+    const now = new Date();
+
+    const fileName = `snapshot-round-${parsedRound}-${APP_ENV}-${now
+      .toISOString()
+      .replace(/[:.]/g, "-")}.xlsx`;
+
+    XLSX.writeFile(workbook, fileName);
+
+    setMessage(`Snapshot export created: ${fileName}`);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown snapshot export error.";
+
+    setMessage(`Snapshot export failed: ${message}`);
+  } finally {
+    setIsExportingSnapshot(false);
+  }
+}
+
+
+async function handleExportTeamsXlsx() {
   if (loginSession?.role !== "admin") {
     setMessage("Only admin can export teams.");
     return;
@@ -1035,10 +1147,20 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
 
     for (const coach of coachConfigs) {
       const coachTeam = sanitiseTeamState(teamRowsByCoachId[coach.id]?.team_data);
-      const rows = buildExportRowsForCoach(coach.id, coachTeam, poolsByCoach);
+
+      const rows = buildExportRowsForCoach(
+        coach.id,
+        coachTeam,
+        poolsByCoach
+      );
+
       const worksheet = XLSX.utils.json_to_sheet(rows);
 
-      XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(coach.name));
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        safeSheetName(coach.name)
+      );
 
       rows.forEach((row) => {
         allCoachRows.push({
@@ -1053,7 +1175,12 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
     }
 
     const allCoachesSheet = XLSX.utils.json_to_sheet(allCoachRows);
-    XLSX.utils.book_append_sheet(workbook, allCoachesSheet, "ALL_Coaches");
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      allCoachesSheet,
+      "ALL_Coaches"
+    );
 
     const now = new Date();
     const fileName = `coach-team-selections-${APP_ENV}-${now
@@ -1366,14 +1493,38 @@ const [isExportingTeams, setIsExportingTeams] = useState(false);
       </p>
     </div>
 
-    <button
-      type="button"
-      onClick={() => void handleExportTeamsXlsx()}
-      disabled={isExportingTeams}
-      className="rounded-xl border border-green-400/30 bg-green-500/20 px-4 py-3 text-sm font-semibold text-green-100 transition hover:bg-green-500/30 disabled:cursor-not-allowed disabled:opacity-60"
-    >
-      {isExportingTeams ? "Exporting..." : "Export Teams (XLSX)"}
-    </button>
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+      <button
+        type="button"
+        onClick={() => void handleExportTeamsXlsx()}
+        disabled={isExportingTeams}
+        className="rounded-xl border border-green-400/30 bg-green-500/20 px-4 py-3 text-sm font-semibold text-green-100 transition hover:bg-green-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isExportingTeams ? "Exporting..." : "Export Teams (XLSX)"}
+      </button>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={1}
+          step={1}
+          value={snapshotRoundInput}
+          onChange={(e) => setSnapshotRoundInput(e.target.value)}
+          className="w-24 rounded-xl border border-white/10 bg-neutral-900 px-3 py-3 text-sm text-white outline-none"
+        />
+
+        <button
+          type="button"
+          onClick={() => void handleExportSnapshotRoundXlsx()}
+          disabled={isExportingSnapshot}
+          className="rounded-xl border border-blue-400/30 bg-blue-500/20 px-4 py-3 text-sm font-semibold text-blue-100 transition hover:bg-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isExportingSnapshot
+            ? "Exporting..."
+            : "Export Snapshot Round"}
+        </button>
+      </div>
+    </div>
   </div>
 
   <div className="mt-6 space-y-6">
