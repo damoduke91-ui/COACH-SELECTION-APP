@@ -1120,11 +1120,7 @@ export default function ResultsPage() {
   }, [roundSubmissions]);
 
   function getCoachSubmission(roundNumber: number, coachId: number): RoundSubmissionRow | null {
-    return (
-      submissionByRoundAndCoach.exact.get(`${roundNumber}-${coachId}`) ??
-      submissionByRoundAndCoach.latestByCoach.get(coachId) ??
-      null
-    );
+    return submissionByRoundAndCoach.exact.get(`${roundNumber}-${coachId}`) ?? null;
   }
 
   useEffect(() => {
@@ -1146,14 +1142,10 @@ export default function ResultsPage() {
         if (importedClubCodes.size < EXPECTED_AFL_CLUB_COUNT) continue;
 
         const coach1Submission =
-          submissionByRoundAndCoach.exact.get(`${match.roundNumber}-${match.coach1Id}`) ??
-          submissionByRoundAndCoach.latestByCoach.get(match.coach1Id) ??
-          null;
+          submissionByRoundAndCoach.exact.get(`${match.roundNumber}-${match.coach1Id}`) ?? null;
 
         const coach2Submission =
-          submissionByRoundAndCoach.exact.get(`${match.roundNumber}-${match.coach2Id}`) ??
-          submissionByRoundAndCoach.latestByCoach.get(match.coach2Id) ??
-          null;
+          submissionByRoundAndCoach.exact.get(`${match.roundNumber}-${match.coach2Id}`) ?? null;
 
         if (!coach1Submission || !coach2Submission) continue;
 
