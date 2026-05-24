@@ -554,6 +554,7 @@ export default function DashboardPage() {
   const [isLoadingFixture, setIsLoadingFixture] = useState(false);
 const [roundInput, setRoundInput] = useState("1");
 const [isSavingRound, setIsSavingRound] = useState(false);
+const [isCompletingWeek, setIsCompletingWeek] = useState(false);
 const [isExportingTeams, setIsExportingTeams] = useState(false);
 const [snapshotRoundInput, setSnapshotRoundInput] = useState("8");
 const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
@@ -773,6 +774,77 @@ const refreshPlayerStats = useCallback(async () => {
     setMessage(`Current AFL round updated to ${parsedRound}.`);
     setIsSavingRound(false);
   }, [loginSession?.role, refreshFixtureForRound, roundInput]);
+
+
+
+  const completeSuper8Week = useCallback(async () => {
+    if (loginSession?.role !== "admin") {
+      setMessage("Only admin can complete a Super 8 week.");
+      return;
+    }
+
+    setIsCompletingWeek(true);
+    setMessage("Completing Super 8 week...");
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw new Error(sessionError.message);
+      }
+
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("No active session found. Please log in again.");
+      }
+
+      const response = await fetch("/api/admin/complete-super8-week", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ snapshotLadder: true }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+        details?: string;
+        previousAflRound?: number;
+        nextAflRound?: number;
+        previousSuper8Round?: number | null;
+        nextSuper8Round?: number | null;
+      } | null;
+
+      if (!response.ok || !payload?.success) {
+        const errorMessage = payload?.error ?? payload?.message ?? "Complete Super 8 Week failed.";
+        const details = payload?.details ? ` ${payload.details}` : "";
+        throw new Error(`${errorMessage}${details}`);
+      }
+
+      await Promise.all([
+        refreshDashboardData(),
+        refreshDashboardFixture(),
+        refreshPlayerStats(),
+      ]);
+
+      setMessage(
+        payload.message ??
+          `Super 8 week completed. AFL Round advanced from ${payload.previousAflRound ?? "?"} to ${payload.nextAflRound ?? "?"}.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown Complete Super 8 Week error.";
+      setMessage(`Complete Super 8 Week failed: ${message}`);
+    } finally {
+      setIsCompletingWeek(false);
+    }
+  }, [loginSession?.role, refreshDashboardData, refreshDashboardFixture, refreshPlayerStats]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1477,14 +1549,25 @@ async function handleExportTeamsXlsx() {
                   />
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => void saveCurrentRound()}
-                  disabled={isSavingRound}
-                  className="rounded-xl border border-yellow-400/30 bg-yellow-500/20 px-4 py-3 text-sm font-semibold text-yellow-100 transition hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSavingRound ? "Saving..." : "Save AFL Round"}
-                </button>
+                <div className="flex flex-col gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void saveCurrentRound()}
+                    disabled={isSavingRound || isCompletingWeek}
+                    className="rounded-xl border border-yellow-400/30 bg-yellow-500/20 px-4 py-3 text-sm font-semibold text-yellow-100 transition hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSavingRound ? "Saving..." : "Save AFL Round"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void completeSuper8Week()}
+                    disabled={isCompletingWeek || isSavingRound || currentRoundStatus !== "FINAL"}
+                    className="rounded-xl border border-emerald-400/30 bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isCompletingWeek ? "Completing..." : "Complete Super 8 Week"}
+                  </button>
+                </div>
 
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
                   <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
