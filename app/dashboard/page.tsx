@@ -676,11 +676,20 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
     await refreshFixtureForRound(aflRound);
   }, [refreshCurrentRound, refreshFixtureForRound]);
 
-  const refreshPlayerStats = useCallback(async () => {
+const refreshPlayerStats = useCallback(async () => {
+  const pageSize = 1000;
+  let from = 0;
+  let allRows: Record<string, unknown>[] = [];
+
+  while (true) {
+    const to = from + pageSize - 1;
+
     const { data, error } = await supabase
       .from("afl_player_round_stats")
       .select("afl_round, afl_team_code")
-      .eq("environment", APP_ENV);
+      .eq("environment", APP_ENV)
+      .order("afl_round", { ascending: true })
+      .range(from, to);
 
     if (error) {
       setMessage(`Player stats load failed: ${error.message}`);
@@ -688,13 +697,31 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
       return;
     }
 
-    const rows: AflPlayerRoundStatRow[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
-      afl_round: typeof row.afl_round === "number" ? row.afl_round : Number(row.afl_round),
-      afl_team_code: typeof row.afl_team_code === "string" ? row.afl_team_code : null,
-    }));
+    const pageRows = (data ?? []) as Record<string, unknown>[];
 
-    setPlayerStats(rows);
-  }, []);
+    allRows = [...allRows, ...pageRows];
+
+    if (pageRows.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  const rows: AflPlayerRoundStatRow[] = allRows.map((row) => ({
+    afl_round:
+      typeof row.afl_round === "number"
+        ? row.afl_round
+        : Number(row.afl_round),
+
+    afl_team_code:
+      typeof row.afl_team_code === "string"
+        ? row.afl_team_code
+        : null,
+  }));
+
+  setPlayerStats(rows);
+}, []);
 
   const saveCurrentRound = useCallback(async () => {
     if (loginSession?.role !== "admin") {
