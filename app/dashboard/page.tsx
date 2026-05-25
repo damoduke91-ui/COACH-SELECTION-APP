@@ -648,7 +648,30 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
       return;
     }
 
-    const nextAflRound = aflRound + 1;
+    const { data: nextRoundRows, error: nextRoundError } = await supabase
+      .from("season_fixture")
+      .select("afl_round")
+      .eq("environment", APP_ENV)
+      .gt("afl_round", aflRound)
+      .order("afl_round", { ascending: true })
+      .limit(1);
+
+    if (nextRoundError) {
+      setMessage(`Next fixture round load failed: ${nextRoundError.message}`);
+      setFixtureRows([]);
+      setNextFixtureRows([]);
+      setIsLoadingFixture(false);
+      return;
+    }
+
+    const nextAflRound =
+      nextRoundRows && nextRoundRows.length > 0
+        ? Number(nextRoundRows[0].afl_round)
+        : null;
+
+    const fixtureRoundNumbers = nextAflRound
+      ? [aflRound, nextAflRound]
+      : [aflRound];
 
     const { data, error } = await supabase
       .from("season_fixture")
@@ -656,7 +679,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
         "id, environment, competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
       )
       .eq("environment", APP_ENV)
-      .in("afl_round", [aflRound, nextAflRound]);
+      .in("afl_round", fixtureRoundNumbers);
 
     if (error) {
       setMessage(`Fixture load failed: ${error.message}`);
@@ -668,7 +691,11 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
 
     const rows = sortFixtureRows((data ?? []) as FixtureRow[]);
     setFixtureRows(rows.filter((row) => row.afl_round === aflRound));
-    setNextFixtureRows(rows.filter((row) => row.afl_round === nextAflRound));
+    setNextFixtureRows(
+      nextAflRound
+        ? rows.filter((row) => row.afl_round === nextAflRound)
+        : []
+    );
     setIsLoadingFixture(false);
   }, []);
 
@@ -1821,7 +1848,7 @@ async function handleExportTeamsXlsx() {
           <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
             <h2 className="text-base font-bold">Next Week</h2>
             <p className="mt-0.5 text-[11px] text-white/50">
-              AFL Round {currentAflRound ? currentAflRound + 1 : "—"}
+              AFL Round {nextWeekFixture[0]?.aflRound ?? "—"}
             </p>
 
             <div className="mt-2 space-y-1.5">

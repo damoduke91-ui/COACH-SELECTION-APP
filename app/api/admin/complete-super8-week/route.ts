@@ -18,8 +18,6 @@ type FixtureRow = {
   competition_round: number | null;
   afl_round: number | null;
   matchup_index: number | null;
-  coach_1_name?: string | null;
-  coach_2_name?: string | null;
   coach_id?: number | null;
   coach_name?: string | null;
   opponent_coach_id?: number | null;
@@ -59,10 +57,7 @@ function getBearerToken(request: NextRequest): string | null {
   const header = request.headers.get("authorization") ?? "";
   const [scheme, token] = header.split(" ");
 
-  if (scheme?.toLowerCase() !== "bearer" || !token) {
-    return null;
-  }
-
+  if (scheme?.toLowerCase() !== "bearer" || !token) return null;
   return token;
 }
 
@@ -136,10 +131,16 @@ function buildLadderRows(results: MatchResultRow[]): LadderRow[] {
   return Array.from(map.values())
     .map((team) => ({
       ...team,
-      percentage: team.points_against > 0 ? (team.points_for / team.points_against) * 100 : 0,
+      percentage:
+        team.points_against > 0
+          ? (team.points_for / team.points_against) * 100
+          : 0,
     }))
     .sort((a, b) => {
-      if (b.ladder_points !== a.ladder_points) return b.ladder_points - a.ladder_points;
+      if (b.ladder_points !== a.ladder_points) {
+        return b.ladder_points - a.ladder_points;
+      }
+
       return b.points_for - a.points_for;
     })
     .map((team, index) => ({
@@ -151,15 +152,12 @@ function buildLadderRows(results: MatchResultRow[]): LadderRow[] {
 async function getCurrentUserProfile(request: NextRequest): Promise<ProfileRow | null> {
   const token = getBearerToken(request);
 
-  if (!token) {
-    return null;
-  }
+  if (!token) return null;
 
-  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+  const { data: userData, error: userError } =
+    await supabaseAdmin.auth.getUser(token);
 
-  if (userError || !userData.user) {
-    return null;
-  }
+  if (userError || !userData.user) return null;
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from("profiles")
@@ -168,9 +166,7 @@ async function getCurrentUserProfile(request: NextRequest): Promise<ProfileRow |
     .eq("environment", APP_ENV)
     .maybeSingle();
 
-  if (profileError || !profile) {
-    return null;
-  }
+  if (profileError || !profile) return null;
 
   return profile as ProfileRow;
 }
@@ -213,14 +209,6 @@ async function maybeSnapshotLadder(
     ladder_points: row.ladder_points,
   }));
 
-  if (rowsToInsert.length === 0) {
-    return {
-      attempted: true,
-      saved: false,
-      message: "Ladder calculated, but there were no ladder rows to snapshot.",
-    };
-  }
-
   const { error } = await supabaseAdmin
     .from("super8_ladder_snapshots")
     .upsert(rowsToInsert, {
@@ -232,7 +220,7 @@ async function maybeSnapshotLadder(
       attempted: true,
       saved: false,
       message:
-        "Ladder calculated, but snapshot table was not available or could not be written. The week completion continued.",
+        "Ladder snapshot table unavailable. Week completion still continued successfully.",
     };
   }
 
@@ -298,7 +286,11 @@ export async function POST(request: NextRequest) {
 
     const importedClubCodes = new Set(
       (statsData ?? [])
-        .map((row) => String((row as { afl_team_code?: string | null }).afl_team_code ?? "").trim().toUpperCase())
+        .map((row) =>
+          String((row as { afl_team_code?: string | null }).afl_team_code ?? "")
+            .trim()
+            .toUpperCase()
+        )
         .filter(Boolean)
     );
 
@@ -313,7 +305,9 @@ export async function POST(request: NextRequest) {
 
     const { data: fixtureData, error: fixtureError } = await supabaseAdmin
       .from("season_fixture")
-      .select("competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name")
+      .select(
+        "competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
+      )
       .eq("environment", APP_ENV)
       .eq("afl_round", currentAflRound);
 
@@ -335,6 +329,7 @@ export async function POST(request: NextRequest) {
       if (!roundNumber || !matchupIndex) continue;
 
       const key = buildMatchKey(roundNumber, matchupIndex);
+
       if (!uniqueFixtureMatches.has(key)) {
         uniqueFixtureMatches.set(key, row);
       }
@@ -347,13 +342,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const currentSuper8Round = toNumber(Array.from(uniqueFixtureMatches.values())[0]?.competition_round);
+    const currentSuper8Round = toNumber(
+      Array.from(uniqueFixtureMatches.values())[0]?.competition_round
+    );
 
-    const { data: matchResultsData, error: matchResultsError } = await supabaseAdmin
-      .from("super8_match_results")
-      .select("round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
-      .eq("environment", APP_ENV)
-      .eq("afl_round", currentAflRound);
+    const { data: matchResultsData, error: matchResultsError } =
+      await supabaseAdmin
+        .from("super8_match_results")
+        .select(
+          "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
+        )
+        .eq("afl_round", currentAflRound);
 
     if (matchResultsError) {
       return jsonResponse(500, {
@@ -383,11 +382,11 @@ export async function POST(request: NextRequest) {
       if (
         !result ||
         result.coach_1_score === null ||
-        result.coach_2_score === null ||
-        !result.coach_1_name ||
-        !result.coach_2_name
+        result.coach_2_score === null
       ) {
-        missingResults.push(`Super 8 Round ${row.competition_round}, Match ${row.matchup_index}`);
+        missingResults.push(
+          `Super 8 Round ${row.competition_round}, Match ${row.matchup_index}`
+        );
       }
     }
 
@@ -399,11 +398,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data: ladderResultsData, error: ladderResultsError } = await supabaseAdmin
-      .from("super8_match_results")
-      .select("round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
-      .eq("environment", APP_ENV)
-      .lte("afl_round", currentAflRound);
+    const { data: ladderResultsData, error: ladderResultsError } =
+      await supabaseAdmin
+        .from("super8_match_results")
+        .select(
+          "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
+        )
+        .lte("afl_round", currentAflRound);
 
     if (ladderResultsError) {
       return jsonResponse(500, {
@@ -413,8 +414,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const allResultsThroughCurrentRound = (ladderResultsData ?? []) as MatchResultRow[];
-    const ladderRows = buildLadderRows(allResultsThroughCurrentRound);
+    const ladderRows = buildLadderRows(
+      (ladderResultsData ?? []) as MatchResultRow[]
+    );
+
     const ladderSnapshot = await maybeSnapshotLadder(
       body.snapshotLadder === true,
       currentSuper8Round,
@@ -422,81 +425,74 @@ export async function POST(request: NextRequest) {
       ladderRows
     );
 
-    const nextAflRound = currentAflRound + 1;
+    const { data: futureFixtureData, error: futureFixtureError } =
+      await supabaseAdmin
+        .from("season_fixture")
+        .select("competition_round, afl_round, matchup_index")
+        .eq("environment", APP_ENV)
+        .gt("afl_round", currentAflRound)
+        .order("afl_round", { ascending: true })
+        .order("competition_round", { ascending: true })
+        .order("matchup_index", { ascending: true });
 
-    const { data: nextFixtureData, error: nextFixtureError } = await supabaseAdmin
-      .from("season_fixture")
-      .select("competition_round, afl_round, matchup_index")
-      .eq("environment", APP_ENV)
-      .eq("afl_round", nextAflRound);
-
-    if (nextFixtureError) {
+    if (futureFixtureError) {
       return jsonResponse(500, {
         success: false,
         error: "Could not prepare next fixture state.",
-        details: nextFixtureError.message,
+        details: futureFixtureError.message,
       });
     }
 
-    const nextFixtureRows = (nextFixtureData ?? []) as FixtureRow[];
-    const nextSuper8Round = toNumber(nextFixtureRows[0]?.competition_round);
+    const futureFixtureRows = (futureFixtureData ?? []) as FixtureRow[];
+    const nextAflRound = toNumber(futureFixtureRows[0]?.afl_round);
 
-    if (nextFixtureRows.length === 0) {
+    if (!nextAflRound) {
       return jsonResponse(400, {
         success: false,
-        error: `AFL Round ${currentAflRound} is complete, but no fixture rows exist for AFL Round ${nextAflRound}.`,
+        error: `AFL Round ${currentAflRound} is complete, but no future fixture rows exist in season_fixture.`,
       });
     }
 
-    const appSettingsPayload = {
-      environment: APP_ENV,
-      current_afl_round: nextAflRound,
-      team_lockout: false,
-      updated_at: new Date().toISOString(),
-    };
+    const nextFixtureRows = futureFixtureRows.filter(
+      (row) => toNumber(row.afl_round) === nextAflRound
+    );
 
-    const { data: updatedSettings, error: updateSettingsError } = await supabaseAdmin
+    const nextSuper8Rounds = Array.from(
+      new Set(
+        nextFixtureRows
+          .map((row) => toNumber(row.competition_round))
+          .filter((round): round is number => typeof round === "number")
+      )
+    ).sort((a, b) => a - b);
+
+    const { error: updateError } = await supabaseAdmin
       .from("app_settings")
-      .update(appSettingsPayload)
-      .eq("environment", APP_ENV)
-      .select("environment, current_afl_round");
+      .update({
+        current_afl_round: nextAflRound,
+      })
+      .eq("environment", APP_ENV);
 
-    if (updateSettingsError) {
+    if (updateError) {
       return jsonResponse(500, {
         success: false,
         error: "Could not advance AFL round.",
-        details: updateSettingsError.message,
+        details: updateError.message,
       });
-    }
-
-    if (!updatedSettings || updatedSettings.length === 0) {
-      const { error: insertSettingsError } = await supabaseAdmin
-        .from("app_settings")
-        .insert(appSettingsPayload);
-
-      if (insertSettingsError) {
-        return jsonResponse(500, {
-          success: false,
-          error: "Could not create app settings for next AFL round.",
-          details: insertSettingsError.message,
-        });
-      }
     }
 
     return jsonResponse(200, {
       success: true,
-      message: `Super 8 week completed. AFL Round advanced from ${currentAflRound} to ${nextAflRound}.`,
+      message: `Super 8 week completed successfully. AFL Round advanced from ${currentAflRound} to ${nextAflRound}.`,
       previousAflRound: currentAflRound,
       nextAflRound,
       previousSuper8Round: currentSuper8Round,
-      nextSuper8Round,
-      importedClubCount: importedClubCodes.size,
-      expectedClubCount: EXPECTED_AFL_CLUB_COUNT,
-      completedMatchCount: uniqueFixtureMatches.size,
+      nextSuper8Round: nextSuper8Rounds[0] ?? null,
+      nextSuper8Rounds,
       ladderSnapshot,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown server error.";
+    const message =
+      error instanceof Error ? error.message : "Unknown server error.";
 
     return jsonResponse(500, {
       success: false,
