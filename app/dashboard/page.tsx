@@ -1183,16 +1183,14 @@ async function handleExportSnapshotRoundXlsx() {
         safeSheetName(coach.name)
       );
 
-      const separatorRow = rows[0];
-
-      if (allCoachRows.length > 0 && separatorRow) {
+      if (allCoachRows.length > 0) {
         allCoachRows.push({
           Coach: coach.name,
-          "No.": separatorRow["Player No."],
-          Pos_2: separatorRow.Position,
-          Club: separatorRow.Club,
-          Player_Name: separatorRow["Player Name"],
-          Selected: separatorRow.Selected,
+          "No.": "No.",
+          Pos_2: "Pos_2",
+          Club: "Club",
+          Player_Name: "Player_Name",
+          Selected: "Selected",
         });
       }
 
@@ -1301,16 +1299,14 @@ async function handleExportTeamsXlsx() {
         safeSheetName(coach.name)
       );
 
-      const separatorRow = rows[0];
-
-      if (allCoachRows.length > 0 && separatorRow) {
+      if (allCoachRows.length > 0) {
         allCoachRows.push({
           Coach: coach.name,
-          "No.": separatorRow["Player No."],
-          Pos_2: separatorRow.Position,
-          Club: separatorRow.Club,
-          Player_Name: separatorRow["Player Name"],
-          Selected: separatorRow.Selected,
+          "No.": "No.",
+          Pos_2: "Pos_2",
+          Club: "Club",
+          Player_Name: "Player_Name",
+          Selected: "Selected",
         });
       }
 
