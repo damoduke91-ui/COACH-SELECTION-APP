@@ -1183,6 +1183,17 @@ async function handleExportSnapshotRoundXlsx() {
         safeSheetName(coach.name)
       );
 
+      if (allCoachRows.length > 0) {
+        allCoachRows.push({
+          Coach: coach.name,
+          "No.": "",
+          Pos_2: "",
+          Club: "",
+          "Player Name": "",
+          Selected: "",
+        });
+      }
+
       rows.forEach((row) => {
         allCoachRows.push({
           Coach: coach.name,
@@ -1287,6 +1298,17 @@ async function handleExportTeamsXlsx() {
         worksheet,
         safeSheetName(coach.name)
       );
+
+      if (allCoachRows.length > 0) {
+        allCoachRows.push({
+          Coach: coach.name,
+          "No.": "",
+          Pos_2: "",
+          Club: "",
+          "Player Name": "",
+          Selected: "",
+        });
+      }
 
       rows.forEach((row) => {
         allCoachRows.push({
