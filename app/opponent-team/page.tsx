@@ -374,11 +374,22 @@ function buildCoachBreakdownRows(
         continue;
       }
 
-      const replacement = emergencyStats.find((emergency) => {
-        if (!emergency.played || !emergency.stat) return false;
-        return !usedEmergencyNames.has(normalisePlayerName(emergency.playerName));
-      });
+      let replacement: (typeof emergencyStats)[number] | null = null;
 
+      for (const emergency of emergencyStats) {
+        if (usedEmergencyNames.has(normalisePlayerName(emergency.playerName))) {
+          continue;
+        }
+
+        if (!emergency.clubImported) {
+          break;
+        }
+
+        if (emergency.played && emergency.stat) {
+          replacement = emergency;
+          break;
+        }
+      }
       if (replacement?.stat) {
         usedEmergencyNames.add(normalisePlayerName(replacement.playerName));
         rows.push({
