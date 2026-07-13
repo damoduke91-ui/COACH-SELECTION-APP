@@ -224,7 +224,12 @@ function normalisePlayerName(value: string): string {
 
 function normaliseClubCode(value: string | null | undefined): string {
   const club = value?.trim().toUpperCase() ?? "";
-  return club === "BRL" ? "BRI" : club;
+  const aliases: Record<string, string> = {
+    BRL: "BRI",
+    NTH: "NM",
+  };
+
+  return aliases[club] ?? club;
 }
 
 function calculatePlayerPoints(stat: AflPlayerRoundStatRow | null): number | null {
