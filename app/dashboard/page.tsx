@@ -60,6 +60,15 @@ type ExportPlayerRow = {
   "Selection Order": number | string;
 };
 
+type AllCoachExportRow = {
+  Coach: string;
+  "No.": number | string;
+  Pos_2: string;
+  Club: string;
+  Player_Name: string;
+  Selected: string;
+};
+
 type AppSettingsRow = {
   environment: "production" | "preview";
   current_afl_round: number | null;
@@ -1113,61 +1122,34 @@ const refreshPlayerStats = useCallback(async () => {
     router.replace("/login");
   }
 
-  
-async function handleExportSnapshotRoundXlsx() {
-  if (loginSession?.role !== "admin") {
-    setMessage("Only admin can export snapshot rounds.");
-    return;
-  }
-
-  const parsedRound = Number(snapshotRoundInput);
-
-  if (!Number.isInteger(parsedRound) || parsedRound < 1) {
-    setMessage("Please enter a valid Super 8 round.");
-    return;
-  }
-
-  setIsExportingSnapshot(true);
-
-  try {
-    const { data, error } = await supabase
-      .from("round_submissions")
-      .select("coach_id, coach_name, team_data")
-      .eq("environment", APP_ENV)
-      .eq("round_number", parsedRound);
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    const snapshotRows = data ?? [];
-
-    const poolsByCoach: Record<number, ReturnType<typeof getPlayersForCoach>> = {};
-
-    for (const coach of coachConfigs) {
-      poolsByCoach[coach.id] = getPlayersForCoach({
-        coachId: coach.id,
-        coachName: coach.name,
-      });
-    }
-
+  function buildTeamsExportWorkbook(
+    rowsByCoachId: Record<number, SavedTeamRow>,
+    poolsByCoach: Record<number, ReturnType<typeof getPlayersForCoach>>
+  ) {
     const workbook = XLSX.utils.book_new();
 
-    const allCoachRows: {
-      Coach: string;
-      "No.": number | string;
-      Pos_2: string;
-      Club: string;
-      Player_Name: string;
-      Selected: string;
-    }[] = [];
+    const summaryRows = coachConfigs.map((coach) => {
+      const row = rowsByCoachId[coach.id];
+      const teamData = sanitiseTeamState(row?.team_data);
+      const selectedCount = getAllSelectedPlayers(teamData).length;
+
+      return {
+        Coach: coach.name,
+        "Coach ID": coach.id,
+        Submitted: row?.is_submitted ? "Yes" : "No",
+        "Last Updated": formatTimestamp(row?.updated_at ?? null),
+        "Submitted At": formatTimestamp(row?.submitted_at ?? null),
+        "Players Selected": selectedCount,
+      };
+    });
+
+    const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+
+    const allCoachRows: AllCoachExportRow[] = [];
 
     for (const coach of coachConfigs) {
-      const snapshotRow = snapshotRows.find(
-        (row) => row.coach_id === coach.id
-      );
-
-      const coachTeam = sanitiseTeamState(snapshotRow?.team_data);
+      const coachTeam = sanitiseTeamState(rowsByCoachId[coach.id]?.team_data);
 
       const rows = buildExportRowsForCoach(
         coach.id,
@@ -1214,15 +1196,84 @@ async function handleExportSnapshotRoundXlsx() {
       "ALL_Coaches"
     );
 
+    return workbook;
+  }
+
+  
+async function handleExportSnapshotRoundXlsx() {
+  if (loginSession?.role !== "admin") {
+    setMessage("Only admin can export snapshot rounds.");
+    return;
+  }
+
+  const parsedRound = Number(snapshotRoundInput);
+
+  if (!Number.isInteger(parsedRound) || parsedRound < 1) {
+    setMessage("Please enter a valid Super 8 round.");
+    return;
+  }
+
+  setIsExportingSnapshot(true);
+  setMessage(`Preparing round ${parsedRound} teams export...`);
+
+  try {
+    const { data, error } = await supabase
+      .from("round_submissions")
+      .select("coach_id, coach_name, team_data")
+      .eq("environment", APP_ENV)
+      .eq("round_number", parsedRound);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const snapshotRows = data ?? [];
+
+    if (snapshotRows.length === 0) {
+      throw new Error(
+        `No saved coach snapshots found for round ${parsedRound}.`
+      );
+    }
+
+    const snapshotRowsByCoachId: Record<number, SavedTeamRow> = {};
+
+    for (const row of snapshotRows) {
+      snapshotRowsByCoachId[row.coach_id] = {
+        coach_id: row.coach_id,
+        coach_name: row.coach_name,
+        team_data: row.team_data,
+        is_submitted: true,
+        submitted_at: null,
+        updated_at: null,
+        environment: APP_ENV as "production" | "preview",
+      };
+    }
+
+    const poolsByCoach: Record<number, ReturnType<typeof getPlayersForCoach>> = {};
+
+    for (const coach of coachConfigs) {
+      poolsByCoach[coach.id] = getPlayersForCoach({
+        coachId: coach.id,
+        coachName: coach.name,
+      });
+    }
+
+    const workbook = buildTeamsExportWorkbook(
+      snapshotRowsByCoachId,
+      poolsByCoach
+    );
+
     const now = new Date();
 
-    const fileName = `snapshot-round-${parsedRound}-${APP_ENV}-${now
+    const fileName = `coach-team-selections-round-${parsedRound}-${APP_ENV}-${now
       .toISOString()
       .replace(/[:.]/g, "-")}.xlsx`;
 
     XLSX.writeFile(workbook, fileName);
 
-    setMessage(`Snapshot export created: ${fileName}`);
+    setMessage(
+      `Snapshot export created: ${fileName}. Found ${snapshotRows.length} saved coach snapshots for round ${parsedRound}.`
+    );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown snapshot export error.";
@@ -1253,82 +1304,7 @@ async function handleExportTeamsXlsx() {
       });
     }
 
-    const workbook = XLSX.utils.book_new();
-
-    const summaryRows = coachConfigs.map((coach) => {
-      const row = teamRowsByCoachId[coach.id];
-      const teamData = sanitiseTeamState(row?.team_data);
-      const selectedCount = getAllSelectedPlayers(teamData).length;
-
-      return {
-        Coach: coach.name,
-        "Coach ID": coach.id,
-        Submitted: row?.is_submitted ? "Yes" : "No",
-        "Last Updated": formatTimestamp(row?.updated_at ?? null),
-        "Submitted At": formatTimestamp(row?.submitted_at ?? null),
-        "Players Selected": selectedCount,
-      };
-    });
-
-    const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
-    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
-
-    const allCoachRows: {
-      Coach: string;
-      "No.": number | string;
-      Pos_2: string;
-      Club: string;
-      Player_Name: string;
-      Selected: string;
-    }[] = [];
-
-    for (const coach of coachConfigs) {
-      const coachTeam = sanitiseTeamState(teamRowsByCoachId[coach.id]?.team_data);
-
-      const rows = buildExportRowsForCoach(
-        coach.id,
-        coachTeam,
-        poolsByCoach
-      );
-
-      const worksheet = XLSX.utils.json_to_sheet(rows);
-
-      XLSX.utils.book_append_sheet(
-        workbook,
-        worksheet,
-        safeSheetName(coach.name)
-      );
-
-      if (allCoachRows.length > 0) {
-        allCoachRows.push({
-          Coach: coach.name,
-          "No.": "No.",
-          Pos_2: "Pos_2",
-          Club: "Club",
-          Player_Name: "Player_Name",
-          Selected: "Selected",
-        });
-      }
-
-      rows.forEach((row) => {
-        allCoachRows.push({
-          Coach: coach.name,
-          "No.": row["Player No."],
-          Pos_2: row.Position,
-          Club: row.Club,
-          Player_Name: row["Player Name"],
-          Selected: row.Selected,
-        });
-      });
-    }
-
-    const allCoachesSheet = XLSX.utils.json_to_sheet(allCoachRows);
-
-    XLSX.utils.book_append_sheet(
-      workbook,
-      allCoachesSheet,
-      "ALL_Coaches"
-    );
+    const workbook = buildTeamsExportWorkbook(teamRowsByCoachId, poolsByCoach);
 
     const now = new Date();
     const fileName = `coach-team-selections-${APP_ENV}-${now
@@ -1680,7 +1656,7 @@ async function handleExportTeamsXlsx() {
         >
           {isExportingSnapshot
             ? "Exporting..."
-            : "Export Snapshot Round"}
+            : "Export Teams for Round"}
         </button>
       </div>
     </div>
