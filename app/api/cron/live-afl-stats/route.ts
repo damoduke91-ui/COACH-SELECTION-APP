@@ -10,7 +10,7 @@ import {
   mapAflPlayerStats,
 } from "../../../../lib/aflLiveStats";
 
-type AdminSupabaseClient = SupabaseClient<any, "public", any>;
+type AdminSupabaseClient = SupabaseClient;
 
 type CronMatchRow = AflMatchRow & {
   utc_start_time: string | null;
@@ -26,10 +26,21 @@ type MatchImportResult = {
   aflRawRows?: number;
   mappedRows?: number;
   wroteRows?: number;
+  teamRowCounts?: Record<string, number>;
+};
+
+type MatchStatusRefreshResult = {
+  round: number | null;
+  rawMatches: number;
+  updatedMatches: number;
+  skippedMatches: number;
+  error?: string;
 };
 
 const BEFORE_START_WINDOW_MS = 90 * 60 * 1000;
 const AFTER_START_WINDOW_MS = 5 * 60 * 60 * 1000;
+const MIN_FINAL_PLAYERS_PER_TEAM = 20;
+const AFL_MATCHES_URL = "https://aflapi.afl.com.au/afl/v2/matches";
 
 function getEnv(name: string): string {
   const value = process.env[name];
@@ -49,6 +60,149 @@ function isCronAuthorized(request: NextRequest): boolean {
   if (secret && suppliedSecret === secret) return true;
 
   return userAgent.includes("vercel-cron");
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function toText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function firstText(...values: unknown[]): string {
+  for (const value of values) {
+    const text = toText(value);
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function getMatchesFromResponse(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) return payload;
+
+  const root = asObject(payload);
+  const data = asObject(root.data);
+  const rootMatches = asArray(root.matches);
+
+  return rootMatches.length ? rootMatches : asArray(data.matches);
+}
+
+async function loadCurrentAflRound(
+  supabase: AdminSupabaseClient,
+  environment: string
+): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("app_settings")
+    .select("current_afl_round")
+    .eq("environment", environment)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Current AFL round load failed: ${error.message}`);
+  }
+
+  return toNumber((data as { current_afl_round?: unknown } | null)?.current_afl_round);
+}
+
+async function refreshMatchStatuses(params: {
+  supabase: AdminSupabaseClient;
+  environment: string;
+  round: number | null;
+  refreshedAt: string;
+}): Promise<MatchStatusRefreshResult> {
+  const { supabase, environment, round, refreshedAt } = params;
+
+  if (!round) {
+    return {
+      round: null,
+      rawMatches: 0,
+      updatedMatches: 0,
+      skippedMatches: 0,
+      error: "Current AFL round is not set; match status refresh skipped.",
+    };
+  }
+
+  try {
+    const url = new URL(AFL_MATCHES_URL);
+    url.searchParams.set("competitionId", process.env.AFL_COMPETITION_ID ?? "1");
+    url.searchParams.set("compSeasonId", process.env.AFL_COMP_SEASON_ID ?? "85");
+    url.searchParams.set("roundNumber", String(round));
+
+    const response = await fetch(url, {
+      headers: {
+        accept: "application/json",
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`AFL fixture request failed: ${response.status}`);
+    }
+
+    const rawMatches = getMatchesFromResponse(await response.json());
+    let updatedMatches = 0;
+    let skippedMatches = 0;
+
+    for (const rawMatch of rawMatches) {
+      const match = asObject(rawMatch);
+      const aflMatchId = toNumber(match.id ?? match.matchId);
+      const status = firstText(match.status, match.matchStatus);
+
+      if (!aflMatchId || !status) {
+        skippedMatches += 1;
+        continue;
+      }
+
+      const { error } = await supabase
+        .from("afl_matches")
+        .update({
+          status,
+          updated_at: refreshedAt,
+        })
+        .eq("environment", environment)
+        .eq("afl_match_id", aflMatchId);
+
+      if (error) {
+        throw new Error(`Match ${aflMatchId} status update failed: ${error.message}`);
+      }
+
+      updatedMatches += 1;
+    }
+
+    return {
+      round,
+      rawMatches: rawMatches.length,
+      updatedMatches,
+      skippedMatches,
+    };
+  } catch (error) {
+    return {
+      round,
+      rawMatches: 0,
+      updatedMatches: 0,
+      skippedMatches: 0,
+      error: error instanceof Error ? error.message : "Unknown match status refresh error",
+    };
+  }
 }
 
 function isInPollingWindow(match: CronMatchRow, nowMs: number): boolean {
@@ -91,6 +245,10 @@ async function importMatch(params: {
     const allStats = flattenAflPlayerStats(aflStats);
     const mappedRows = mapAflPlayerStats(match, aflStats, importedAt, nameAliases);
     const upsertRows = mappedRows.map((mappedRow) => mappedRow.row);
+    const teamRowCounts = upsertRows.reduce<Record<string, number>>((counts, row) => {
+      counts[row.afl_team_code] = (counts[row.afl_team_code] ?? 0) + 1;
+      return counts;
+    }, {});
 
     if (upsertRows.length === 0) {
       return {
@@ -102,7 +260,38 @@ async function importMatch(params: {
         aflRawRows: allStats.length,
         mappedRows: 0,
         wroteRows: 0,
+        teamRowCounts,
       };
+    }
+
+    const isFinal = FINAL_AFL_MATCH_STATUSES.has((match.status ?? "").toUpperCase());
+
+    if (isFinal) {
+      const expectedTeamCodes = [
+        match.home_app_team_code ?? match.home_team_code,
+        match.away_app_team_code ?? match.away_team_code,
+      ].filter((code): code is string => Boolean(code));
+
+      const incompleteTeamCodes = expectedTeamCodes.filter(
+        (teamCode) => (teamRowCounts[teamCode] ?? 0) < MIN_FINAL_PLAYERS_PER_TEAM
+      );
+
+      if (expectedTeamCodes.length !== 2 || incompleteTeamCodes.length > 0) {
+        return {
+          afl_match_id: match.afl_match_id,
+          label,
+          status: match.status ?? null,
+          action: "failed",
+          reason:
+            expectedTeamCodes.length !== 2
+              ? "final snapshot is missing expected team codes"
+              : `final snapshot is incomplete for: ${incompleteTeamCodes.join(", ")}`,
+          aflRawRows: allStats.length,
+          mappedRows: upsertRows.length,
+          wroteRows: 0,
+          teamRowCounts,
+        };
+      }
     }
 
     const { error: upsertError } = await supabase
@@ -114,8 +303,6 @@ async function importMatch(params: {
     if (upsertError) {
       throw new Error(`Stats upsert failed: ${upsertError.message}`);
     }
-
-    const isFinal = FINAL_AFL_MATCH_STATUSES.has((match.status ?? "").toUpperCase());
 
     const matchUpdatePayload: Record<string, string> = {
       last_polled_at: importedAt,
@@ -144,6 +331,7 @@ async function importMatch(params: {
       aflRawRows: allStats.length,
       mappedRows: upsertRows.length,
       wroteRows: upsertRows.length,
+      teamRowCounts,
     };
   } catch (error) {
     return {
@@ -179,6 +367,25 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    let targetRound: number | null = null;
+
+    if (roundParam) {
+      targetRound = Number(roundParam);
+
+      if (!Number.isInteger(targetRound) || targetRound < 1) {
+        return NextResponse.json({ error: "Invalid round" }, { status: 400 });
+      }
+    } else {
+      targetRound = await loadCurrentAflRound(supabase, environment);
+    }
+
+    const statusRefresh = await refreshMatchStatuses({
+      supabase,
+      environment,
+      round: targetRound,
+      refreshedAt: importedAt,
+    });
+
     let query = supabase
       .from("afl_matches")
       .select(
@@ -187,13 +394,8 @@ export async function GET(request: NextRequest) {
       .eq("environment", environment)
       .order("utc_start_time", { ascending: true });
 
-    if (roundParam) {
-      const round = Number(roundParam);
-      if (!Number.isFinite(round)) {
-        return NextResponse.json({ error: "Invalid round" }, { status: 400 });
-      }
-
-      query = query.eq("afl_round", round);
+    if (targetRound) {
+      query = query.eq("afl_round", targetRound);
     }
 
     const { data, error } = await query;
@@ -208,6 +410,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         importedAt,
         environment,
+        targetRound,
+        statusRefresh,
         checkedMatches: data?.length ?? 0,
         candidateMatches: 0,
         results: [],
@@ -233,6 +437,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       importedAt,
       environment,
+      targetRound,
+      statusRefresh,
       checkedMatches: data?.length ?? 0,
       candidateMatches: matches.length,
       aliasesLoaded: nameAliases.size,
