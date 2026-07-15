@@ -91,7 +91,15 @@ export type LiveFinalisationResult = {
 const EXPECTED_AFL_MATCH_COUNT = 9;
 const EXPECTED_AFL_CLUB_COUNT = 18;
 const POSITION_ORDER = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
-const FINAL_MATCH_STATUSES = new Set(["CONCLUDED", "COMPLETED", "FINAL", "FULL_TIME", "FULL TIME"]);
+const FINAL_MATCH_STATUSES = new Set([
+  "POST_GAME",
+  "POSTGAME",
+  "CONCLUDED",
+  "COMPLETED",
+  "FINAL",
+  "FULL_TIME",
+  "FULL TIME",
+]);
 
 function toNumber(value: unknown): number {
   const parsed = Number(value);
