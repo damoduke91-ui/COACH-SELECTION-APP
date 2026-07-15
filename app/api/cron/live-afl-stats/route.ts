@@ -9,6 +9,7 @@ import {
   loadAflPlayerNameAliases,
   mapAflPlayerStats,
 } from "../../../../lib/aflLiveStats";
+import { finaliseSuper8RoundFromLiveStats } from "../../../../lib/super8LiveFinalisation";
 
 type AdminSupabaseClient = SupabaseClient;
 
@@ -407,11 +408,21 @@ export async function GET(request: NextRequest) {
     const matches = ((data ?? []) as CronMatchRow[]).filter((match) => isInPollingWindow(match, nowMs));
 
     if (matches.length === 0) {
+      const finalisation = targetRound
+        ? await finaliseSuper8RoundFromLiveStats({
+            supabase,
+            environment,
+            aflRound: targetRound,
+            finalisedAt: importedAt,
+          })
+        : null;
+
       return NextResponse.json({
         importedAt,
         environment,
         targetRound,
         statusRefresh,
+        finalisation,
         checkedMatches: data?.length ?? 0,
         candidateMatches: 0,
         results: [],
@@ -434,11 +445,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const finalisation = targetRound
+      ? await finaliseSuper8RoundFromLiveStats({
+          supabase,
+          environment,
+          aflRound: targetRound,
+          finalisedAt: importedAt,
+        })
+      : null;
+
     return NextResponse.json({
       importedAt,
       environment,
       targetRound,
       statusRefresh,
+      finalisation,
       checkedMatches: data?.length ?? 0,
       candidateMatches: matches.length,
       aliasesLoaded: nameAliases.size,
