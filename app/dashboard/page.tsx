@@ -74,6 +74,13 @@ type AppSettingsRow = {
   current_afl_round: number | null;
 };
 
+type AflRoundFinalisationRow = {
+  afl_round: number;
+  expected_match_count: number;
+  final_match_count: number;
+  live_cleared_at: string | null;
+};
+
 type MatchResultRow = {
   round_number: number | null;
   afl_round: number | null;
@@ -404,8 +411,8 @@ function getImportedClubCodesForRound(
   return clubs;
 }
 
-function getRoundStatus(importedClubCount: number): "LIVE" | "FINAL" {
-  return importedClubCount >= EXPECTED_AFL_CLUB_COUNT ? "FINAL" : "LIVE";
+function getRoundStatus(finalMatchCount: number, expectedMatchCount: number): "LIVE" | "FINAL" {
+  return expectedMatchCount > 0 && finalMatchCount >= expectedMatchCount ? "FINAL" : "LIVE";
 }
 
 function emptyTeamState(): TeamState {
@@ -561,6 +568,8 @@ export default function DashboardPage() {
   const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
   const [nextFixtureRows, setNextFixtureRows] = useState<FixtureRow[]>([]);
   const [isLoadingFixture, setIsLoadingFixture] = useState(false);
+  const [currentRoundFinalisation, setCurrentRoundFinalisation] =
+    useState<AflRoundFinalisationRow | null>(null);
 const [roundInput, setRoundInput] = useState("1");
 const [isSavingRound, setIsSavingRound] = useState(false);
 const [isCompletingWeek, setIsCompletingWeek] = useState(false);
@@ -709,10 +718,51 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
     setIsLoadingFixture(false);
   }, []);
 
+  const refreshRoundFinalisation = useCallback(async (aflRound: number | null) => {
+    if (!aflRound || !Number.isFinite(aflRound)) {
+      setCurrentRoundFinalisation(null);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("afl_round_finalisation")
+      .select("afl_round, expected_match_count, final_match_count, live_cleared_at")
+      .eq("environment", APP_ENV)
+      .eq("afl_round", aflRound)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Round finalisation load failed:", error.message);
+      setCurrentRoundFinalisation(null);
+      return;
+    }
+
+    if (!data) {
+      setCurrentRoundFinalisation({
+        afl_round: aflRound,
+        expected_match_count: 9,
+        final_match_count: 0,
+        live_cleared_at: null,
+      });
+      return;
+    }
+
+    setCurrentRoundFinalisation({
+      afl_round: Number(data.afl_round),
+      expected_match_count: Number(data.expected_match_count) || 9,
+      final_match_count: Number(data.final_match_count) || 0,
+      live_cleared_at:
+        typeof data.live_cleared_at === "string" ? data.live_cleared_at : null,
+    });
+  }, []);
+
   const refreshDashboardFixture = useCallback(async () => {
     const aflRound = await refreshCurrentRound();
-    await refreshFixtureForRound(aflRound);
-  }, [refreshCurrentRound, refreshFixtureForRound]);
+    await Promise.all([
+      refreshFixtureForRound(aflRound),
+      refreshRoundFinalisation(aflRound),
+    ]);
+  }, [refreshCurrentRound, refreshFixtureForRound, refreshRoundFinalisation]);
 
 const refreshPlayerStats = useCallback(async () => {
   const pageSize = 1000;
@@ -807,10 +857,13 @@ const refreshPlayerStats = useCallback(async () => {
 
     setCurrentAflRound(parsedRound);
     setRoundInput(String(parsedRound));
-    await refreshFixtureForRound(parsedRound);
+    await Promise.all([
+      refreshFixtureForRound(parsedRound),
+      refreshRoundFinalisation(parsedRound),
+    ]);
     setMessage(`Current AFL round updated to ${parsedRound}.`);
     setIsSavingRound(false);
-  }, [loginSession?.role, refreshFixtureForRound, roundInput]);
+  }, [loginSession?.role, refreshFixtureForRound, refreshRoundFinalisation, roundInput]);
 
 
 
@@ -931,6 +984,7 @@ const refreshPlayerStats = useCallback(async () => {
         aflRound?: number;
         deletedPlayerStatCount?: number;
         deletedFallbackResultCount?: number;
+        clearedAt?: string;
       } | null;
 
       if (!response.ok || !payload?.success) {
@@ -941,7 +995,10 @@ const refreshPlayerStats = useCallback(async () => {
 
       const clearedRound = payload.aflRound ?? currentAflRound;
       setResults((previous) => previous.filter((result) => result.afl_round !== clearedRound));
-      await refreshPlayerStats();
+      await Promise.all([
+        refreshPlayerStats(),
+        refreshRoundFinalisation(clearedRound),
+      ]);
       setMessage(
         payload.message ??
           `Live scores cleared for AFL Round ${clearedRound}. You can now upload the CSV files.`
@@ -952,7 +1009,7 @@ const refreshPlayerStats = useCallback(async () => {
     } finally {
       setIsClearingLiveScores(false);
     }
-  }, [currentAflRound, loginSession?.role, refreshPlayerStats]);
+  }, [currentAflRound, loginSession?.role, refreshPlayerStats, refreshRoundFinalisation]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1113,6 +1170,18 @@ const refreshPlayerStats = useCallback(async () => {
       void supabase.removeChannel(channel);
     };
   }, [loginSession, refreshDashboardData, refreshDashboardFixture, refreshPlayerStats]);
+
+  useEffect(() => {
+    if (!loginSession || !currentAflRound) return;
+
+    const intervalId = window.setInterval(() => {
+      void refreshRoundFinalisation(currentAflRound);
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [currentAflRound, loginSession, refreshRoundFinalisation]);
 
   const ladder = useMemo(() => {
   const map = new Map<string, LadderRow>();
@@ -1397,7 +1466,14 @@ async function handleExportTeamsXlsx() {
     return getImportedClubCodesForRound(playerStats, currentAflRound);
   }, [currentAflRound, playerStats]);
 
-  const currentRoundStatus = getRoundStatus(currentRoundImportedClubCodes.size);
+  const currentRoundExpectedMatchCount = currentRoundFinalisation?.expected_match_count ?? 9;
+  const currentRoundFinalMatchCount = currentRoundFinalisation?.final_match_count ?? 0;
+  const currentRoundStatus = getRoundStatus(
+    currentRoundFinalMatchCount,
+    currentRoundExpectedMatchCount
+  );
+  const isCurrentRoundCsvReady =
+    currentRoundImportedClubCodes.size >= EXPECTED_AFL_CLUB_COUNT;
 
   const dashboardTitle = useMemo(() => {
     if (!loginSession) return "Dashboard";
@@ -1663,17 +1739,28 @@ async function handleExportTeamsXlsx() {
                       isClearingLiveScores ||
                       isCompletingWeek ||
                       isSavingRound ||
-                      currentRoundStatus !== "FINAL"
+                      currentRoundStatus !== "FINAL" ||
+                      Boolean(currentRoundFinalisation?.live_cleared_at)
                     }
                     className="rounded-xl border border-red-400/30 bg-red-500/20 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {isClearingLiveScores ? "Clearing..." : "Clear Live Scores"}
+                    {isClearingLiveScores
+                      ? "Clearing..."
+                      : currentRoundFinalisation?.live_cleared_at
+                        ? "Live Scores Cleared"
+                        : "Clear Live Scores"}
                   </button>
 
                   <button
                     type="button"
                     onClick={() => void completeSuper8Week()}
-                    disabled={isCompletingWeek || isSavingRound || isClearingLiveScores || currentRoundStatus !== "FINAL"}
+                    disabled={
+                      isCompletingWeek ||
+                      isSavingRound ||
+                      isClearingLiveScores ||
+                      currentRoundStatus !== "FINAL" ||
+                      !isCurrentRoundCsvReady
+                    }
                     className="rounded-xl border border-emerald-400/30 bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isCompletingWeek ? "Completing..." : "Complete Super 8 Week"}
@@ -1697,6 +1784,9 @@ async function handleExportTeamsXlsx() {
                     >
                       {currentRoundStatus}
                     </span>
+                  </div>
+                  <div className="mt-1 text-sm text-white/70">
+                    {currentRoundFinalMatchCount}/{currentRoundExpectedMatchCount} AFL matches final
                   </div>
                   <div className="mt-1 text-sm text-white/70">
                     {currentRoundImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} AFL clubs imported
@@ -1867,7 +1957,7 @@ async function handleExportTeamsXlsx() {
             <h2 className="text-xl font-bold">Current Week Fixture</h2>
             <p className="mt-1 text-xs text-white/60">
               Super 8 Round {currentWeekFixture[0]?.competitionRound ?? "—"} / AFL Round{" "}
-              {currentAflRound ?? "—"} • {currentRoundStatus} ({currentRoundImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} clubs)
+              {currentAflRound ?? "—"} • {currentRoundStatus} ({currentRoundFinalMatchCount}/{currentRoundExpectedMatchCount} matches final, {currentRoundImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} clubs)
             </p>
 
             <div className="mt-3 space-y-2">
