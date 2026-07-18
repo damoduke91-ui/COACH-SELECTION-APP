@@ -564,6 +564,7 @@ export default function DashboardPage() {
 const [roundInput, setRoundInput] = useState("1");
 const [isSavingRound, setIsSavingRound] = useState(false);
 const [isCompletingWeek, setIsCompletingWeek] = useState(false);
+const [isClearingLiveScores, setIsClearingLiveScores] = useState(false);
 const [isExportingTeams, setIsExportingTeams] = useState(false);
 const [snapshotRoundInput, setSnapshotRoundInput] = useState("8");
 const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
@@ -881,6 +882,77 @@ const refreshPlayerStats = useCallback(async () => {
       setIsCompletingWeek(false);
     }
   }, [loginSession?.role, refreshDashboardData, refreshDashboardFixture, refreshPlayerStats]);
+
+  const clearCurrentRoundLiveScores = useCallback(async () => {
+    if (loginSession?.role !== "admin") {
+      setMessage("Only admin can clear live scores.");
+      return;
+    }
+
+    if (!currentAflRound) {
+      setMessage("Current AFL round is not set.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Clear all live player scores and live fallback results for AFL Round ${currentAflRound}?\n\nOnly continue after the final game has finished and before uploading the CSV files. This cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setIsClearingLiveScores(true);
+    setMessage(`Clearing live scores for AFL Round ${currentAflRound}...`);
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) throw new Error(sessionError.message);
+
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("No active session found. Please log in again.");
+
+      const response = await fetch("/api/admin/clear-current-round-live-scores", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ confirmRound: currentAflRound }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+        details?: string;
+        aflRound?: number;
+        deletedPlayerStatCount?: number;
+        deletedFallbackResultCount?: number;
+      } | null;
+
+      if (!response.ok || !payload?.success) {
+        const errorMessage = payload?.error ?? payload?.message ?? "Clear Live Scores failed.";
+        const details = payload?.details ? ` ${payload.details}` : "";
+        throw new Error(`${errorMessage}${details}`);
+      }
+
+      const clearedRound = payload.aflRound ?? currentAflRound;
+      setResults((previous) => previous.filter((result) => result.afl_round !== clearedRound));
+      await refreshPlayerStats();
+      setMessage(
+        payload.message ??
+          `Live scores cleared for AFL Round ${clearedRound}. You can now upload the CSV files.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown Clear Live Scores error.";
+      setMessage(`Clear Live Scores failed: ${message}`);
+    } finally {
+      setIsClearingLiveScores(false);
+    }
+  }, [currentAflRound, loginSession?.role, refreshPlayerStats]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1578,7 +1650,7 @@ async function handleExportTeamsXlsx() {
                   <button
                     type="button"
                     onClick={() => void saveCurrentRound()}
-                    disabled={isSavingRound || isCompletingWeek}
+                    disabled={isSavingRound || isCompletingWeek || isClearingLiveScores}
                     className="rounded-xl border border-yellow-400/30 bg-yellow-500/20 px-4 py-3 text-sm font-semibold text-yellow-100 transition hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isSavingRound ? "Saving..." : "Save AFL Round"}
@@ -1586,8 +1658,22 @@ async function handleExportTeamsXlsx() {
 
                   <button
                     type="button"
+                    onClick={() => void clearCurrentRoundLiveScores()}
+                    disabled={
+                      isClearingLiveScores ||
+                      isCompletingWeek ||
+                      isSavingRound ||
+                      currentRoundStatus !== "FINAL"
+                    }
+                    className="rounded-xl border border-red-400/30 bg-red-500/20 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isClearingLiveScores ? "Clearing..." : "Clear Live Scores"}
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => void completeSuper8Week()}
-                    disabled={isCompletingWeek || isSavingRound || currentRoundStatus !== "FINAL"}
+                    disabled={isCompletingWeek || isSavingRound || isClearingLiveScores || currentRoundStatus !== "FINAL"}
                     className="rounded-xl border border-emerald-400/30 bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isCompletingWeek ? "Completing..." : "Complete Super 8 Week"}
