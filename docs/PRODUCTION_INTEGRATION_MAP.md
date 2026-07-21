@@ -29,6 +29,7 @@ Only these application files are required for the production pipeline:
 - `app/api/admin/dispatch-production-github-pipeline/route.ts`
 - `app/api/cron/live-afl-stats/route.ts`
 - `app/dashboard/page.tsx`
+- `lib/supabaseAdmin.ts`
 - `tools/afl-preview-fetcher/afl_stats_scheduled_runner.py`
 - `tools/afl-preview-fetcher/requirements.txt`
 - `tools/import-production-worker-csv.py`
@@ -78,7 +79,7 @@ Do not copy these into the production integration unless separately reviewed for
 
 ## Locked production configuration
 
-Keep both switches disabled during integration:
+Keep all production switches disabled during integration:
 
 - GitHub repository variable `PRODUCTION_PIPELINE_ENABLED` absent or `false`.
 - Vercel environment variable `PRODUCTION_PIPELINE_DISPATCH_ENABLED` absent or `false`.
