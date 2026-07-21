@@ -30,6 +30,7 @@ Only these application files are required for the production pipeline:
 - `app/api/cron/live-afl-stats/route.ts`
 - `app/dashboard/page.tsx`
 - `lib/supabaseAdmin.ts`
+- `tools/afl-preview-fetcher/.gitignore`
 - `tools/afl-preview-fetcher/afl_stats_scheduled_runner.py`
 - `tools/afl-preview-fetcher/requirements.txt`
 - `tools/import-production-worker-csv.py`
