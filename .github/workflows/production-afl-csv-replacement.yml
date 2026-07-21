@@ -1,0 +1,83 @@
+name: Production AFL CSV replacement (LOCKED)
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_round:
+        description: Confirmed AFL round from the production admin dashboard
+        required: true
+        type: string
+      confirmation_phrase:
+        description: Production safety confirmation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-afl-csv-replacement
+  cancel-in-progress: false
+
+jobs:
+  fetch-validate-and-import:
+    name: Protected production CSV replacement
+    if: >-
+      ${{ vars.PRODUCTION_PIPELINE_ENABLED == 'true' &&
+          inputs.confirmation_phrase == 'PRODUCTION_AFL_CSV_REPLACEMENT' }}
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out approved production code
+        uses: actions/checkout@v5
+
+      - name: Create isolated Python environment
+        shell: powershell
+        run: |
+          & "C:\Program Files\Python313\python.exe" --version
+          & "C:\Program Files\Python313\python.exe" -m venv .production-worker-venv
+
+      - name: Install fetcher packages
+        shell: powershell
+        run: |
+          & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" -m pip install --requirement tools/afl-preview-fetcher/requirements.txt
+
+      - name: Fetch completed FootyWire matches and generate production CSV files
+        shell: powershell
+        working-directory: tools/afl-preview-fetcher
+        env:
+          AFL_STATS_ENVIRONMENT: production
+        run: |
+          & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" afl_stats_scheduled_runner.py
+
+      - name: Validate round, structure, and production environment
+        shell: powershell
+        env:
+          EXPECTED_AFL_ROUND: ${{ inputs.expected_round }}
+          EXPECTED_CSV_ENVIRONMENT: production
+        run: |
+          & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" tools/validate-preview-worker-output.py
+
+      - name: Import only unprotected production match CSV files
+        shell: powershell
+        env:
+          EXPECTED_AFL_ROUND: ${{ inputs.expected_round }}
+          PRODUCTION_SUPABASE_URL: ${{ secrets.PRODUCTION_SUPABASE_URL }}
+          PRODUCTION_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_SERVICE_ROLE_KEY }}
+          ENABLE_PRODUCTION_CSV_IMPORT: ENABLE_PROTECTED_PRODUCTION_CSV_IMPORT
+        run: |
+          & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" tools/import-production-worker-csv.py
+
+      - name: Save production audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-afl-csv-audit
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            tools/afl-preview-fetcher/Round */*.csv
+            tools/afl-preview-fetcher/preview_worker_summary.json
+            tools/afl-preview-fetcher/production_worker_import_summary.json
+            tools/afl-preview-fetcher/afl_stats_scheduler.log

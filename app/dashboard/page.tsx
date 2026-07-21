@@ -574,6 +574,12 @@ const [roundInput, setRoundInput] = useState("1");
 const [isSavingRound, setIsSavingRound] = useState(false);
 const [isCompletingWeek, setIsCompletingWeek] = useState(false);
 const [isClearingLiveScores, setIsClearingLiveScores] = useState(false);
+const [isCheckingPreviewPipeline, setIsCheckingPreviewPipeline] = useState(false);
+const [isFetchingPreviewCsv, setIsFetchingPreviewCsv] = useState(false);
+const [isCheckingPreviewImport, setIsCheckingPreviewImport] = useState(false);
+const [isImportingPreviewCsv, setIsImportingPreviewCsv] = useState(false);
+const [isDeletingPreviewStats, setIsDeletingPreviewStats] = useState(false);
+const [isDeletingProductionCsv, setIsDeletingProductionCsv] = useState(false);
 const [isExportingTeams, setIsExportingTeams] = useState(false);
 const [snapshotRoundInput, setSnapshotRoundInput] = useState("8");
 const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
@@ -584,14 +590,31 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
       .select("id, role, coach_id, coach_name, team_name")
       .eq("id", userId)
       .eq("environment", APP_ENV)
-      .single();
+      .maybeSingle();
 
     if (error) {
       setMessage(`Profile load failed: ${error.message}`);
       return null;
     }
 
-    const profile = data as UserProfileRow | null;
+    let profile = data as UserProfileRow | null;
+
+    if (!profile && APP_ENV === "preview") {
+      const { data: productionData, error: productionError } = await supabase
+        .from("profiles")
+        .select("id, role, coach_id, coach_name, team_name")
+        .eq("id", userId)
+        .eq("environment", "production")
+        .eq("role", "admin")
+        .maybeSingle();
+
+      if (productionError) {
+        setMessage(`Preview admin verification failed: ${productionError.message}`);
+        return null;
+      }
+
+      profile = productionData as UserProfileRow | null;
+    }
 
     if (!profile) {
       setMessage("No profile found for this user.");
@@ -948,13 +971,19 @@ const refreshPlayerStats = useCallback(async () => {
     }
 
     const confirmed = window.confirm(
-      `Clear all live player scores and live fallback results for AFL Round ${currentAflRound}?\n\nOnly continue after the final game has finished and before uploading the CSV files. This cannot be undone.`
+      APP_ENV === "preview"
+        ? `Start the private development live-to-CSV pipeline for AFL Round ${currentAflRound}?\n\nYour private Windows runner will fetch FootyWire CSV files and safely import only missing matches into local Supabase. Protected CSV rows will not be overwritten.`
+        : `Start the protected live-to-CSV pipeline for AFL Round ${currentAflRound}?\n\nThe runner will fetch and validate FootyWire CSV files before replacing matching live rows. Existing protected CSV rows will not be overwritten. This can be run mid-round.`
     );
 
     if (!confirmed) return;
 
     setIsClearingLiveScores(true);
-    setMessage(`Clearing live scores for AFL Round ${currentAflRound}...`);
+    setMessage(
+      APP_ENV === "preview"
+        ? `Requesting the private development pipeline for AFL Round ${currentAflRound}...`
+        : `Requesting the protected production pipeline for AFL Round ${currentAflRound}...`
+    );
 
     try {
       const {
@@ -967,7 +996,208 @@ const refreshPlayerStats = useCallback(async () => {
       const accessToken = session?.access_token;
       if (!accessToken) throw new Error("No active session found. Please log in again.");
 
-      const response = await fetch("/api/admin/clear-current-round-live-scores", {
+      const response = await fetch(
+        APP_ENV === "preview"
+          ? "/api/admin/dispatch-preview-github-pipeline"
+          : "/api/admin/dispatch-production-github-pipeline",
+        {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ confirmRound: currentAflRound }),
+        }
+      );
+
+      const payload = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+        details?: string;
+        aflRound?: number;
+        deletedPlayerStatCount?: number;
+        deletedFallbackResultCount?: number;
+        clearedAt?: string;
+        workflowRunId?: number | null;
+        workflowRunUrl?: string | null;
+        workflowStatus?: string;
+      } | null;
+
+      if (!response.ok || !payload?.success) {
+        const errorMessage = payload?.error ?? payload?.message ?? "Clear Live Scores failed.";
+        const details = payload?.details ? ` ${payload.details}` : "";
+        throw new Error(`${errorMessage}${details}`);
+      }
+
+      const workflowRunId = payload.workflowRunId;
+        const initialRunUrl = payload.workflowRunUrl ?? "";
+        const statusEndpoint =
+          APP_ENV === "preview"
+            ? "/api/admin/dispatch-preview-github-pipeline"
+            : "/api/admin/dispatch-production-github-pipeline";
+        const pipelineLabel =
+          APP_ENV === "preview" ? "Private development pipeline" : "Protected production pipeline";
+        setMessage(payload.message ?? `${pipelineLabel} started for AFL Round ${currentAflRound}.`);
+
+        if (!workflowRunId) return;
+
+        for (let attempt = 1; attempt <= 100; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 3_000));
+          const statusResponse = await fetch(
+            `${statusEndpoint}?runId=${workflowRunId}`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${accessToken}` },
+              cache: "no-store",
+            }
+          );
+          const statusPayload = (await statusResponse.json().catch(() => null)) as {
+            success?: boolean;
+            error?: string;
+            details?: string;
+            workflowStatus?: string;
+            workflowConclusion?: string | null;
+            workflowRunUrl?: string | null;
+          } | null;
+
+          if (!statusResponse.ok || !statusPayload?.success) {
+            const reason = statusPayload?.error ?? "Pipeline status check failed.";
+            const details = statusPayload?.details ? ` ${statusPayload.details}` : "";
+            throw new Error(`${reason}${details}`);
+          }
+
+          const runUrl = statusPayload.workflowRunUrl ?? initialRunUrl;
+          if (statusPayload.workflowStatus !== "completed") {
+            setMessage(
+              `${pipelineLabel} is ${statusPayload.workflowStatus ?? "running"} for AFL Round ${currentAflRound}.${runUrl ? ` ${runUrl}` : ""}`
+            );
+            continue;
+          }
+
+          if (statusPayload.workflowConclusion !== "success") {
+            throw new Error(
+              `${pipelineLabel} finished with ${statusPayload.workflowConclusion ?? "an unknown result"}.${runUrl ? ` ${runUrl}` : ""}`
+            );
+          }
+
+          await Promise.all([
+            refreshPlayerStats(),
+            refreshRoundFinalisation(currentAflRound),
+          ]);
+          setMessage(
+            `${pipelineLabel} completed successfully for AFL Round ${currentAflRound}. Existing protected CSV rows were retained.${runUrl ? ` ${runUrl}` : ""}`
+          );
+          return;
+        }
+
+      throw new Error(
+        `${pipelineLabel} did not finish within five minutes.${initialRunUrl ? ` ${initialRunUrl}` : ""}`
+      );
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown Clear Live Scores error.";
+      setMessage(
+        APP_ENV === "preview"
+          ? `Private pipeline failed: ${message}`
+          : `Protected production pipeline failed: ${message}`
+      );
+    } finally {
+      setIsClearingLiveScores(false);
+    }
+  }, [currentAflRound, loginSession?.role, refreshPlayerStats, refreshRoundFinalisation]);
+
+  const checkPreviewAflCsvPipeline = useCallback(async () => {
+    if (APP_ENV !== "preview") {
+      setMessage("The AFL CSV development pipeline is only available in preview.");
+      return;
+    }
+
+    if (loginSession?.role !== "admin") {
+      setMessage("Only a preview admin can check the AFL CSV pipeline.");
+      return;
+    }
+
+    if (!currentAflRound) {
+      setMessage("Current AFL round is not set for preview.");
+      return;
+    }
+
+    setIsCheckingPreviewPipeline(true);
+    setMessage(`Checking the preview AFL CSV pipeline for Round ${currentAflRound}...`);
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) throw new Error(sessionError.message);
+
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("No active session found. Please log in again.");
+
+      const response = await fetch("/api/admin/preview-afl-csv-pipeline", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ confirmRound: currentAflRound }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        dryRun?: boolean;
+        message?: string;
+        error?: string;
+        details?: string;
+        plannedSteps?: string[];
+      } | null;
+
+      if (!response.ok || !payload?.success || !payload.dryRun) {
+        const errorMessage = payload?.error ?? payload?.message ?? "Preview pipeline check failed.";
+        const details = payload?.details ? ` ${payload.details}` : "";
+        throw new Error(`${errorMessage}${details}`);
+      }
+
+      const steps = payload.plannedSteps?.length
+        ? ` Planned steps: ${payload.plannedSteps.join(" ")}`
+        : "";
+      setMessage(`${payload.message ?? "Preview pipeline safety check passed."}${steps}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown preview pipeline error.";
+      setMessage(`Preview pipeline check failed: ${message}`);
+    } finally {
+      setIsCheckingPreviewPipeline(false);
+    }
+  }, [currentAflRound, loginSession?.role]);
+
+  const generatePreviewAflCsvFiles = useCallback(async () => {
+    if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
+      setMessage("Preview admin access and a current AFL round are required.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Fetch completed FootyWire matches and generate local preview CSV files for AFL Round ${currentAflRound}?\n\nThis will not clear scores or upload anything to Supabase.`
+    );
+    if (!confirmed) return;
+
+    setIsFetchingPreviewCsv(true);
+    setMessage(`Generating local preview CSV files for AFL Round ${currentAflRound}...`);
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) throw new Error(sessionError.message);
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("No active session found. Please log in again.");
+
+      const response = await fetch("/api/admin/run-preview-afl-fetcher", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -981,35 +1211,292 @@ const refreshPlayerStats = useCallback(async () => {
         message?: string;
         error?: string;
         details?: string;
-        aflRound?: number;
-        deletedPlayerStatCount?: number;
-        deletedFallbackResultCount?: number;
-        clearedAt?: string;
+        matchCount?: number;
+        playerCount?: number;
+        roundCsv?: string | null;
+        perGameFiles?: string[];
       } | null;
 
       if (!response.ok || !payload?.success) {
-        const errorMessage = payload?.error ?? payload?.message ?? "Clear Live Scores failed.";
+        const errorMessage = payload?.error ?? payload?.message ?? "Preview CSV generation failed.";
         const details = payload?.details ? ` ${payload.details}` : "";
         throw new Error(`${errorMessage}${details}`);
       }
 
-      const clearedRound = payload.aflRound ?? currentAflRound;
-      setResults((previous) => previous.filter((result) => result.afl_round !== clearedRound));
-      await Promise.all([
-        refreshPlayerStats(),
-        refreshRoundFinalisation(clearedRound),
-      ]);
+      const fileCount = payload.perGameFiles?.length ?? 0;
       setMessage(
-        payload.message ??
-          `Live scores cleared for AFL Round ${clearedRound}. You can now upload the CSV files.`
+        `${payload.message ?? "Preview CSV generation completed."} ` +
+          `${payload.matchCount ?? 0} matches, ${payload.playerCount ?? 0} players, ` +
+          `${fileCount} match CSV files${payload.roundCsv ? ` plus ${payload.roundCsv}` : ""}.`
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown Clear Live Scores error.";
-      setMessage(`Clear Live Scores failed: ${message}`);
+      const message = error instanceof Error ? error.message : "Unknown preview fetcher error.";
+      setMessage(`Preview CSV generation failed: ${message}`);
     } finally {
-      setIsClearingLiveScores(false);
+      setIsFetchingPreviewCsv(false);
     }
-  }, [currentAflRound, loginSession?.role, refreshPlayerStats, refreshRoundFinalisation]);
+  }, [currentAflRound, loginSession?.role]);
+
+  const checkPreviewCsvImport = useCallback(async () => {
+    if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
+      setMessage("Preview admin access and a current AFL round are required.");
+      return;
+    }
+
+    setIsCheckingPreviewImport(true);
+    setMessage(`Checking protected CSV imports for Preview Round ${currentAflRound}...`);
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      if (sessionError) throw new Error(sessionError.message);
+
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("No active session found. Please log in again.");
+
+      const response = await fetch("/api/admin/check-preview-csv-import", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ confirmRound: currentAflRound }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        dryRun?: boolean;
+        message?: string;
+        error?: string;
+        details?: string;
+      } | null;
+
+      if (!response.ok || !payload?.success || !payload.dryRun) {
+        const errorMessage = payload?.error ?? payload?.message ?? "Protected import check failed.";
+        const details = payload?.details ? ` ${payload.details}` : "";
+        throw new Error(`${errorMessage}${details}`);
+      }
+
+      setMessage(payload.message ?? "Protected preview import check completed. No rows were changed.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown import-check error.";
+      setMessage(`Protected preview import check failed: ${message}`);
+    } finally {
+      setIsCheckingPreviewImport(false);
+    }
+  }, [currentAflRound, loginSession?.role]);
+
+  const importPreviewCsvFiles = useCallback(async () => {
+    if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
+      setMessage("Preview admin access and a current AFL round are required.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Insert new player rows from the generated match CSVs into Preview Round ${currentAflRound}?\n\nExisting rows will be skipped and protected. Production will not be changed.`
+    );
+    if (!confirmed) return;
+
+    setIsImportingPreviewCsv(true);
+    setMessage(`Importing protected CSV rows into Preview Round ${currentAflRound}...`);
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      if (sessionError) throw new Error(sessionError.message);
+
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("No active session found. Please log in again.");
+
+      const response = await fetch("/api/admin/import-preview-csv-files", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ confirmRound: currentAflRound }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+        details?: string;
+      } | null;
+
+      if (!response.ok || !payload?.success) {
+        const errorMessage = payload?.error ?? payload?.message ?? "Protected import failed.";
+        const details = payload?.details ? ` ${payload.details}` : "";
+        throw new Error(`${errorMessage}${details}`);
+      }
+
+      await refreshPlayerStats();
+      setMessage(payload.message ?? "Protected Preview CSV import completed.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown Preview import error.";
+      setMessage(`Protected Preview CSV import failed: ${message}`);
+    } finally {
+      setIsImportingPreviewCsv(false);
+    }
+  }, [currentAflRound, loginSession?.role, refreshPlayerStats]);
+
+  const deletePreviewRoundStats = useCallback(async () => {
+    if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
+      setMessage("Preview admin access and a current AFL round are required.");
+      return;
+    }
+
+    setIsDeletingPreviewStats(true);
+    setMessage(`Inspecting Preview Round ${currentAflRound} deletion...`);
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      if (sessionError) throw new Error(sessionError.message);
+
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("No active session found. Please log in again.");
+
+      const requestDeletion = async (body: Record<string, unknown>) => {
+        const response = await fetch("/api/admin/delete-preview-round-stats", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const payload = (await response.json().catch(() => null)) as {
+          success?: boolean;
+          message?: string;
+          error?: string;
+          details?: string;
+          affectedRowCount?: number;
+          requiredConfirmation?: string;
+        } | null;
+        if (!response.ok || !payload?.success) {
+          const errorMessage = payload?.error ?? payload?.message ?? "Preview deletion failed.";
+          const details = payload?.details ? ` ${payload.details}` : "";
+          throw new Error(`${errorMessage}${details}`);
+        }
+        return payload;
+      };
+
+      const inspection = await requestDeletion({
+        action: "inspect",
+        confirmRound: currentAflRound,
+      });
+      const requiredConfirmation = inspection.requiredConfirmation;
+      if (!requiredConfirmation) throw new Error("The server did not provide a confirmation phrase.");
+
+      const enteredConfirmation = window.prompt(
+        `${inspection.affectedRowCount ?? 0} Preview player-stat rows will be permanently deleted for AFL Round ${currentAflRound}.\n\nProduction will not be changed.\n\nType this exact phrase to continue:\n${requiredConfirmation}`
+      );
+
+      if (enteredConfirmation === null) {
+        setMessage("Preview deletion cancelled. No rows were changed.");
+        return;
+      }
+
+      const result = await requestDeletion({
+        action: "delete",
+        confirmRound: currentAflRound,
+        confirmation: enteredConfirmation,
+      });
+      await refreshPlayerStats();
+      setMessage(result.message ?? "Preview round rows were deleted.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown Preview deletion error.";
+      setMessage(`Preview deletion failed: ${message}`);
+    } finally {
+      setIsDeletingPreviewStats(false);
+    }
+  }, [currentAflRound, loginSession?.role, refreshPlayerStats]);
+
+  const deleteProductionRoundCsv = useCallback(async () => {
+    if (APP_ENV !== "production" || loginSession?.role !== "admin" || !currentAflRound) {
+      setMessage("Production admin access and a current AFL round are required.");
+      return;
+    }
+
+    setIsDeletingProductionCsv(true);
+    setMessage(`Inspecting protected production CSV rows for AFL Round ${currentAflRound}...`);
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      if (sessionError) throw new Error(sessionError.message);
+
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("No active session found. Please log in again.");
+
+      const requestDeletion = async (body: Record<string, unknown>) => {
+        const response = await fetch("/api/admin/delete-production-round-csv", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const payload = (await response.json().catch(() => null)) as {
+          success?: boolean;
+          message?: string;
+          error?: string;
+          details?: string;
+          affectedRowCount?: number;
+          requiredConfirmation?: string;
+        } | null;
+        if (!response.ok || !payload?.success) {
+          const errorMessage =
+            payload?.error ?? payload?.message ?? "Production CSV deletion failed.";
+          const details = payload?.details ? ` ${payload.details}` : "";
+          throw new Error(`${errorMessage}${details}`);
+        }
+        return payload;
+      };
+
+      const inspection = await requestDeletion({
+        action: "inspect",
+        confirmRound: currentAflRound,
+      });
+      const requiredConfirmation = inspection.requiredConfirmation;
+      if (!requiredConfirmation) {
+        throw new Error("The server did not provide a confirmation phrase.");
+      }
+
+      const enteredConfirmation = window.prompt(
+        `${inspection.affectedRowCount ?? 0} protected production CSV rows will be permanently deleted for AFL Round ${currentAflRound}.\n\nLive rows will not be deleted. This is for exceptional recovery only.\n\nType this exact phrase to continue:\n${requiredConfirmation}`
+      );
+
+      if (enteredConfirmation === null) {
+        setMessage("Production CSV deletion cancelled. No rows were changed.");
+        return;
+      }
+
+      const result = await requestDeletion({
+        action: "delete",
+        confirmRound: currentAflRound,
+        confirmation: enteredConfirmation,
+      });
+      await refreshPlayerStats();
+      setMessage(result.message ?? "Protected production CSV rows were deleted.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown production CSV deletion error.";
+      setMessage(`Production CSV deletion failed: ${message}`);
+    } finally {
+      setIsDeletingProductionCsv(false);
+    }
+  }, [currentAflRound, loginSession?.role, refreshPlayerStats]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1726,11 +2213,149 @@ async function handleExportTeamsXlsx() {
                   <button
                     type="button"
                     onClick={() => void saveCurrentRound()}
-                    disabled={isSavingRound || isCompletingWeek || isClearingLiveScores}
+                    disabled={
+                      isSavingRound ||
+                      isCompletingWeek ||
+                      isClearingLiveScores ||
+                      isCheckingPreviewPipeline ||
+                      isFetchingPreviewCsv ||
+                      isCheckingPreviewImport ||
+                      isImportingPreviewCsv ||
+                      isDeletingPreviewStats ||
+                      isDeletingProductionCsv
+                    }
                     className="rounded-xl border border-yellow-400/30 bg-yellow-500/20 px-4 py-3 text-sm font-semibold text-yellow-100 transition hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isSavingRound ? "Saving..." : "Save AFL Round"}
                   </button>
+
+                  {APP_ENV === "preview" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void checkPreviewAflCsvPipeline()}
+                        disabled={
+                          isCheckingPreviewPipeline ||
+                          isFetchingPreviewCsv ||
+                          isCheckingPreviewImport ||
+                          isImportingPreviewCsv ||
+                          isDeletingPreviewStats ||
+                          isClearingLiveScores ||
+                          isCompletingWeek ||
+                          isSavingRound ||
+                          !currentAflRound
+                        }
+                        className="rounded-xl border border-sky-400/30 bg-sky-500/20 px-4 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isCheckingPreviewPipeline
+                          ? "Checking Preview Pipeline..."
+                          : "Check AFL CSV Pipeline (Dry Run)"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void generatePreviewAflCsvFiles()}
+                        disabled={
+                          isFetchingPreviewCsv ||
+                          isCheckingPreviewPipeline ||
+                          isCheckingPreviewImport ||
+                          isImportingPreviewCsv ||
+                          isDeletingPreviewStats ||
+                          isClearingLiveScores ||
+                          isCompletingWeek ||
+                          isSavingRound ||
+                          !currentAflRound
+                        }
+                        className="rounded-xl border border-violet-400/30 bg-violet-500/20 px-4 py-3 text-sm font-semibold text-violet-100 transition hover:bg-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isFetchingPreviewCsv
+                          ? "Generating Preview CSVs..."
+                          : "Generate Preview CSVs"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void checkPreviewCsvImport()}
+                        disabled={
+                          isCheckingPreviewImport ||
+                          isImportingPreviewCsv ||
+                          isDeletingPreviewStats ||
+                          isFetchingPreviewCsv ||
+                          isCheckingPreviewPipeline ||
+                          isClearingLiveScores ||
+                          isCompletingWeek ||
+                          isSavingRound ||
+                          !currentAflRound
+                        }
+                        className="rounded-xl border border-cyan-400/30 bg-cyan-500/20 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isCheckingPreviewImport
+                          ? "Checking Protected Import..."
+                          : "Check Protected CSV Import"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void importPreviewCsvFiles()}
+                        disabled={
+                          isImportingPreviewCsv ||
+                          isDeletingPreviewStats ||
+                          isCheckingPreviewImport ||
+                          isFetchingPreviewCsv ||
+                          isCheckingPreviewPipeline ||
+                          isClearingLiveScores ||
+                          isCompletingWeek ||
+                          isSavingRound ||
+                          !currentAflRound
+                        }
+                        className="rounded-xl border border-emerald-400/30 bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isImportingPreviewCsv
+                          ? "Importing Preview CSVs..."
+                          : "Import Protected Preview CSVs"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void deletePreviewRoundStats()}
+                        disabled={
+                          isDeletingPreviewStats ||
+                          isImportingPreviewCsv ||
+                          isCheckingPreviewImport ||
+                          isFetchingPreviewCsv ||
+                          isCheckingPreviewPipeline ||
+                          isClearingLiveScores ||
+                          isCompletingWeek ||
+                          isSavingRound ||
+                          !currentAflRound
+                        }
+                        className="rounded-xl border border-red-500/50 bg-red-950/40 px-4 py-3 text-sm font-semibold text-red-200 transition hover:bg-red-900/50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isDeletingPreviewStats
+                          ? "Processing Preview Deletion..."
+                          : "Exception Only: Delete Preview Round Stats"}
+                      </button>
+                    </>
+                  )}
+
+                  {APP_ENV === "production" && (
+                    <button
+                      type="button"
+                      onClick={() => void deleteProductionRoundCsv()}
+                      disabled={
+                        isDeletingProductionCsv ||
+                        isClearingLiveScores ||
+                        isCompletingWeek ||
+                        isSavingRound ||
+                        !currentAflRound
+                      }
+                      className="rounded-xl border border-red-600/60 bg-red-950/60 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-900/60 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isDeletingProductionCsv
+                        ? "Inspecting Production CSV Rows..."
+                        : "Exception Only: Delete Production Round CSVs"}
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -1739,16 +2364,20 @@ async function handleExportTeamsXlsx() {
                       isClearingLiveScores ||
                       isCompletingWeek ||
                       isSavingRound ||
-                      currentRoundStatus !== "FINAL" ||
-                      Boolean(currentRoundFinalisation?.live_cleared_at)
+                      isCheckingPreviewPipeline ||
+                      isFetchingPreviewCsv ||
+                      isCheckingPreviewImport ||
+                      isImportingPreviewCsv ||
+                      isDeletingPreviewStats ||
+                      isDeletingProductionCsv
                     }
                     className="rounded-xl border border-red-400/30 bg-red-500/20 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isClearingLiveScores
-                      ? "Clearing..."
-                      : currentRoundFinalisation?.live_cleared_at
-                        ? "Live Scores Cleared"
-                        : "Clear Live Scores"}
+                      ? APP_ENV === "preview"
+                        ? "Starting Private Pipeline..."
+                        : "Starting Protected Pipeline..."
+                      : "Run Live → CSV Pipeline"}
                   </button>
 
                   <button
@@ -1758,6 +2387,12 @@ async function handleExportTeamsXlsx() {
                       isCompletingWeek ||
                       isSavingRound ||
                       isClearingLiveScores ||
+                      isCheckingPreviewPipeline ||
+                      isFetchingPreviewCsv ||
+                      isCheckingPreviewImport ||
+                      isImportingPreviewCsv ||
+                      isDeletingPreviewStats ||
+                      isDeletingProductionCsv ||
                       currentRoundStatus !== "FINAL" ||
                       !isCurrentRoundCsvReady
                     }

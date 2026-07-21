@@ -38,6 +38,12 @@ type MatchStatusRefreshResult = {
   error?: string;
 };
 
+type ProtectedLiveWriteResult = {
+  status?: "imported" | "protected";
+  written_rows?: number;
+  protected_rows?: number;
+};
+
 const BEFORE_START_WINDOW_MS = 90 * 60 * 1000;
 const AFTER_START_WINDOW_MS = 5 * 60 * 60 * 1000;
 const MIN_FINAL_PLAYERS_PER_TEAM = 20;
@@ -245,7 +251,10 @@ async function importMatch(params: {
     const aflStats = await fetchAflPlayerStats(match.afl_match_provider_id, token);
     const allStats = flattenAflPlayerStats(aflStats);
     const mappedRows = mapAflPlayerStats(match, aflStats, importedAt, nameAliases);
-    const upsertRows = mappedRows.map((mappedRow) => mappedRow.row);
+    const upsertRows = mappedRows.map((mappedRow) => ({
+      ...mappedRow.row,
+      score_source: "live",
+    }));
     const teamRowCounts = upsertRows.reduce<Record<string, number>>((counts, row) => {
       counts[row.afl_team_code] = (counts[row.afl_team_code] ?? 0) + 1;
       return counts;
@@ -260,6 +269,32 @@ async function importMatch(params: {
         reason: "no mapped rows",
         aflRawRows: allStats.length,
         mappedRows: 0,
+        wroteRows: 0,
+        teamRowCounts,
+      };
+    }
+
+    const matchTeamCodes = [...new Set(upsertRows.map((row) => row.afl_team_code))];
+    const { count: protectedCsvRowCount, error: protectedCsvError } = await supabase
+      .from("afl_player_round_stats")
+      .select("id", { count: "exact", head: true })
+      .eq("environment", match.environment)
+      .eq("afl_round", match.afl_round)
+      .in("afl_team_code", matchTeamCodes)
+      .eq("score_source", "csv");
+
+    if (protectedCsvError) {
+      throw new Error(`CSV protection check failed: ${protectedCsvError.message}`);
+    }
+
+    if ((protectedCsvRowCount ?? 0) > 0) {
+      return {
+        afl_match_id: match.afl_match_id,
+        label,
+        status: match.status ?? null,
+        action: "skipped",
+        reason: "this match already has protected CSV player statistics",
+        mappedRows: upsertRows.length,
         wroteRows: 0,
         teamRowCounts,
       };
@@ -295,14 +330,39 @@ async function importMatch(params: {
       }
     }
 
-    const { error: upsertError } = await supabase
-      .from("afl_player_round_stats")
-      .upsert(upsertRows, {
-        onConflict: "environment,afl_round,afl_team_code,player_name",
-      });
+    const { data: protectedWriteData, error: upsertError } = await supabase.rpc(
+      "upsert_live_match_if_unprotected",
+      {
+        p_environment: match.environment,
+        p_afl_round: match.afl_round,
+        p_team_codes: matchTeamCodes,
+        p_rows: upsertRows,
+      }
+    );
 
     if (upsertError) {
-      throw new Error(`Stats upsert failed: ${upsertError.message}`);
+      throw new Error(`Protected stats upsert failed: ${upsertError.message}`);
+    }
+
+    const protectedWrite = protectedWriteData as ProtectedLiveWriteResult | null;
+    if (protectedWrite?.status === "protected") {
+      return {
+        afl_match_id: match.afl_match_id,
+        label,
+        status: match.status ?? null,
+        action: "skipped",
+        reason: "CSV player statistics became protected before the live write",
+        mappedRows: upsertRows.length,
+        wroteRows: 0,
+        teamRowCounts,
+      };
+    }
+
+    if (
+      protectedWrite?.status !== "imported" ||
+      protectedWrite.written_rows !== upsertRows.length
+    ) {
+      throw new Error("Protected stats upsert returned an invalid result.");
     }
 
     const matchUpdatePayload: Record<string, string> = {
@@ -331,7 +391,7 @@ async function importMatch(params: {
       action: "imported",
       aflRawRows: allStats.length,
       mappedRows: upsertRows.length,
-      wroteRows: upsertRows.length,
+      wroteRows: protectedWrite.written_rows,
       teamRowCounts,
     };
   } catch (error) {
