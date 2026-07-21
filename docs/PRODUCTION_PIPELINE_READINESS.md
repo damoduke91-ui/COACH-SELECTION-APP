@@ -56,6 +56,7 @@ Repository: `damoduke91-ui/COACH-SELECTION-APP`
 
 - Add server-only `GITHUB_PRODUCTION_WORKFLOW_TOKEN` with access only to the production repository and permission to dispatch/read Actions runs.
 - Keep `PRODUCTION_PIPELINE_DISPATCH_ENABLED` absent or `false` during setup.
+- Keep `PRODUCTION_CSV_DELETE_ENABLED` absent or `false` during setup and normal operation. Enable it only for an approved exception deletion window, then disable it immediately.
 - Confirm `NEXT_PUBLIC_APP_ENV=production`.
 - Confirm existing Supabase URL, anonymous key and service-role key refer to the intended production project.
 - Enable `PRODUCTION_PIPELINE_DISPATCH_ENABLED=true` only after the database migration and GitHub workflow checks pass.

@@ -30,6 +30,10 @@ function confirmationPhrase(round: number): string {
   return `DELETE PRODUCTION ROUND ${round} CSV DATA`;
 }
 
+function isProductionDeletionEnabled(): boolean {
+  return process.env.PRODUCTION_CSV_DELETE_ENABLED === "true";
+}
+
 async function isProductionAdmin(request: NextRequest): Promise<boolean> {
   const token = getBearerToken(request);
   if (!token) return false;
@@ -49,10 +53,10 @@ async function isProductionAdmin(request: NextRequest): Promise<boolean> {
 }
 
 export async function POST(request: NextRequest) {
-  if (APP_ENV !== "production") {
+  if (APP_ENV !== "production" || !isProductionDeletionEnabled()) {
     return jsonResponse(403, {
       success: false,
-      error: "Production CSV deletion is disabled outside production.",
+      error: "Production CSV deletion is locked.",
     });
   }
 

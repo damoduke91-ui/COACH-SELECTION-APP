@@ -82,6 +82,7 @@ Keep both switches disabled during integration:
 
 - GitHub repository variable `PRODUCTION_PIPELINE_ENABLED` absent or `false`.
 - Vercel environment variable `PRODUCTION_PIPELINE_DISPATCH_ENABLED` absent or `false`.
+- Vercel environment variable `PRODUCTION_CSV_DELETE_ENABLED` absent or `false`.
 
 The production workflow also requires, but must not receive until the approved rollout stage:
 
