@@ -98,7 +98,7 @@ The production workflow also requires, but must not receive until the approved r
 2. Create a dedicated production integration branch from the current production `master`.
 3. Apply only the allowlisted application changes.
 4. Copy only migrations `005` and `006`.
-5. Keep both production enable switches off.
+5. Keep all production enable switches off.
 6. Run TypeScript and the full production build.
 7. Review the integration diff and verify the protected user files are unchanged.
 8. Push the integration branch and use a reviewed pull request; do not deploy yet.
