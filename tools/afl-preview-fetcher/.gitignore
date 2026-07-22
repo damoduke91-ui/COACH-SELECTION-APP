@@ -1,0 +1,9 @@
+__pycache__/
+*.log
+afl_stats_scheduler_state.json
+preview_worker_summary.json
+preview_worker_import_summary.json
+AFL_Stats_Latest.xlsx
+supabase_import_latest.csv
+Round */
+output/
