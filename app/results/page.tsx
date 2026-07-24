@@ -1437,9 +1437,10 @@ export default function ResultsPage() {
                     );
                     const teamTotal = calculateTeamTotal(rows);
                     const countedPlayers = rows.filter((row) => row.countsToTotal).length;
-                    const pendingPlayers = rows.filter(
-                      (row) => row.selectedType === "X" && !row.played && !row.clubImported
+                    const selectedScoringSlots = rows.filter(
+                      (row) => row.selectedType === "X"
                     ).length;
+                    const pendingPlayers = Math.max(0, selectedScoringSlots - countedPlayers);
 
                     return {
                       coachId,
