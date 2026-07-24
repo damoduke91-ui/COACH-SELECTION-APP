@@ -272,6 +272,69 @@ const AFL_TEAM_NAME_ALIASES: Record<string, string> = {
   "Western Bulldogs": "Western Bulldogs",
 };
 
+const FOOTYWIRE_TO_AFL_PLAYER_NAME: Record<string, string> = {
+  "alex neal bullen": "Alex N-Bullen",
+  "andy m wakefield": "Andy Moniz-Wakefield",
+  "archer d wicks": "Archer Day-Wicks",
+  "archie may": "Archer May",
+  "bradley close": "Brad Close",
+  "brandon z thatcher": "Brandon Zerk-Thatcher",
+  "callum c jones": "Callum Coleman-Jones",
+  "cameron mackenzie": "Cam Mackenzie",
+  "cameron rayner": "Cam Rayner",
+  "chris scerri": "Christopher Scerri",
+  "daniel butler": "Dan Butler",
+  "darcy b jones": "Darcy Byrne-Jones",
+  "harrison himmelberg": "Harry Himmelberg",
+  "jackson macrae": "Jack Macrae",
+  "jamarra u hagan": "Jamarra Ugle-Hagan",
+  "jason h francis": "Jason Horne-Francis",
+  "joseph fonti": "Joe Fonti",
+  "josh weddle": "Joshua Weddle",
+  "lachlan ash": "Lachie Ash",
+  "lachlan fogarty": "Lachie Fogarty",
+  "lachlan jones": "Lachie Jones",
+  "lachlan schultz": "Lachie Schultz",
+  "lachlan weller": "Lachie Weller",
+  "lachie sullivan": "Lachlan Sullivan",
+  "leo lombard": "Leonardo Lombard",
+  "luke d uniacke": "Luke Davies-Uniacke",
+  "matthew flynn": "Matt Flynn",
+  "matthew roberts": "Matt Roberts",
+  "matt carroll": "Matthew Carroll",
+  "matt cottrell": "Matthew Cottrell",
+  "matt johnson": "Matthew Johnson",
+  "matt owies": "Matthew Owies",
+  "mitchell knevitt": "Mitch Knevitt",
+  "mitchell lewis": "Mitch Lewis",
+  "mitchito owens": "Mitch Owens",
+  "nasiah w milera": "Nasiah Wanganeen-Milera",
+  "nick madden": "Nicholas Madden",
+  "nicholas coffield": "Nick Coffield",
+  "nicholas holman": "Nick Holman",
+  "nikolas cox": "Nik Cox",
+  "noah r thomson": "Noah Roberts-Thomson",
+  "ollie dempsey": "Oliver Dempsey",
+  "ollie greeves": "Oliver Greeves",
+  "oliver h brown": "Oliver Hayes-Brown",
+  "oliver wines": "Ollie Wines",
+  "robert hansen": "Robert Hansen Jr",
+  "saad e hawli": "Saad El-Hawli",
+  "sam collins": "Samuel Collins",
+  "samuel cumming": "Sam Cumming",
+  "samuel grlj": "Sam Grlj",
+  "samuel swadling": "Sam Swadling",
+  "tom edwards": "Thomas Edwards",
+  "timothy english": "Tim English",
+  "thomas burton": "Tom Burton",
+  "thomas liberatore": "Tom Liberatore",
+  "tom stewart": "Thomas Stewart",
+  "will edwards": "William Edwards",
+  "will hayes": "William Hayes",
+  "zachary williams": "Zac Williams",
+  "zachary merrett": "Zach Merrett",
+};
+
 function isValidTimeZone(value: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
@@ -772,7 +835,20 @@ function cleanStatusText(value: string | null | undefined): string {
 }
 
 function normalisePlayerName(value: string | null | undefined): string {
-  return cleanStatusText(value).toLowerCase();
+  return cleanStatusText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/['`.]/g, "")
+    .replace(/[-_]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolveFootywirePlayerName(value: string | null | undefined): string {
+  const normalisedName = normalisePlayerName(value);
+  return FOOTYWIRE_TO_AFL_PLAYER_NAME[normalisedName] ?? cleanStatusText(value);
 }
 
 function startsWithEmergency(value: string | null | undefined): boolean {
@@ -825,7 +901,8 @@ function getPlayerStatus(
   const matchingRow = teamList.find(
     (row) =>
       Number(row.round) === round &&
-      normalisePlayerName(row.player_name) === trimmedName.toLowerCase()
+      normalisePlayerName(resolveFootywirePlayerName(row.player_name)) ===
+        normalisePlayerName(resolveFootywirePlayerName(trimmedName))
   );
 
   if (!matchingRow) {
