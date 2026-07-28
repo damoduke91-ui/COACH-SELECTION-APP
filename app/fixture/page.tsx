@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import FinalsFixtureSection from "./FinalsFixtureSection";
 
 type LoginSession = {
   userId: string;
@@ -176,14 +177,28 @@ export default function FixturePage() {
       .select("id, role, coach_id, coach_name, team_name")
       .eq("id", userId)
       .eq("environment", APP_ENV)
-      .single();
+      .maybeSingle();
 
     if (error) {
       setMessage(`Profile load failed: ${error.message}`);
       return null;
     }
 
-    const profile = data as UserProfileRow | null;
+    let profile = data as UserProfileRow | null;
+
+    if (!profile && APP_ENV === "preview") {
+      const { data: productionData, error: productionError } = await supabase
+        .from("profiles")
+        .select("id, role, coach_id, coach_name, team_name")
+        .eq("id", userId)
+        .eq("environment", "production")
+        .maybeSingle();
+      if (productionError) {
+        setMessage(`Profile load failed: ${productionError.message}`);
+        return null;
+      }
+      profile = productionData as UserProfileRow | null;
+    }
 
     if (!profile) {
       setMessage("No profile found for this user.");
@@ -682,6 +697,8 @@ export default function FixturePage() {
             )}
           </div>
         </section>
+
+        <FinalsFixtureSection />
       </div>
     </main>
   );

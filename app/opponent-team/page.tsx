@@ -5,6 +5,14 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
+import {
+  buildFinalsBracket,
+  FINALS_TEAM_NAMES,
+  getFinalsWeekForAflRound,
+  getFinalsWeekForCompetitionRound,
+  type FinalsResult,
+  type RegularSeasonResult,
+} from "../../lib/finals";
 
 type LoginSession = {
   userId: string;
@@ -23,6 +31,7 @@ type UserProfileRow = {
 
 type AppSettingsRow = {
   current_afl_round: number | string | null;
+  current_super8_round: number | string | null;
 };
 
 type FixtureRow = {
@@ -793,6 +802,9 @@ export default function OpponentTeamPage() {
   const [message, setMessage] = useState("");
   const [selectedCoachId, setSelectedCoachId] = useState<number | null>(null);
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
+  const [currentSuper8Round, setCurrentSuper8Round] = useState<number | null>(null);
+  const [regularResults, setRegularResults] = useState<RegularSeasonResult[]>([]);
+  const [finalsResults, setFinalsResults] = useState<FinalsResult[]>([]);
   const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
   const [roundSubmissions, setRoundSubmissions] = useState<RoundSubmissionRow[]>([]);
   const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
@@ -804,14 +816,28 @@ export default function OpponentTeamPage() {
       .select("id, role, coach_id, coach_name")
       .eq("id", userId)
       .eq("environment", APP_ENV)
-      .single();
+      .maybeSingle();
 
     if (error) {
       setMessage(`Profile load failed: ${error.message}`);
       return null;
     }
 
-    const profile = data as UserProfileRow | null;
+    let profile = data as UserProfileRow | null;
+
+    if (!profile && APP_ENV === "preview") {
+      const { data: productionData, error: productionError } = await supabase
+        .from("profiles")
+        .select("id, role, coach_id, coach_name")
+        .eq("id", userId)
+        .eq("environment", "production")
+        .maybeSingle();
+      if (productionError) {
+        setMessage(`Profile load failed: ${productionError.message}`);
+        return null;
+      }
+      profile = productionData as UserProfileRow | null;
+    }
 
     if (!profile) {
       setMessage("No profile found for this user.");
@@ -837,7 +863,7 @@ export default function OpponentTeamPage() {
   const refreshCurrentRound = useCallback(async () => {
     const { data, error } = await supabase
       .from("app_settings")
-      .select("current_afl_round")
+      .select("current_afl_round, current_super8_round")
       .eq("environment", APP_ENV)
       .maybeSingle();
 
@@ -849,9 +875,26 @@ export default function OpponentTeamPage() {
 
     const row = data as AppSettingsRow | null;
     const round = toNullableNumber(row?.current_afl_round ?? null);
+    setCurrentSuper8Round(toNullableNumber(row?.current_super8_round ?? null));
 
     setCurrentAflRound(round);
     return round;
+  }, []);
+
+  const refreshFinals = useCallback(async () => {
+    const [regular, finals] = await Promise.all([
+      supabase
+        .from("super8_match_results")
+        .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
+        .lte("round_number", 14),
+      supabase
+        .from("finals_results")
+        .select("match_code, coach_1_score, coach_2_score")
+        .eq("environment", APP_ENV)
+        .eq("season_year", new Date().getFullYear()),
+    ]);
+    setRegularResults((regular.data ?? []) as RegularSeasonResult[]);
+    if (!finals.error) setFinalsResults((finals.data ?? []) as FinalsResult[]);
   }, []);
 
   const refreshFixtureRows = useCallback(async (aflRound: number | null) => {
@@ -985,10 +1028,11 @@ export default function OpponentTeamPage() {
       refreshFixtureRows(aflRound),
       refreshRoundSubmissions(),
       refreshPlayerStats(aflRound),
+      refreshFinals(),
     ]);
 
     setIsLoadingPageData(false);
-  }, [refreshCurrentRound, refreshFixtureRows, refreshPlayerStats, refreshRoundSubmissions]);
+  }, [refreshCurrentRound, refreshFinals, refreshFixtureRows, refreshPlayerStats, refreshRoundSubmissions]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1188,11 +1232,63 @@ export default function OpponentTeamPage() {
       matches.push(view);
     }
 
+    const finalsWeek =
+      getFinalsWeekForCompetitionRound(currentSuper8Round) ??
+      getFinalsWeekForAflRound(currentAflRound);
+    if (finalsWeek) {
+      const bracket = buildFinalsBracket(regularResults, finalsResults);
+      const finalsMatches = bracket.matches.filter((match) => match.week === finalsWeek);
+      const coachByName = new Map<string, { id: number; name: string }>();
+      for (const coach of availableCoaches) {
+        coachByName.set(coach.name.trim().toLowerCase(), coach);
+        const teamName = FINALS_TEAM_NAMES[coach.id];
+        if (teamName) coachByName.set(teamName.trim().toLowerCase(), coach);
+      }
+
+      for (const finalsMatch of finalsMatches) {
+        if (!finalsMatch.home || !finalsMatch.away) continue;
+        const home = coachByName.get(finalsMatch.home.name.trim().toLowerCase());
+        const away = coachByName.get(finalsMatch.away.name.trim().toLowerCase());
+        if (!home || !away || (selectedCoachId !== home.id && selectedCoachId !== away.id)) continue;
+        const selectedIsHome = selectedCoachId === home.id;
+        const fixture: FixtureRow = {
+          id: -finalsWeek,
+          environment: APP_ENV,
+          competition_round: currentSuper8Round ?? 14 + finalsWeek,
+          afl_round: currentAflRound ?? 0,
+          matchup_index: finalsMatches.indexOf(finalsMatch) + 1,
+          coach_id: home.id,
+          coach_name: home.name,
+          opponent_coach_id: away.id,
+          opponent_coach_name: away.name,
+        };
+        matches.push({
+          key: `finals-${finalsMatch.code}-${selectedCoachId}`,
+          fixture,
+          roundNumber: fixture.competition_round,
+          aflRound: fixture.afl_round,
+          matchupIndex: fixture.matchup_index,
+          selectedCoachId,
+          selectedCoachName: selectedIsHome ? home.name : away.name,
+          opponentCoachId: selectedIsHome ? away.id : home.id,
+          opponentCoachName: selectedIsHome ? away.name : home.name,
+        });
+      }
+    }
+
     return matches.sort((a, b) => {
       if (a.roundNumber !== b.roundNumber) return a.roundNumber - b.roundNumber;
       return a.matchupIndex - b.matchupIndex;
     });
-  }, [fixtureRows, selectedCoachId]);
+  }, [
+    availableCoaches,
+    currentAflRound,
+    currentSuper8Round,
+    finalsResults,
+    fixtureRows,
+    regularResults,
+    selectedCoachId,
+  ]);
 
 
   const submissionByRoundAndCoach = useMemo(() => {

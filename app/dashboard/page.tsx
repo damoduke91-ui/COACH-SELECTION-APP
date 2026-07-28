@@ -2178,12 +2178,12 @@ async function handleExportTeamsXlsx() {
           </Link>
 
           <Link
-            href="/records"
-            className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10"
+            href="/finals"
+            className="rounded-2xl border border-yellow-300/25 bg-yellow-300/10 p-5 transition hover:bg-yellow-300/20"
           >
-            <div className="text-lg font-bold">Records</div>
-            <div className="mt-2 text-sm text-white/75">
-              Placeholder page for season and historical records.
+            <div className="text-lg font-bold text-yellow-200">Finals</div>
+            <div className="mt-2 text-sm text-yellow-100/75">
+              Follow the top-five premiership race.
             </div>
           </Link>
         </section>
