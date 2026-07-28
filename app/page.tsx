@@ -32,6 +32,13 @@ export default function HomePage() {
           >
             View Selection Page
           </Link>
+
+          <Link
+            href="/finals"
+            className="rounded-xl border border-yellow-300/50 bg-yellow-300/10 px-6 py-3 font-semibold text-yellow-200 transition hover:bg-yellow-300/20"
+          >
+            Finals
+          </Link>
         </div>
 
         <div className="mt-12 w-full max-w-5xl rounded-3xl border border-slate-800 bg-slate-900/80 p-6 text-left shadow-2xl">

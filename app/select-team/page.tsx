@@ -9,6 +9,12 @@ import {
   getPlayersForCoach,
 } from "../../lib/playersByCoach";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import {
+  buildFinalsSeeds,
+  FINALS_TEAM_NAMES,
+  getFinalsWeekForAflRound,
+  getFinalsWeekForCompetitionRound,
+} from "../../lib/finals";
 
 type PositionState = {
   onField: string[];
@@ -1037,6 +1043,10 @@ export default function SelectTeamPage() {
   const [lockoutScheduleAt, setLockoutScheduleAt] = useState<string | null>(null);
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
   const [currentSuper8Round, setCurrentSuper8Round] = useState<number | null>(null);
+  const [finalsWeekOneEligibleNames, setFinalsWeekOneEligibleNames] = useState<Set<string>>(
+    new Set(),
+  );
+  const [isFinalsWeekOne, setIsFinalsWeekOne] = useState(false);
   const [weeklyTeamListRows, setWeeklyTeamListRows] = useState<TeamListRow[]>([]);
   const [weeklyTeamListError, setWeeklyTeamListError] = useState("");
   const [isLoadingWeeklyTeamLists, setIsLoadingWeeklyTeamLists] = useState(false);
@@ -1109,7 +1119,11 @@ export default function SelectTeamPage() {
       !isLoadingTeam &&
       canViewSelectedCoach &&
       !Boolean(submittedCoachIds[selectedCoach.id]) &&
-      (isAdmin || !isTeamLocked)
+      (isAdmin || !isTeamLocked) &&
+      (!isFinalsWeekOne ||
+        finalsWeekOneEligibleNames.has(
+          (FINALS_TEAM_NAMES[selectedCoach.id] ?? selectedCoach.name).trim().toLowerCase(),
+        ))
   );
 
   const canUnlockSelectedCoach = Boolean(
@@ -1170,14 +1184,28 @@ export default function SelectTeamPage() {
         .select("id, role, coach_id, coach_name")
         .eq("id", userId)
         .eq("environment", APP_ENV)
-        .single();
+        .maybeSingle();
 
       if (error) {
         setLoginError(`Profile load failed: ${error.message}`);
         return null;
       }
 
-      const profile = data as UserProfileRow | null;
+      let profile = data as UserProfileRow | null;
+
+      if (!profile && APP_ENV === "preview") {
+        const { data: productionData, error: productionError } = await supabase
+          .from("profiles")
+          .select("id, role, coach_id, coach_name")
+          .eq("id", userId)
+          .eq("environment", "production")
+          .maybeSingle();
+        if (productionError) {
+          setLoginError(`Profile load failed: ${productionError.message}`);
+          return null;
+        }
+        profile = productionData as UserProfileRow | null;
+      }
 
       if (!profile) {
         setLoginError("No profile found for this user.");
@@ -1418,7 +1446,7 @@ export default function SelectTeamPage() {
 
       const { error: upsertError } = await supabase
         .from("round_submissions")
-        .upsert(snapshotRows, { onConflict: "coach_id,round_number" });
+        .upsert(snapshotRows, { onConflict: "coach_id,round_number,environment" });
 
       if (upsertError) {
         setSubmitMessage(`Auto snapshot save failed: ${upsertError.message}`);
@@ -1449,6 +1477,37 @@ export default function SelectTeamPage() {
       isMounted = false;
     };
   }, [applyAppSettings]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadFinalsEligibility() {
+      const weekOneActive =
+        getFinalsWeekForCompetitionRound(currentSuper8Round) === 1 ||
+        getFinalsWeekForAflRound(currentAflRound) === 1;
+      if (mounted) setIsFinalsWeekOne(weekOneActive);
+
+      if (!weekOneActive) {
+        if (mounted) setFinalsWeekOneEligibleNames(new Set());
+        return;
+      }
+      const { data } = await supabase
+        .from("super8_match_results")
+        .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
+        .lte("round_number", 14);
+      if (!mounted) return;
+      setFinalsWeekOneEligibleNames(
+        new Set(
+          buildFinalsSeeds(data ?? [])
+            .filter((team) => team.seed !== 1)
+            .map((team) => team.name.trim().toLowerCase()),
+        ),
+      );
+    }
+    void loadFinalsEligibility();
+    return () => {
+      mounted = false;
+    };
+  }, [currentAflRound, currentSuper8Round]);
 
   useEffect(() => {
     let isMounted = true;
@@ -2260,7 +2319,7 @@ export default function SelectTeamPage() {
 
         const { error: snapshotError } = await supabase
           .from("round_submissions")
-          .upsert(snapshotPayload, { onConflict: "coach_id,round_number" });
+          .upsert(snapshotPayload, { onConflict: "coach_id,round_number,environment" });
 
         if (snapshotError) {
           setSubmitMessage(`Team submitted, but snapshot save failed: ${snapshotError.message}`);
@@ -2915,6 +2974,17 @@ export default function SelectTeamPage() {
                 </div>
               </div>
             </div>
+          </section>
+        ) : null}
+
+        {isFinalsWeekOne &&
+        selectedCoach &&
+        !finalsWeekOneEligibleNames.has(
+          (FINALS_TEAM_NAMES[selectedCoach.id] ?? selectedCoach.name).trim().toLowerCase(),
+        ) ? (
+          <section className="rounded-2xl border border-yellow-300/30 bg-yellow-300/10 p-4 text-sm text-yellow-100">
+            Finals Week 1 selection is available only to teams seeded 2nd–5th.
+            The 1st-placed team has the week off.
           </section>
         ) : null}
 
