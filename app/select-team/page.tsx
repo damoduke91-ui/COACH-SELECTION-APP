@@ -1446,7 +1446,7 @@ export default function SelectTeamPage() {
 
       const { error: upsertError } = await supabase
         .from("round_submissions")
-        .upsert(snapshotRows, { onConflict: "coach_id,round_number" });
+        .upsert(snapshotRows, { onConflict: "coach_id,round_number,environment" });
 
       if (upsertError) {
         setSubmitMessage(`Auto snapshot save failed: ${upsertError.message}`);
@@ -2319,7 +2319,7 @@ export default function SelectTeamPage() {
 
         const { error: snapshotError } = await supabase
           .from("round_submissions")
-          .upsert(snapshotPayload, { onConflict: "coach_id,round_number" });
+          .upsert(snapshotPayload, { onConflict: "coach_id,round_number,environment" });
 
         if (snapshotError) {
           setSubmitMessage(`Team submitted, but snapshot save failed: ${snapshotError.message}`);
