@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import * as coachConfigModule from "../../lib/coachConfig";
+import {
+  FINALS_AFL_ROUNDS,
+  getFinalsWeekForAflRound,
+  getFinalsWeekForCompetitionRound,
+} from "../../lib/finals";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
 import { APP_ENV, supabase } from "../../lib/supabase";
 
@@ -72,6 +77,7 @@ type AllCoachExportRow = {
 type AppSettingsRow = {
   environment: "production" | "preview";
   current_afl_round: number | null;
+  current_super8_round: number | null;
 };
 
 type AflRoundFinalisationRow = {
@@ -308,10 +314,17 @@ function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
       : typeof row.current_afl_round === "string"
         ? Number(row.current_afl_round)
         : null;
+  const parsedSuper8Round =
+    typeof row.current_super8_round === "number"
+      ? row.current_super8_round
+      : typeof row.current_super8_round === "string"
+        ? Number(row.current_super8_round)
+        : null;
 
   return {
     environment: APP_ENV,
     current_afl_round: Number.isFinite(parsedRound) ? parsedRound : null,
+    current_super8_round: Number.isFinite(parsedSuper8Round) ? parsedSuper8Round : null,
   };
 }
 
@@ -565,12 +578,14 @@ export default function DashboardPage() {
   const [message, setMessage] = useState("");
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
+  const [currentSuper8RoundSetting, setCurrentSuper8RoundSetting] = useState<number | null>(null);
   const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
   const [nextFixtureRows, setNextFixtureRows] = useState<FixtureRow[]>([]);
   const [isLoadingFixture, setIsLoadingFixture] = useState(false);
   const [currentRoundFinalisation, setCurrentRoundFinalisation] =
     useState<AflRoundFinalisationRow | null>(null);
 const [roundInput, setRoundInput] = useState("1");
+const [roundStageInput, setRoundStageInput] = useState("manual");
 const [isSavingRound, setIsSavingRound] = useState(false);
 const [isCompletingWeek, setIsCompletingWeek] = useState(false);
 const [isClearingLiveScores, setIsClearingLiveScores] = useState(false);
@@ -663,7 +678,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
   const refreshCurrentRound = useCallback(async () => {
     const { data, error } = await supabase
       .from("app_settings")
-      .select("environment, current_afl_round")
+      .select("environment, current_afl_round, current_super8_round")
       .eq("environment", APP_ENV)
       .maybeSingle();
 
@@ -675,7 +690,12 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
 
     const settings = normaliseAppSettingsRow(data);
     setCurrentAflRound(settings.current_afl_round);
+    setCurrentSuper8RoundSetting(settings.current_super8_round);
     setRoundInput(String(settings.current_afl_round ?? 1));
+    const finalsWeek =
+      getFinalsWeekForCompetitionRound(settings.current_super8_round) ??
+      getFinalsWeekForAflRound(settings.current_afl_round);
+    setRoundStageInput(finalsWeek ? `finals-${finalsWeek}` : "manual");
 
     return settings.current_afl_round;
   }, []);
@@ -839,7 +859,11 @@ const refreshPlayerStats = useCallback(async () => {
       return;
     }
 
-    const parsedRound = Number(roundInput);
+    const finalsWeekMatch = /^finals-([1-4])$/.exec(roundStageInput);
+    const finalsWeek = finalsWeekMatch ? Number(finalsWeekMatch[1]) : null;
+    const parsedRound = finalsWeek
+      ? FINALS_AFL_ROUNDS[finalsWeek - 1]
+      : Number(roundInput);
 
     if (!Number.isInteger(parsedRound) || parsedRound < 1) {
       setMessage("Please enter a valid AFL round number.");
@@ -849,16 +873,40 @@ const refreshPlayerStats = useCallback(async () => {
     setIsSavingRound(true);
     setMessage("");
 
+    let nextSuper8Round = finalsWeek ? 14 + finalsWeek : currentSuper8RoundSetting;
+
+    if (!finalsWeek) {
+      const { data: fixtureData, error: fixtureError } = await supabase
+        .from("season_fixture")
+        .select("competition_round")
+        .eq("environment", APP_ENV)
+        .eq("afl_round", parsedRound)
+        .order("competition_round", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (fixtureError) {
+        setMessage(`Round mapping load failed: ${fixtureError.message}`);
+        setIsSavingRound(false);
+        return;
+      }
+
+      if (fixtureData?.competition_round) {
+        nextSuper8Round = Number(fixtureData.competition_round);
+      }
+    }
+
     const payload = {
       environment: APP_ENV,
       current_afl_round: parsedRound,
+      current_super8_round: nextSuper8Round,
     };
 
     const { error: updateError, data: updateData } = await supabase
       .from("app_settings")
       .update(payload)
       .eq("environment", APP_ENV)
-      .select("environment, current_afl_round");
+      .select("environment, current_afl_round, current_super8_round");
 
     if (updateError) {
       setMessage(`AFL round save failed: ${updateError.message}`);
@@ -879,14 +927,26 @@ const refreshPlayerStats = useCallback(async () => {
     }
 
     setCurrentAflRound(parsedRound);
+    setCurrentSuper8RoundSetting(nextSuper8Round);
     setRoundInput(String(parsedRound));
     await Promise.all([
       refreshFixtureForRound(parsedRound),
       refreshRoundFinalisation(parsedRound),
     ]);
-    setMessage(`Current AFL round updated to ${parsedRound}.`);
+    setMessage(
+      finalsWeek
+        ? `Round Control updated to Finals Week ${finalsWeek} (Super 8 Round ${nextSuper8Round}, AFL Round ${parsedRound}).`
+        : `Current round updated to Super 8 Round ${nextSuper8Round ?? "not mapped"}, AFL Round ${parsedRound}.`,
+    );
     setIsSavingRound(false);
-  }, [loginSession?.role, refreshFixtureForRound, refreshRoundFinalisation, roundInput]);
+  }, [
+    currentSuper8RoundSetting,
+    loginSession?.role,
+    refreshFixtureForRound,
+    refreshRoundFinalisation,
+    roundInput,
+    roundStageInput,
+  ]);
 
 
 
@@ -1961,6 +2021,9 @@ async function handleExportTeamsXlsx() {
   );
   const isCurrentRoundCsvReady =
     currentRoundImportedClubCodes.size >= EXPECTED_AFL_CLUB_COUNT;
+  const currentFinalsWeek =
+    getFinalsWeekForCompetitionRound(currentSuper8RoundSetting) ??
+    getFinalsWeekForAflRound(currentAflRound);
 
   const dashboardTitle = useMemo(() => {
     if (!loginSession) return "Dashboard";
@@ -2193,18 +2256,47 @@ async function handleExportTeamsXlsx() {
             <section className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-6">
               <h2 className="text-2xl font-bold">Round Control</h2>
               <p className="mt-1 text-sm text-white/70">
-                Update the AFL round used by the opponent team screen.
+                Update the competition stage and AFL round used by team selection and live scores.
               </p>
 
               <div className="mt-4 grid gap-4 lg:grid-cols-[220px_180px_1fr] lg:items-end">
-                <div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-white/80" htmlFor="round-stage">
+                      Competition Stage
+                    </label>
+                    <select
+                      id="round-stage"
+                      value={roundStageInput}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setRoundStageInput(value);
+                        const match = /^finals-([1-4])$/.exec(value);
+                        if (match) {
+                          const finalsWeek = Number(match[1]);
+                          setRoundInput(String(FINALS_AFL_ROUNDS[finalsWeek - 1]));
+                        }
+                      }}
+                      className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
+                    >
+                      <option value="manual">Regular Season / Manual</option>
+                      <option value="finals-1">Finals Week 1 — AFL Round 21</option>
+                      <option value="finals-2">Finals Week 2 — AFL Round 22</option>
+                      <option value="finals-3">Finals Week 3 — AFL Round 23</option>
+                      <option value="finals-4">Finals Week 4 — AFL Round 24</option>
+                    </select>
+                  </div>
                   <div className="mb-2 text-sm font-medium text-white/80">Current AFL Round</div>
                   <input
                     type="number"
                     min={1}
                     step={1}
                     value={roundInput}
-                    onChange={(e) => setRoundInput(e.target.value)}
+                    onChange={(e) => {
+                      setRoundInput(e.target.value);
+                      setRoundStageInput("manual");
+                    }}
+                    readOnly={roundStageInput !== "manual"}
                     className="w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-white outline-none"
                   />
                 </div>
@@ -2226,7 +2318,7 @@ async function handleExportTeamsXlsx() {
                     }
                     className="rounded-xl border border-yellow-400/30 bg-yellow-500/20 px-4 py-3 text-sm font-semibold text-yellow-100 transition hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {isSavingRound ? "Saving..." : "Save AFL Round"}
+                    {isSavingRound ? "Saving..." : "Save Round Settings"}
                   </button>
 
                   {APP_ENV === "preview" && (
@@ -2393,6 +2485,7 @@ async function handleExportTeamsXlsx() {
                       isImportingPreviewCsv ||
                       isDeletingPreviewStats ||
                       isDeletingProductionCsv ||
+                      currentFinalsWeek !== null ||
                       currentRoundStatus !== "FINAL" ||
                       !isCurrentRoundCsvReady
                     }
@@ -2408,7 +2501,9 @@ async function handleExportTeamsXlsx() {
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-3">
                     <span className="text-lg font-bold">
-                      AFL Round {currentAflRound ?? "Not set"}
+                      {currentFinalsWeek
+                        ? `Finals Week ${currentFinalsWeek} • AFL Round ${currentAflRound ?? "Not set"}`
+                        : `AFL Round ${currentAflRound ?? "Not set"}`}
                     </span>
                     <span
                       className={`rounded-full border px-3 py-1 text-xs font-bold ${
@@ -2421,8 +2516,16 @@ async function handleExportTeamsXlsx() {
                     </span>
                   </div>
                   <div className="mt-1 text-sm text-white/70">
+                    Super 8 Round {currentSuper8RoundSetting ?? "Not set"}
+                  </div>
+                  <div className="mt-1 text-sm text-white/70">
                     {currentRoundFinalMatchCount}/{currentRoundExpectedMatchCount} AFL matches final
                   </div>
+                  {currentFinalsWeek ? (
+                    <div className="mt-2 text-xs font-semibold text-yellow-200">
+                      Finals progression is controlled from the Finals page. Regular-season completion is disabled.
+                    </div>
+                  ) : null}
                   <div className="mt-1 text-sm text-white/70">
                     {currentRoundImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} AFL clubs imported
                   </div>
