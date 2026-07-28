@@ -7,11 +7,16 @@ import {
   buildFinalsBracket,
   displayFinalsTeam,
   FINALS_AFL_ROUNDS,
+  FINALS_TEAM_NAMES,
   type FinalsMatch,
   type FinalsMatchCode,
   type FinalsResult,
   type RegularSeasonResult,
 } from "../../lib/finals";
+import {
+  calculateFinalsLiveScore,
+  type FinalsLiveStat,
+} from "../../lib/finalsLiveScores";
 import { APP_ENV, supabase } from "../../lib/supabase";
 
 function TeamLine({
@@ -42,7 +47,7 @@ function TeamLine({
           aria-label={`View ${displayFinalsTeam(team, fallback)} score for finals week ${week}`}
           className="min-w-20 rounded px-1 py-0.5 text-right font-black underline decoration-yellow-700/50 underline-offset-2 hover:bg-yellow-300/50 hover:decoration-yellow-950"
         >
-          {score ?? "View score"}
+          {score ?? "—"}
         </Link>
       ) : (
         <span className="min-w-8 text-right font-black">{score ?? "—"}</span>
@@ -68,12 +73,19 @@ export default function FinalsPage() {
   const [role, setRole] = useState<"admin" | "coach" | null>(null);
   const [regularResults, setRegularResults] = useState<RegularSeasonResult[]>([]);
   const [finalsResults, setFinalsResults] = useState<FinalsResult[]>([]);
+  const [submissions, setSubmissions] = useState<Array<{
+    coach_id: number;
+    coach_name: string;
+    round_number: number;
+    team_data: Record<string, { onField?: string[]; emergencies?: string[] }>;
+  }>>([]);
+  const [liveStats, setLiveStats] = useState<FinalsLiveStat[]>([]);
   const [message, setMessage] = useState("");
   const [savingCode, setSavingCode] = useState<FinalsMatchCode | null>(null);
   const [drafts, setDrafts] = useState<Partial<Record<FinalsMatchCode, [string, string]>>>({});
 
   const refresh = useCallback(async () => {
-    const [regular, finals] = await Promise.all([
+    const [regular, finals, submissionRows, statRows] = await Promise.all([
       supabase
         .from("super8_match_results")
         .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
@@ -83,6 +95,18 @@ export default function FinalsPage() {
         .select("match_code, coach_1_score, coach_2_score")
         .eq("environment", APP_ENV)
         .eq("season_year", new Date().getFullYear()),
+      supabase
+        .from("round_submissions")
+        .select("coach_id, coach_name, round_number, team_data")
+        .eq("environment", APP_ENV)
+        .eq("is_submitted", true)
+        .gte("round_number", 15)
+        .lte("round_number", 18),
+      supabase
+        .from("afl_player_round_stats")
+        .select("afl_round, afl_team_code, player_name, d, m, g, b, t, ho, ff, fa")
+        .eq("environment", APP_ENV)
+        .in("afl_round", [...FINALS_AFL_ROUNDS]),
     ]);
     if (regular.error) setMessage(`Finals ladder load failed: ${regular.error.message}`);
     else setRegularResults((regular.data ?? []) as RegularSeasonResult[]);
@@ -92,6 +116,8 @@ export default function FinalsPage() {
     } else {
       setFinalsResults((finals.data ?? []) as FinalsResult[]);
     }
+    if (!submissionRows.error) setSubmissions((submissionRows.data ?? []) as typeof submissions);
+    if (!statRows.error) setLiveStats((statRows.data ?? []) as FinalsLiveStat[]);
   }, []);
 
   useEffect(() => {
@@ -126,12 +152,62 @@ export default function FinalsPage() {
     };
   }, [refresh, router]);
 
+  useEffect(() => {
+    if (!role) return;
+    const channel = supabase
+      .channel(`finals-live-${APP_ENV}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "round_submissions" }, () => {
+        void refresh();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "afl_player_round_stats" }, () => {
+        void refresh();
+      })
+      .subscribe();
+    const timer = window.setInterval(() => void refresh(), 30_000);
+    return () => {
+      window.clearInterval(timer);
+      void supabase.removeChannel(channel);
+    };
+  }, [refresh, role]);
+
   const bracket = useMemo(
     () => buildFinalsBracket(regularResults, finalsResults),
     [finalsResults, regularResults],
   );
   const match = (code: FinalsMatchCode) =>
     bracket.matches.find((item) => item.code === code)!;
+  const liveScores = useMemo(() => {
+    const scores = new Map<string, number>();
+    for (const [index, aflRound] of FINALS_AFL_ROUNDS.entries()) {
+      const roundNumber = 15 + index;
+      for (const submission of submissions.filter((row) => row.round_number === roundNumber)) {
+        const teamName = FINALS_TEAM_NAMES[submission.coach_id] ?? submission.coach_name;
+        scores.set(
+          `${index + 1}:${teamName.trim().toLowerCase()}`,
+          calculateFinalsLiveScore({
+            coachId: submission.coach_id,
+            coachName: submission.coach_name,
+            teamData: submission.team_data,
+            stats: liveStats,
+            aflRound,
+          }),
+        );
+      }
+    }
+    return scores;
+  }, [liveStats, submissions]);
+
+  const withLiveScores = (finalsMatch: FinalsMatch): FinalsMatch => ({
+    ...finalsMatch,
+    homeScore:
+      (finalsMatch.home
+        ? liveScores.get(`${finalsMatch.week}:${finalsMatch.home.name.trim().toLowerCase()}`)
+        : undefined) ?? finalsMatch.homeScore,
+    awayScore:
+      (finalsMatch.away
+        ? liveScores.get(`${finalsMatch.week}:${finalsMatch.away.name.trim().toLowerCase()}`)
+        : undefined) ?? finalsMatch.awayScore,
+  });
 
   async function saveResult(finalsMatch: FinalsMatch) {
     const draft = drafts[finalsMatch.code] ?? [
@@ -218,12 +294,12 @@ export default function FinalsPage() {
                 <h3 className="bg-yellow-300 px-3 py-2 text-center text-sm font-black italic text-neutral-950">Week Off</h3>
                 <TeamLine team={bracket.bye} score={null} fallback="1st place" week={1} linkToScore={false} />
               </article>
-              <MatchCard match={match("QF")} />
-              <MatchCard match={match("EF")} />
+              <MatchCard match={withLiveScores(match("QF"))} />
+              <MatchCard match={withLiveScores(match("EF"))} />
             </div>
-            <div className="space-y-16 pt-10"><MatchCard match={match("SF1")} /><MatchCard match={match("SF2")} /></div>
-            <div className="pt-28"><MatchCard match={match("PF")} /></div>
-            <div className="pt-28"><MatchCard match={match("GF")} /></div>
+            <div className="space-y-16 pt-10"><MatchCard match={withLiveScores(match("SF1"))} /><MatchCard match={withLiveScores(match("SF2"))} /></div>
+            <div className="pt-28"><MatchCard match={withLiveScores(match("PF"))} /></div>
+            <div className="pt-28"><MatchCard match={withLiveScores(match("GF"))} /></div>
           </div>
         </section>
 
