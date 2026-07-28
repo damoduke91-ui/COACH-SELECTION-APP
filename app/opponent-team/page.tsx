@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { COACHES } from "../../lib/coachConfig";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
 import {
@@ -1183,6 +1184,10 @@ export default function OpponentTeamPage() {
   const availableCoaches = useMemo(() => {
     const map = new Map<number, string>();
 
+    for (const coach of COACHES) {
+      map.set(coach.id, coach.name);
+    }
+
     for (const row of fixtureRows) {
       map.set(row.coach_id, row.coach_name);
       map.set(row.opponent_coach_id, row.opponent_coach_name);
@@ -1198,6 +1203,23 @@ export default function OpponentTeamPage() {
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.id - b.id);
   }, [fixtureRows, roundSubmissions]);
+
+  useEffect(() => {
+    if (loginSession?.role !== "admin" || availableCoaches.length === 0) return;
+
+    const requestedCoachName = new URLSearchParams(window.location.search)
+      .get("coachName")
+      ?.trim()
+      .toLowerCase();
+    if (!requestedCoachName) return;
+
+    const requestedCoach = availableCoaches.find((coach) => {
+      const teamName = FINALS_TEAM_NAMES[coach.id]?.trim().toLowerCase();
+      return coach.name.trim().toLowerCase() === requestedCoachName || teamName === requestedCoachName;
+    });
+
+    if (requestedCoach) setSelectedCoachId(requestedCoach.id);
+  }, [availableCoaches, loginSession?.role]);
 
   useEffect(() => {
     if (selectedCoachId || availableCoaches.length === 0) return;
@@ -1381,6 +1403,26 @@ export default function OpponentTeamPage() {
           {message ? (
             <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
               {message}
+            </div>
+          ) : null}
+
+          {canChangeCoach ? (
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+              <label htmlFor="live-score-coach" className="text-sm font-semibold text-white/70">
+                View coach
+              </label>
+              <select
+                id="live-score-coach"
+                value={selectedCoachId ?? ""}
+                onChange={(event) => setSelectedCoachId(Number(event.target.value))}
+                className="min-w-56 rounded-xl border border-white/10 bg-neutral-900 px-4 py-2 text-sm font-semibold text-white outline-none"
+              >
+                {availableCoaches.map((coach) => (
+                  <option key={coach.id} value={coach.id}>
+                    {FINALS_TEAM_NAMES[coach.id] ?? coach.name} — {coach.name}
+                  </option>
+                ))}
+              </select>
             </div>
           ) : null}
         </section>
