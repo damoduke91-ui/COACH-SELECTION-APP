@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   buildFinalsBracket,
   displayFinalsTeam,
+  FINALS_AFL_ROUNDS,
   type FinalsMatch,
   type FinalsMatchCode,
   type FinalsResult,
@@ -17,15 +18,35 @@ function TeamLine({
   team,
   score,
   fallback,
+  week,
+  linkToScore = true,
 }: {
   team: FinalsMatch["home"];
   score: number | null;
   fallback: string;
+  week: number;
+  linkToScore?: boolean;
 }) {
+  const aflRound = FINALS_AFL_ROUNDS[week - 1];
+  const scoreHref =
+    team && aflRound
+      ? `/opponent-team?coachName=${encodeURIComponent(team.name)}&competitionRound=${14 + week}&aflRound=${aflRound}`
+      : null;
+
   return (
     <div className="flex min-h-10 items-center justify-between gap-3 border-t border-yellow-950/20 bg-yellow-100 px-3 py-2 text-sm font-semibold text-neutral-950">
       <span>{displayFinalsTeam(team, fallback)}</span>
-      <span className="min-w-8 text-right font-black">{score ?? "—"}</span>
+      {scoreHref && linkToScore ? (
+        <Link
+          href={scoreHref}
+          aria-label={`View ${displayFinalsTeam(team, fallback)} score for finals week ${week}`}
+          className="min-w-20 rounded px-1 py-0.5 text-right font-black underline decoration-yellow-700/50 underline-offset-2 hover:bg-yellow-300/50 hover:decoration-yellow-950"
+        >
+          {score ?? "View score"}
+        </Link>
+      ) : (
+        <span className="min-w-8 text-right font-black">{score ?? "—"}</span>
+      )}
     </div>
   );
 }
@@ -36,8 +57,8 @@ function MatchCard({ match }: { match: FinalsMatch }) {
       <h3 className="bg-yellow-300 px-3 py-2 text-center text-sm font-black italic text-neutral-950">
         {match.label}
       </h3>
-      <TeamLine team={match.home} score={match.homeScore} fallback="To be decided" />
-      <TeamLine team={match.away} score={match.awayScore} fallback="To be decided" />
+      <TeamLine team={match.home} score={match.homeScore} fallback="To be decided" week={match.week} />
+      <TeamLine team={match.away} score={match.awayScore} fallback="To be decided" week={match.week} />
     </article>
   );
 }
@@ -195,7 +216,7 @@ export default function FinalsPage() {
             <div className="space-y-8">
               <article className="overflow-hidden rounded-md border-2 border-yellow-300">
                 <h3 className="bg-yellow-300 px-3 py-2 text-center text-sm font-black italic text-neutral-950">Week Off</h3>
-                <TeamLine team={bracket.bye} score={null} fallback="1st place" />
+                <TeamLine team={bracket.bye} score={null} fallback="1st place" week={1} linkToScore={false} />
               </article>
               <MatchCard match={match("QF")} />
               <MatchCard match={match("EF")} />
