@@ -82,6 +82,7 @@ export default function FinalsPage() {
   const [liveStats, setLiveStats] = useState<FinalsLiveStat[]>([]);
   const [message, setMessage] = useState("");
   const [savingCode, setSavingCode] = useState<FinalsMatchCode | null>(null);
+  const [completingWeek, setCompletingWeek] = useState(false);
   const [drafts, setDrafts] = useState<Partial<Record<FinalsMatchCode, [string, string]>>>({});
 
   const refresh = useCallback(async () => {
@@ -264,6 +265,49 @@ export default function FinalsPage() {
     await refresh();
   }
 
+  async function completeFinalsWeek() {
+    if (
+      !window.confirm(
+        "Complete the current Finals week using the submitted teams and final AFL scores?",
+      )
+    ) {
+      return;
+    }
+
+    setCompletingWeek(true);
+    setMessage("");
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) {
+      setCompletingWeek(false);
+      router.replace("/login");
+      return;
+    }
+
+    try {
+      const result = await fetch("/api/admin/complete-finals-week", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+      const payload = (await result.json()) as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+      };
+      setMessage(payload.message ?? payload.error ?? "Finals completion returned no message.");
+      if (result.ok) await refresh();
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not complete the Finals week.",
+      );
+    } finally {
+      setCompletingWeek(false);
+    }
+  }
+
   if (!role) {
     return <main className="min-h-screen bg-neutral-950 p-8 text-white">Loading finals...</main>;
   }
@@ -309,6 +353,23 @@ export default function FinalsPage() {
         </section>
 
         {role === "admin" ? (
+          <>
+          <section className="rounded-2xl border border-yellow-300/30 bg-yellow-300/10 p-5">
+            <h2 className="text-xl font-bold text-yellow-300">Complete Finals Week</h2>
+            <p className="mt-1 text-sm text-white/70">
+              This verifies both teams submitted, all 18 AFL clubs are imported, saves the
+              live totals, advances the bracket, and moves Round Control to the next week.
+              Drawn or previously completed matchups are blocked.
+            </p>
+            <button
+              type="button"
+              onClick={() => void completeFinalsWeek()}
+              disabled={completingWeek}
+              className="mt-4 rounded-xl bg-yellow-300 px-5 py-3 font-black text-neutral-950 disabled:opacity-50"
+            >
+              {completingWeek ? "Checking and completing..." : "Complete Current Finals Week"}
+            </button>
+          </section>
           <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <h2 className="text-xl font-bold">Admin Finals Results</h2>
             <p className="mt-1 text-sm text-white/60">Saving a result automatically advances its winner and loser.</p>
@@ -348,6 +409,7 @@ export default function FinalsPage() {
               })}
             </div>
           </section>
+          </>
         ) : null}
       </div>
     </main>
