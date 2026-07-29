@@ -182,18 +182,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const stats = (statsQuery.data ?? []) as FinalsLiveStat[];
-    const importedClubs = new Set(
-      stats.map((stat) => normaliseClub(stat.afl_team_code)).filter(Boolean),
-    );
-    if (importedClubs.size < EXPECTED_AFL_CLUB_COUNT) {
-      return response(400, {
-        success: false,
-        error: `AFL Round ${aflRound} is not complete. ${importedClubs.size}/18 AFL clubs have been imported.`,
-        importedClubCount: importedClubs.size,
-      });
-    }
-
     const submissions = (submissionsQuery.data ?? []) as SubmissionRow[];
     const coachIdByTeam = new Map(
       Object.entries(FINALS_TEAM_NAMES).map(([coachId, teamName]) => [
@@ -206,6 +194,40 @@ export async function POST(request: NextRequest) {
     );
 
     const missingSubmissions: string[] = [];
+    for (const match of matches) {
+      if (!match?.home || !match.away) continue;
+      const homeCoachId = coachIdByTeam.get(match.home.name.trim().toLowerCase());
+      const awayCoachId = coachIdByTeam.get(match.away.name.trim().toLowerCase());
+      if (!homeCoachId || !submissionByCoach.has(homeCoachId)) {
+        missingSubmissions.push(match.home.name);
+      }
+      if (!awayCoachId || !submissionByCoach.has(awayCoachId)) {
+        missingSubmissions.push(match.away.name);
+      }
+    }
+
+    if (missingSubmissions.length > 0) {
+      return response(400, {
+        success: false,
+        error: `Both teams in every matchup must submit first. Missing: ${[
+          ...new Set(missingSubmissions),
+        ].join(", ")}.`,
+        missingSubmissions: [...new Set(missingSubmissions)],
+      });
+    }
+
+    const stats = (statsQuery.data ?? []) as FinalsLiveStat[];
+    const importedClubs = new Set(
+      stats.map((stat) => normaliseClub(stat.afl_team_code)).filter(Boolean),
+    );
+    if (importedClubs.size < EXPECTED_AFL_CLUB_COUNT) {
+      return response(400, {
+        success: false,
+        error: `AFL Round ${aflRound} is not complete. ${importedClubs.size}/18 AFL clubs have been imported.`,
+        importedClubCount: importedClubs.size,
+      });
+    }
+
     const resultRows: Array<{
       environment: string;
       season_year: number;
@@ -223,8 +245,6 @@ export async function POST(request: NextRequest) {
       const homeSubmission = homeCoachId ? submissionByCoach.get(homeCoachId) : undefined;
       const awaySubmission = awayCoachId ? submissionByCoach.get(awayCoachId) : undefined;
 
-      if (!homeSubmission) missingSubmissions.push(match.home.name);
-      if (!awaySubmission) missingSubmissions.push(match.away.name);
       if (!homeSubmission || !awaySubmission || !homeCoachId || !awayCoachId) continue;
 
       const homeScore = calculateFinalsLiveScore({
@@ -258,16 +278,6 @@ export async function POST(request: NextRequest) {
         coach_2_score: awayScore,
         completed_at: now,
         updated_at: now,
-      });
-    }
-
-    if (missingSubmissions.length > 0) {
-      return response(400, {
-        success: false,
-        error: `Both teams in every matchup must submit first. Missing: ${[
-          ...new Set(missingSubmissions),
-        ].join(", ")}.`,
-        missingSubmissions: [...new Set(missingSubmissions)],
       });
     }
 
