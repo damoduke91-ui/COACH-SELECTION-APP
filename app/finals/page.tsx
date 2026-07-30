@@ -86,7 +86,7 @@ export default function FinalsPage() {
   const [drafts, setDrafts] = useState<Partial<Record<FinalsMatchCode, [string, string]>>>({});
 
   const refresh = useCallback(async () => {
-    const [regular, finals, submissionRows, statRows] = await Promise.all([
+    const [regular, finals, submissionRows] = await Promise.all([
       supabase
         .from("super8_match_results")
         .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
@@ -103,12 +103,16 @@ export default function FinalsPage() {
         .eq("is_submitted", true)
         .gte("round_number", 15)
         .lte("round_number", 18),
-      supabase
-        .from("afl_player_round_stats")
-        .select("afl_round, afl_team_code, player_name, d, m, g, b, t, ho, ff, fa")
-        .eq("environment", APP_ENV)
-        .in("afl_round", [...FINALS_AFL_ROUNDS]),
     ]);
+    const statQueries = await Promise.all(
+      FINALS_AFL_ROUNDS.map((aflRound) =>
+        supabase
+          .from("afl_player_round_stats")
+          .select("afl_round, afl_team_code, player_name, d, m, g, b, t, ho, ff, fa")
+          .eq("environment", APP_ENV)
+          .eq("afl_round", aflRound),
+      ),
+    );
     if (regular.error) setMessage(`Finals ladder load failed: ${regular.error.message}`);
     else setRegularResults((regular.data ?? []) as RegularSeasonResult[]);
     if (finals.error) {
@@ -118,7 +122,14 @@ export default function FinalsPage() {
       setFinalsResults((finals.data ?? []) as FinalsResult[]);
     }
     if (!submissionRows.error) setSubmissions((submissionRows.data ?? []) as typeof submissions);
-    if (!statRows.error) setLiveStats((statRows.data ?? []) as FinalsLiveStat[]);
+    const statError = statQueries.find((query) => query.error)?.error;
+    if (statError) {
+      setMessage(`Finals live score load failed: ${statError.message}`);
+    } else {
+      setLiveStats(
+        statQueries.flatMap((query) => query.data ?? []) as FinalsLiveStat[],
+      );
+    }
   }, []);
 
   useEffect(() => {
