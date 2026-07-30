@@ -1315,29 +1315,19 @@ export default function OpponentTeamPage() {
 
   const submissionByRoundAndCoach = useMemo(() => {
     const exact = new Map<string, RoundSubmissionRow>();
-    const latestByCoach = new Map<number, RoundSubmissionRow>();
 
     for (const submission of roundSubmissions) {
       const exactKey = `${submission.round_number}-${submission.coach_id}`;
       if (!exact.has(exactKey)) {
         exact.set(exactKey, submission);
       }
-
-      const latest = latestByCoach.get(submission.coach_id);
-      if (!latest || new Date(submission.submitted_at).getTime() > new Date(latest.submitted_at).getTime()) {
-        latestByCoach.set(submission.coach_id, submission);
-      }
     }
 
-    return { exact, latestByCoach };
+    return exact;
   }, [roundSubmissions]);
 
   function getCoachSubmission(roundNumber: number, coachId: number): RoundSubmissionRow | null {
-    return (
-      submissionByRoundAndCoach.exact.get(`${roundNumber}-${coachId}`) ??
-      submissionByRoundAndCoach.latestByCoach.get(coachId) ??
-      null
-    );
+    return submissionByRoundAndCoach.get(`${roundNumber}-${coachId}`) ?? null;
   }
 
   const currentImportedClubCodes = useMemo(
