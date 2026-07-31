@@ -25,7 +25,7 @@ const IGNORED_DIRECTORIES = new Set([
 
 const INVALID_PATTERNS = [
   { label: "Unicode replacement character", pattern: /\uFFFD/u },
-  { label: "common UTF-8 mojibake", pattern: /(?:â€¢|â€”|â€“|â†|ï¿½)/u },
+  { label: "common UTF-8 mojibake", pattern: /(?:â€¢|â€”|â€“|â†|âœ|ï¿½)/u },
   { label: "corrupted on-field separator", pattern: /On-field:[^\r\n]* \? Emergencies:/u },
   { label: "corrupted fixture separator", pattern: /details\.join\(["'] \? ["']\)/u },
   { label: "corrupted schedule separator", pattern: /Schedule ON \?/u },
