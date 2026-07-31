@@ -121,6 +121,16 @@ type TeamListRow = {
   role2: string | null;
 };
 
+type AflFixtureRow = {
+  afl_round: number;
+  home_app_team_code: string;
+  away_app_team_code: string;
+  home_team_name: string;
+  away_team_name: string;
+  utc_start_time: string | null;
+  venue: string | null;
+};
+
 const POSITIONS: PositionKey[] = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
 
 const DEFAULT_ON_FIELD_SLOTS: Record<PositionKey, number> = {
@@ -243,6 +253,7 @@ const AFL_TEAM_NAME_ALIASES: Record<string, string> = {
   ADE: "Adelaide",
   Adelaide: "Adelaide",
   BRI: "Brisbane",
+  BRL: "Brisbane",
   Brisbane: "Brisbane",
   CAR: "Carlton",
   Carlton: "Carlton",
@@ -263,6 +274,7 @@ const AFL_TEAM_NAME_ALIASES: Record<string, string> = {
   MEL: "Melbourne",
   Melbourne: "Melbourne",
   NTH: "North Melbourne",
+  NM: "North Melbourne",
   "North Melbourne": "North Melbourne",
   PTA: "Port Adelaide",
   "Port Adelaide": "Port Adelaide",
@@ -276,6 +288,27 @@ const AFL_TEAM_NAME_ALIASES: Record<string, string> = {
   "West Coast": "West Coast",
   WBU: "Western Bulldogs",
   "Western Bulldogs": "Western Bulldogs",
+};
+
+const AFL_APP_TEAM_CODES: Record<string, string> = {
+  adelaide: "ADE",
+  brisbane: "BRI",
+  carlton: "CAR",
+  collingwood: "COL",
+  essendon: "ESS",
+  fremantle: "FRE",
+  geelong: "GEE",
+  "gold coast": "GCS",
+  "gws giants": "GWS",
+  hawthorn: "HAW",
+  melbourne: "MEL",
+  "north melbourne": "NM",
+  "port adelaide": "PTA",
+  richmond: "RIC",
+  "st kilda": "STK",
+  sydney: "SYD",
+  "west coast": "WCE",
+  "western bulldogs": "WBU",
 };
 
 const FOOTYWIRE_TO_AFL_PLAYER_NAME: Record<string, string> = {
@@ -549,10 +582,10 @@ function formatScheduleSummary(options: {
   )} (${options.lockoutTimezone || DEFAULT_LOCKOUT_TIMEZONE})`;
 
   if (!options.lockoutAt) {
-    return `Schedule ON • ${base}`;
+    return `Schedule ON ? ${base}`;
   }
 
-  return `Schedule ON • ${base} • Next lockout: ${formatTimestamp(options.lockoutAt)}`;
+  return `Schedule ON ? ${base} ? Next lockout: ${formatTimestamp(options.lockoutAt)}`;
 }
 
 function formatCountdown(durationMs: number): string {
@@ -577,11 +610,11 @@ function getCountdownLabel(options: {
   scheduledLockoutActive: boolean;
 }): string {
   if (!options.enabled) {
-    return "Countdown unavailable — schedule is off.";
+    return "Countdown unavailable ? schedule is off.";
   }
 
   if (!options.lockoutAt) {
-    return "Countdown unavailable — next lockout is not set.";
+    return "Countdown unavailable ? next lockout is not set.";
   }
 
   if (options.scheduledLockoutActive) {
@@ -591,7 +624,7 @@ function getCountdownLabel(options: {
   const lockoutDate = new Date(options.lockoutAt);
 
   if (Number.isNaN(lockoutDate.getTime())) {
-    return "Countdown unavailable — saved lockout date is invalid.";
+    return "Countdown unavailable ? saved lockout date is invalid.";
   }
 
   const remainingMs = lockoutDate.getTime() - Date.now();
@@ -821,11 +854,11 @@ function moveItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
 }
 
 function formatTimestamp(value: string | null | undefined): string {
-  if (!value) return "—";
+  if (!value) return "?";
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "?";
 
   return date.toLocaleString(undefined, {
     year: "numeric",
@@ -873,6 +906,43 @@ function normaliseAflTeamName(value: string | null | undefined): string {
   }
 
   return AFL_TEAM_NAME_ALIASES[cleaned] ?? AFL_TEAM_NAME_ALIASES[cleaned.toUpperCase()] ?? cleaned;
+}
+
+function getAflAppTeamCode(value: string | null | undefined): string {
+  const cleaned = value?.trim() ?? "";
+
+  if (!cleaned) {
+    return "";
+  }
+
+  const upper = cleaned.toUpperCase();
+
+  if (Object.values(AFL_APP_TEAM_CODES).includes(upper)) {
+    return upper;
+  }
+
+  return AFL_APP_TEAM_CODES[normaliseAflTeamName(cleaned).toLowerCase()] ?? "";
+}
+
+function formatFixtureStartTime(value: string | null): string {
+  if (!value) {
+    return "Time TBC";
+  }
+
+  const parsed = new Date(value);
+
+  if (!Number.isFinite(parsed.getTime())) {
+    return "Time TBC";
+  }
+
+  return new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Sydney",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
 }
 
 function isAflTeamAnnouncedForRound(
@@ -1050,6 +1120,7 @@ export default function SelectTeamPage() {
   const [weeklyTeamListRows, setWeeklyTeamListRows] = useState<TeamListRow[]>([]);
   const [weeklyTeamListError, setWeeklyTeamListError] = useState("");
   const [isLoadingWeeklyTeamLists, setIsLoadingWeeklyTeamLists] = useState(false);
+  const [aflFixtureRows, setAflFixtureRows] = useState<AflFixtureRow[]>([]);
   const [isTogglingLockout, setIsTogglingLockout] = useState(false);
   const [isSavingLockoutSchedule, setIsSavingLockoutSchedule] = useState(false);
   const [lockoutClockTick, setLockoutClockTick] = useState(() => Date.now());
@@ -1165,6 +1236,17 @@ export default function SelectTeamPage() {
 
     return lookup;
   }, [coachPool]);
+
+  const fixtureByClubCode = useMemo(() => {
+    const lookup = new Map<string, AflFixtureRow>();
+
+    for (const fixture of aflFixtureRows) {
+      lookup.set(fixture.home_app_team_code, fixture);
+      lookup.set(fixture.away_app_team_code, fixture);
+    }
+
+    return lookup;
+  }, [aflFixtureRows]);
 
   const resetSessionScopedState = useCallback(() => {
     setLoadedCoachIds({});
@@ -1553,6 +1635,40 @@ export default function SelectTeamPage() {
   }, [currentAflRound]);
 
   useEffect(() => {
+    let isMounted = true;
+
+    async function loadAflFixtures() {
+      if (
+        typeof currentAflRound !== "number" ||
+        !Number.isFinite(currentAflRound) ||
+        currentAflRound < 1
+      ) {
+        setAflFixtureRows([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("afl_matches")
+        .select(
+          "afl_round, home_app_team_code, away_app_team_code, home_team_name, away_team_name, utc_start_time, venue"
+        )
+        .eq("environment", APP_ENV)
+        .eq("afl_round", currentAflRound)
+        .order("utc_start_time", { ascending: true });
+
+      if (!isMounted) return;
+
+      setAflFixtureRows(error ? [] : ((data ?? []) as AflFixtureRow[]));
+    }
+
+    void loadAflFixtures();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentAflRound]);
+
+  useEffect(() => {
     const channel = supabase
       .channel(`app-settings-${APP_ENV}`)
       .on(
@@ -1835,6 +1951,26 @@ export default function SelectTeamPage() {
 
   function getPlayerClub(playerName: string): string {
     return playerLookup.get(playerName)?.club ?? "";
+  }
+
+  function getPlayerFixtureText(playerClub: string): string {
+    const clubCode = getAflAppTeamCode(playerClub);
+    const fixture = fixtureByClubCode.get(clubCode);
+
+    if (!fixture) {
+      return "";
+    }
+
+    const isHomeTeam = fixture.home_app_team_code === clubCode;
+    const opponent = isHomeTeam ? fixture.away_team_name : fixture.home_team_name;
+    const venue = fixture.venue?.trim();
+    const details = [
+      opponent ? `vs ${opponent}` : "",
+      venue || "",
+      formatFixtureStartTime(fixture.utc_start_time),
+    ].filter(Boolean);
+
+    return details.join(" ? ");
   }
 
   function getSelectedPlayerStatusTooltip(playerName: string): string | undefined {
@@ -2795,7 +2931,7 @@ export default function SelectTeamPage() {
                 onClick={() => router.push("/dashboard")}
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
               >
-                ← Back to Dashboard
+                ? Back to Dashboard
               </button>
 
               <button
@@ -2983,7 +3119,7 @@ export default function SelectTeamPage() {
           (FINALS_TEAM_NAMES[selectedCoach.id] ?? selectedCoach.name).trim().toLowerCase(),
         ) ? (
           <section className="rounded-2xl border border-yellow-300/30 bg-yellow-300/10 p-4 text-sm text-yellow-100">
-            Finals Week 1 selection is available only to teams seeded 2nd–5th.
+            Finals Week 1 selection is available only to teams seeded 2nd?5th.
             The 1st-placed team has the week off.
           </section>
         ) : null}
@@ -3030,7 +3166,7 @@ export default function SelectTeamPage() {
                 </select>
               ) : (
                 <div className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white">
-                  {selectedCoach?.name ?? "—"}
+                  {selectedCoach?.name ?? "?"}
                 </div>
               )}
             </div>
@@ -3162,7 +3298,7 @@ export default function SelectTeamPage() {
                     <div>
                       <h3 className="text-xl font-bold">{position}</h3>
                       <p className="mt-1 text-xs text-white/60">
-                        On-field: {onFieldSelected.length}/{onFieldRequired} • Emergencies:{" "}
+                        On-field: {onFieldSelected.length}/{onFieldRequired} ? Emergencies:{" "}
                         {emergenciesSelected.length}/{emergencyLimit}
                       </p>
                     </div>
@@ -3199,6 +3335,11 @@ export default function SelectTeamPage() {
                                   <div className="mt-1 text-xs text-white/50">
                                     {getPlayerClub(playerName)}
                                   </div>
+                                  {getPlayerFixtureText(getPlayerClub(playerName)) ? (
+                                    <div className="mt-0.5 text-xs text-white/65">
+                                      {getPlayerFixtureText(getPlayerClub(playerName))}
+                                    </div>
+                                  ) : null}
                                 </div>
 
                                 <div className="flex flex-wrap gap-2">
@@ -3269,6 +3410,11 @@ export default function SelectTeamPage() {
                                   <div className="mt-1 text-xs text-white/50">
                                     {getPlayerClub(playerName)}
                                   </div>
+                                  {getPlayerFixtureText(getPlayerClub(playerName)) ? (
+                                    <div className="mt-0.5 text-xs text-white/65">
+                                      {getPlayerFixtureText(getPlayerClub(playerName))}
+                                    </div>
+                                  ) : null}
                                 </div>
 
                                 <div className="flex flex-wrap gap-2">
@@ -3338,6 +3484,11 @@ export default function SelectTeamPage() {
                                   />
                                 </div>
                                 <div className="mt-1 text-xs text-white/50">{player.club}</div>
+                                {getPlayerFixtureText(player.club) ? (
+                                  <div className="mt-0.5 text-xs text-white/65">
+                                    {getPlayerFixtureText(player.club)}
+                                  </div>
+                                ) : null}
                               </div>
 
                               <div className="flex flex-wrap gap-2">
@@ -3414,13 +3565,18 @@ export default function SelectTeamPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span>
                               {playerName}{" "}
-                              {getPlayerClub(playerName) ? `• ${getPlayerClub(playerName)}` : ""}
+                              {getPlayerClub(playerName) ? `? ${getPlayerClub(playerName)}` : ""}
                             </span>
                             <PlayerStatusBadge
                               status={getSelectedPlayerStatus(playerName)}
                               tooltip={getSelectedPlayerStatusTooltip(playerName)}
                             />
                           </div>
+                          {getPlayerFixtureText(getPlayerClub(playerName)) ? (
+                            <div className="mt-0.5 text-[11px] text-white/60">
+                              {getPlayerFixtureText(getPlayerClub(playerName))}
+                            </div>
+                          ) : null}
                         </div>
                       ))}
                     </div>
@@ -3443,13 +3599,18 @@ export default function SelectTeamPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span>
                               {index + 1}. {playerName}{" "}
-                              {getPlayerClub(playerName) ? `• ${getPlayerClub(playerName)}` : ""}
+                              {getPlayerClub(playerName) ? `? ${getPlayerClub(playerName)}` : ""}
                             </span>
                             <PlayerStatusBadge
                               status={getSelectedPlayerStatus(playerName)}
                               tooltip={getSelectedPlayerStatusTooltip(playerName)}
                             />
                           </div>
+                          {getPlayerFixtureText(getPlayerClub(playerName)) ? (
+                            <div className="mt-0.5 text-[11px] text-white/60">
+                              {getPlayerFixtureText(getPlayerClub(playerName))}
+                            </div>
+                          ) : null}
                         </div>
                       ))}
                     </div>

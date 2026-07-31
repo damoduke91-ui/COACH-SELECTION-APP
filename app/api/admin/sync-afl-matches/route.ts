@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { getAflFixtureOverride } from "../../../../lib/aflFixtureOverrides";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ type SyncMatchRow = {
   home_team_name: string;
   away_team_name: string;
   utc_start_time: string | null;
+  venue: string | null;
   status: string | null;
   updated_at: string;
 };
@@ -187,6 +189,27 @@ function getStartTime(match: Record<string, any>): string | null {
   return value || null;
 }
 
+function getVenue(match: Record<string, any>): string | null {
+  const venue = asObject(match.venue);
+  const stadium = asObject(match.stadium);
+  const ground = asObject(match.ground);
+  const value = firstText(
+    venue.name,
+    venue.abbreviation,
+    stadium.name,
+    stadium.abbreviation,
+    ground.name,
+    ground.abbreviation,
+    match.venueName,
+    match.venue_name,
+    match.stadiumName,
+    match.groundName,
+    typeof match.venue === "string" ? match.venue : ""
+  );
+
+  return value || null;
+}
+
 function mapMatchToRow(
   match: unknown,
   aflRound: number,
@@ -227,6 +250,12 @@ function mapMatchToRow(
     };
   }
 
+  const fixtureOverride = getAflFixtureOverride(
+    aflRound,
+    homeMapping.appCode,
+    awayMapping.appCode
+  );
+
   return {
     row: {
       environment,
@@ -241,7 +270,8 @@ function mapMatchToRow(
       away_app_team_code: awayMapping.appCode,
       home_team_name: homeTeamName,
       away_team_name: awayTeamName,
-      utc_start_time: getStartTime(matchObject),
+      utc_start_time: fixtureOverride?.utcStartTime ?? getStartTime(matchObject),
+      venue: fixtureOverride?.venue ?? getVenue(matchObject),
       status: firstText(matchObject.status, matchObject.matchStatus) || null,
       updated_at: updatedAt,
     },
