@@ -78,6 +78,13 @@ type AppSettingsRow = {
   environment: "production" | "preview";
   current_afl_round: number | null;
   current_super8_round: number | null;
+  latest_team_list_round: number | null;
+  team_list_sync_status: string | null;
+  team_list_sync_at: string | null;
+  team_list_sync_round: number | null;
+  team_list_sync_player_count: number | null;
+  team_list_sync_team_count: number | null;
+  team_list_sync_message: string | null;
 };
 
 type AflRoundFinalisationRow = {
@@ -320,11 +327,45 @@ function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
       : typeof row.current_super8_round === "string"
         ? Number(row.current_super8_round)
         : null;
+  const parsedTeamListRound =
+    typeof row.latest_team_list_round === "number"
+      ? row.latest_team_list_round
+      : typeof row.latest_team_list_round === "string"
+        ? Number(row.latest_team_list_round)
+        : null;
+  const parsedSyncRound =
+    typeof row.team_list_sync_round === "number"
+      ? row.team_list_sync_round
+      : typeof row.team_list_sync_round === "string"
+        ? Number(row.team_list_sync_round)
+        : null;
+  const parsedPlayerCount =
+    typeof row.team_list_sync_player_count === "number"
+      ? row.team_list_sync_player_count
+      : typeof row.team_list_sync_player_count === "string"
+        ? Number(row.team_list_sync_player_count)
+        : null;
+  const parsedTeamCount =
+    typeof row.team_list_sync_team_count === "number"
+      ? row.team_list_sync_team_count
+      : typeof row.team_list_sync_team_count === "string"
+        ? Number(row.team_list_sync_team_count)
+        : null;
 
   return {
     environment: APP_ENV,
     current_afl_round: Number.isFinite(parsedRound) ? parsedRound : null,
     current_super8_round: Number.isFinite(parsedSuper8Round) ? parsedSuper8Round : null,
+    latest_team_list_round: Number.isFinite(parsedTeamListRound) ? parsedTeamListRound : null,
+    team_list_sync_status:
+      typeof row.team_list_sync_status === "string" ? row.team_list_sync_status : null,
+    team_list_sync_at:
+      typeof row.team_list_sync_at === "string" ? row.team_list_sync_at : null,
+    team_list_sync_round: Number.isFinite(parsedSyncRound) ? parsedSyncRound : null,
+    team_list_sync_player_count: Number.isFinite(parsedPlayerCount) ? parsedPlayerCount : null,
+    team_list_sync_team_count: Number.isFinite(parsedTeamCount) ? parsedTeamCount : null,
+    team_list_sync_message:
+      typeof row.team_list_sync_message === "string" ? row.team_list_sync_message : null,
   };
 }
 
@@ -579,6 +620,7 @@ export default function DashboardPage() {
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
   const [currentSuper8RoundSetting, setCurrentSuper8RoundSetting] = useState<number | null>(null);
+  const [teamListSyncHealth, setTeamListSyncHealth] = useState<AppSettingsRow | null>(null);
   const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
   const [nextFixtureRows, setNextFixtureRows] = useState<FixtureRow[]>([]);
   const [isLoadingFixture, setIsLoadingFixture] = useState(false);
@@ -678,7 +720,9 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
   const refreshCurrentRound = useCallback(async () => {
     const { data, error } = await supabase
       .from("app_settings")
-      .select("environment, current_afl_round, current_super8_round")
+      .select(
+        "environment, current_afl_round, current_super8_round, latest_team_list_round, team_list_sync_status, team_list_sync_at, team_list_sync_round, team_list_sync_player_count, team_list_sync_team_count, team_list_sync_message"
+      )
       .eq("environment", APP_ENV)
       .maybeSingle();
 
@@ -691,6 +735,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
     const settings = normaliseAppSettingsRow(data);
     setCurrentAflRound(settings.current_afl_round);
     setCurrentSuper8RoundSetting(settings.current_super8_round);
+    setTeamListSyncHealth(settings);
     setRoundInput(String(settings.current_afl_round ?? 1));
     const finalsWeek =
       getFinalsWeekForCompetitionRound(settings.current_super8_round) ??
@@ -2533,6 +2578,60 @@ async function handleExportTeamsXlsx() {
               </div>
             </section>
 
+            <section className="border-y border-cyan-400/20 bg-cyan-500/5 px-6 py-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-bold">AFL Team-List Sync</h2>
+                  <p className="mt-1 text-sm text-white/65">
+                    Latest player-status data available to the team-selection page.
+                  </p>
+                </div>
+                <span
+                  className={`w-fit rounded-full border px-3 py-1 text-xs font-bold uppercase ${
+                    teamListSyncHealth?.team_list_sync_status === "success"
+                      ? "border-green-400/30 bg-green-500/15 text-green-200"
+                      : teamListSyncHealth?.team_list_sync_status === "failed"
+                        ? "border-red-400/30 bg-red-500/15 text-red-200"
+                        : "border-amber-400/30 bg-amber-500/15 text-amber-100"
+                  }`}
+                >
+                  {teamListSyncHealth?.team_list_sync_status ?? "Not recorded"}
+                </span>
+              </div>
+
+              <dl className="mt-5 grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-white/45">Team-list round</dt>
+                  <dd className="mt-1 text-lg font-bold">
+                    {teamListSyncHealth?.latest_team_list_round ?? "Not set"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-white/45">Players</dt>
+                  <dd className="mt-1 text-lg font-bold">
+                    {teamListSyncHealth?.team_list_sync_player_count ?? "-"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-white/45">Teams</dt>
+                  <dd className="mt-1 text-lg font-bold">
+                    {teamListSyncHealth?.team_list_sync_team_count ?? "-"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-white/45">Last update</dt>
+                  <dd className="mt-1 text-sm font-semibold">
+                    {formatTimestamp(teamListSyncHealth?.team_list_sync_at)}
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="mt-4 text-sm text-white/70">
+                {teamListSyncHealth?.team_list_sync_message ??
+                  "Run the AFL team-list sync once to populate health details."}
+              </div>
+            </section>
+
             <section className="rounded-2xl border border-green-500/20 bg-green-500/10 p-6">
   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
     <div>
@@ -2582,7 +2681,7 @@ async function handleExportTeamsXlsx() {
 
                   const teamData =
                     row?.team_data && typeof row.team_data === "object"
-                      ? (row.team_data as Record<string, any>)
+                      ? (row.team_data as Partial<Record<PositionKey, Partial<PositionState>>>)
                       : {};
 
                   return (
