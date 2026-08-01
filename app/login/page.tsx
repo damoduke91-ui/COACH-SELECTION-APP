@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { supabase } from "../../lib/supabase";
+import { APP_ENV, supabase } from "../../lib/supabase";
 
 type UserProfileRow = {
   id: string;
@@ -11,6 +11,42 @@ type UserProfileRow = {
   coach_id: number | null;
   coach_name: string | null;
 };
+
+async function loadAuthorisedProfile(userId: string): Promise<{
+  profile: UserProfileRow | null;
+  errorMessage: string;
+}> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, role, coach_id, coach_name")
+    .eq("id", userId)
+    .eq("environment", APP_ENV)
+    .maybeSingle();
+
+  if (error) {
+    return { profile: null, errorMessage: error.message };
+  }
+
+  let profile = data as UserProfileRow | null;
+
+  if (!profile && APP_ENV === "preview") {
+    const { data: productionAdmin, error: productionError } = await supabase
+      .from("profiles")
+      .select("id, role, coach_id, coach_name")
+      .eq("id", userId)
+      .eq("environment", "production")
+      .eq("role", "admin")
+      .maybeSingle();
+
+    if (productionError) {
+      return { profile: null, errorMessage: productionError.message };
+    }
+
+    profile = productionAdmin as UserProfileRow | null;
+  }
+
+  return { profile, errorMessage: "" };
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -46,22 +82,20 @@ export default function LoginPage() {
         return;
       }
 
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, role, coach_id, coach_name")
-        .eq("id", session.user.id)
-        .single();
+      const { profile, errorMessage } = await loadAuthorisedProfile(session.user.id);
 
       if (!isMounted) return;
 
-      if (profileError) {
-        setMessage(`Profile check failed: ${profileError.message}`);
+      if (errorMessage) {
+        setMessage(`Profile check failed: ${errorMessage}`);
         setIsCheckingSession(false);
         return;
       }
 
-      if (!(profile as UserProfileRow | null)) {
-        setMessage("No profile found for this account.");
+      if (!profile) {
+        await supabase.auth.signOut();
+        if (!isMounted) return;
+        setMessage(`This account is not authorised for ${APP_ENV}.`);
         setIsCheckingSession(false);
         return;
       }
@@ -114,20 +148,17 @@ export default function LoginPage() {
       return;
     }
 
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("id, role, coach_id, coach_name")
-      .eq("id", user.id)
-      .single();
+    const { profile, errorMessage } = await loadAuthorisedProfile(user.id);
 
-    if (profileError) {
-      setMessage(`Profile load failed: ${profileError.message}`);
+    if (errorMessage) {
+      setMessage(`Profile load failed: ${errorMessage}`);
       setIsSigningIn(false);
       return;
     }
 
-    if (!(profile as UserProfileRow | null)) {
-      setMessage("No profile found for this user.");
+    if (!profile) {
+      await supabase.auth.signOut();
+      setMessage(`Login succeeded, but this account is not authorised for ${APP_ENV}.`);
       setIsSigningIn(false);
       return;
     }
