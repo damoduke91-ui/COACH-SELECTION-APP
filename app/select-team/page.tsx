@@ -90,6 +90,7 @@ type AppSettingsRow = {
   lockout_timezone?: string | null;
   lockout_at?: string | null;
   current_afl_round?: number | null;
+  latest_team_list_round?: number | null;
   current_super8_round?: number | null;
 };
 
@@ -654,6 +655,12 @@ function normaliseAppSettingsRow(input: unknown): AppSettingsRow {
         : Number.isFinite(Number(row.current_afl_round))
           ? Number(row.current_afl_round)
           : null,
+    latest_team_list_round:
+      typeof row.latest_team_list_round === "number"
+        ? row.latest_team_list_round
+        : Number.isFinite(Number(row.latest_team_list_round))
+          ? Number(row.latest_team_list_round)
+          : null,
     current_super8_round:
       typeof row.current_super8_round === "number"
         ? row.current_super8_round
@@ -1112,6 +1119,7 @@ export default function SelectTeamPage() {
   );
   const [lockoutScheduleAt, setLockoutScheduleAt] = useState<string | null>(null);
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
+  const [latestTeamListRound, setLatestTeamListRound] = useState<number | null>(null);
   const [currentSuper8Round, setCurrentSuper8Round] = useState<number | null>(null);
   const [finalsWeekOneEligibleNames, setFinalsWeekOneEligibleNames] = useState<Set<string>>(
     new Set(),
@@ -1176,6 +1184,7 @@ export default function SelectTeamPage() {
   const selectedCoach =
     coachConfigs.find((coach) => coach.id === selectedCoachId) ?? coachConfigs[0];
   const selectedCoachTeamName = COACH_TEAM_NAMES[selectedCoach?.id] ?? selectedCoach?.name ?? "Coach";
+  const playerStatusRound = latestTeamListRound ?? currentAflRound;
 
   const teamState = teamsByCoach[selectedCoachId] ?? emptyTeamState();
   const coachPool = getCoachPool(selectedCoach);
@@ -1209,16 +1218,16 @@ export default function SelectTeamPage() {
   const getSelectedPlayerStatus = useCallback(
     (playerName: string): PlayerStatus | null => {
       if (
-        typeof currentAflRound !== "number" ||
-        !Number.isFinite(currentAflRound) ||
-        currentAflRound < 1
+        typeof playerStatusRound !== "number" ||
+        !Number.isFinite(playerStatusRound) ||
+        playerStatusRound < 1
       ) {
         return null;
       }
 
-      return getPlayerStatus(playerName, currentAflRound, weeklyTeamListRows);
+      return getPlayerStatus(playerName, playerStatusRound, weeklyTeamListRows);
     },
-    [currentAflRound, weeklyTeamListRows]
+    [playerStatusRound, weeklyTeamListRows]
   );
 
   const playerLookup = useMemo(() => {
@@ -1424,6 +1433,12 @@ export default function SelectTeamPage() {
         ? row.current_afl_round
         : null
     );
+    setLatestTeamListRound(
+      typeof row.latest_team_list_round === "number" &&
+        Number.isFinite(row.latest_team_list_round)
+        ? row.latest_team_list_round
+        : null
+    );
     setCurrentSuper8Round(
       typeof row.current_super8_round === "number" && Number.isFinite(row.current_super8_round)
         ? row.current_super8_round
@@ -1596,9 +1611,9 @@ export default function SelectTeamPage() {
 
     async function loadWeeklyTeamLists() {
       if (
-        typeof currentAflRound !== "number" ||
-        !Number.isFinite(currentAflRound) ||
-        currentAflRound < 1
+        typeof playerStatusRound !== "number" ||
+        !Number.isFinite(playerStatusRound) ||
+        playerStatusRound < 1
       ) {
         setWeeklyTeamListRows([]);
         setWeeklyTeamListError("");
@@ -1612,7 +1627,7 @@ export default function SelectTeamPage() {
       const { data, error } = await supabase
         .from("weekly_team_lists")
         .select("round, player_name, afl_team, role1, role2")
-        .eq("round", currentAflRound);
+        .eq("round", playerStatusRound);
 
       if (!isMounted) return;
 
@@ -1632,7 +1647,7 @@ export default function SelectTeamPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentAflRound]);
+  }, [playerStatusRound]);
 
   useEffect(() => {
     let isMounted = true;
@@ -3275,9 +3290,9 @@ export default function SelectTeamPage() {
                 ? "Loading AFL team-list statuses..."
                 : weeklyTeamListError
                   ? `AFL team-list statuses unavailable: ${weeklyTeamListError}`
-                  : currentAflRound
-                    ? `AFL Round ${currentAflRound} statuses loaded for ${weeklyTeamListRows.length} players.`
-                    : "AFL round not set yet, so player statuses are hidden."}
+                  : playerStatusRound
+                    ? `AFL Round ${playerStatusRound} statuses loaded for ${weeklyTeamListRows.length} players.`
+                    : "AFL team-list round not set yet, so player statuses are hidden."}
             </div>
           </div>
 
