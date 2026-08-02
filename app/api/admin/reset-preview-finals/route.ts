@@ -50,7 +50,7 @@ async function countRows(
   table: "finals_results" | "afl_player_round_stats" | "afl_round_finalisation" | "round_submissions",
   configure: (query: any) => any,
 ): Promise<number> {
-  const query = supabaseAdmin.from(table).select("id", { count: "exact", head: true });
+  const query = supabaseAdmin.from(table).select("*", { count: "exact", head: true });
   const { count, error } = await configure(query);
   if (error) throw new Error(`${table}: ${error.message}`);
   return count ?? 0;
