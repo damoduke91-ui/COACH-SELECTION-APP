@@ -657,20 +657,19 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
     let profile = data as UserProfileRow | null;
 
     if (!profile && APP_ENV === "preview") {
-      const { data: productionData, error: productionError } = await supabase
+      const { data: productionProfile, error: productionProfileError } = await supabase
         .from("profiles")
         .select("id, role, coach_id, coach_name, team_name")
         .eq("id", userId)
         .eq("environment", "production")
-        .eq("role", "admin")
         .maybeSingle();
 
-      if (productionError) {
-        setMessage(`Preview admin verification failed: ${productionError.message}`);
+      if (productionProfileError) {
+        setMessage(`Preview profile verification failed: ${productionProfileError.message}`);
         return null;
       }
 
-      profile = productionData as UserProfileRow | null;
+      profile = productionProfile as UserProfileRow | null;
     }
 
     if (!profile) {
