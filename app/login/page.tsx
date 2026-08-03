@@ -30,19 +30,18 @@ async function loadAuthorisedProfile(userId: string): Promise<{
   let profile = data as UserProfileRow | null;
 
   if (!profile && APP_ENV === "preview") {
-    const { data: productionAdmin, error: productionError } = await supabase
+    const { data: productionProfile, error: productionError } = await supabase
       .from("profiles")
       .select("id, role, coach_id, coach_name")
       .eq("id", userId)
       .eq("environment", "production")
-      .eq("role", "admin")
       .maybeSingle();
 
     if (productionError) {
       return { profile: null, errorMessage: productionError.message };
     }
 
-    profile = productionAdmin as UserProfileRow | null;
+    profile = productionProfile as UserProfileRow | null;
   }
 
   return { profile, errorMessage: "" };
