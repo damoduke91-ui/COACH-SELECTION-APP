@@ -6,7 +6,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import * as coachConfigModule from "../../lib/coachConfig";
 import {
+  buildFinalsBracket,
   FINALS_AFL_ROUNDS,
+  type FinalsResult,
   getFinalsWeekForAflRound,
   getFinalsWeekForCompetitionRound,
 } from "../../lib/finals";
@@ -615,6 +617,7 @@ export default function DashboardPage() {
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [results, setResults] = useState<MatchResultRow[]>([]);
+  const [finalsResults, setFinalsResults] = useState<FinalsResult[]>([]);
   const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
   const [message, setMessage] = useState("");
   const [teamRowsByCoachId, setTeamRowsByCoachId] = useState<Record<number, SavedTeamRow>>({});
@@ -1778,18 +1781,31 @@ const refreshPlayerStats = useCallback(async () => {
 
   useEffect(() => {
   async function loadResults() {
-    const { data, error } = await supabase
-      .from("super8_match_results")
-      .select(
-        "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
-      );
+    const [regularQuery, finalsQuery] = await Promise.all([
+      supabase
+        .from("super8_match_results")
+        .select(
+          "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
+        ),
+      supabase
+        .from("finals_results")
+        .select("match_code, coach_1_score, coach_2_score")
+        .eq("environment", APP_ENV)
+        .eq("season_year", new Date().getFullYear()),
+    ]);
 
-    if (error) {
-      console.error(error);
+    if (regularQuery.error) {
+      console.error(regularQuery.error);
       return;
     }
 
-    setResults((data ?? []) as MatchResultRow[]);
+    setResults((regularQuery.data ?? []) as MatchResultRow[]);
+    if (finalsQuery.error) {
+      console.error(finalsQuery.error);
+      setFinalsResults([]);
+    } else {
+      setFinalsResults((finalsQuery.data ?? []) as FinalsResult[]);
+    }
   }
 
   loadResults();
@@ -2172,7 +2188,29 @@ async function handleExportTeamsXlsx() {
     return `${loginSession.teamName || loginSession.coachName} Dashboard`;
   }, [loginSession]);
 
-  const currentWeekFixture = useMemo(() => buildDashboardFixtureMatches(fixtureRows), [fixtureRows]);
+  const regularCurrentWeekFixture = useMemo(() => buildDashboardFixtureMatches(fixtureRows), [fixtureRows]);
+  const finalsBracket = useMemo(
+    () => buildFinalsBracket(results, finalsResults),
+    [finalsResults, results]
+  );
+  const buildFinalsWeekFixture = useCallback(
+    (week: number): DashboardFixtureMatch[] =>
+      finalsBracket.matches
+        .filter((match) => match.week === week)
+        .map((match) => ({
+          key: `finals-${match.code}`,
+          matchLabel: match.label,
+          home: match.home?.name ?? "To be decided",
+          away: match.away?.name ?? "To be decided",
+          competitionRound: 14 + match.week,
+          aflRound: FINALS_AFL_ROUNDS[match.week - 1],
+        })),
+    [finalsBracket.matches]
+  );
+  const currentWeekFixture = useMemo(
+    () => currentFinalsWeek ? buildFinalsWeekFixture(currentFinalsWeek) : regularCurrentWeekFixture,
+    [buildFinalsWeekFixture, currentFinalsWeek, regularCurrentWeekFixture]
+  );
   const nextWeekAflRound =
     nextFixtureRows[0]?.afl_round ??
     (currentFinalsWeek && currentAflRound && currentAflRound < FINALS_AFL_ROUNDS.at(-1)!
@@ -2210,7 +2248,11 @@ async function handleExportTeamsXlsx() {
     return a.matchLabel.localeCompare(b.matchLabel);
   });
 }, [currentWeekFixture, loginSession?.coachName]);
-  const nextWeekFixture = useMemo(() => buildDashboardFixtureMatches(nextFixtureRows), [nextFixtureRows]);
+  const regularNextWeekFixture = useMemo(() => buildDashboardFixtureMatches(nextFixtureRows), [nextFixtureRows]);
+  const nextWeekFixture = useMemo(
+    () => nextFinalsWeek ? buildFinalsWeekFixture(nextFinalsWeek) : regularNextWeekFixture,
+    [buildFinalsWeekFixture, nextFinalsWeek, regularNextWeekFixture]
+  );
 
   const opponentCardData = useMemo(() => {
     if (!loginSession?.coachId || fixtureRows.length === 0) {
