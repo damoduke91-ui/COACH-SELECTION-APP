@@ -1188,6 +1188,30 @@ export default function SelectTeamPage() {
 
   const teamState = teamsByCoach[selectedCoachId] ?? emptyTeamState();
   const coachPool = getCoachPool(selectedCoach);
+  const selectedOnFieldCount = POSITIONS.reduce(
+    (total, position) => total + teamState[position].onField.length,
+    0
+  );
+  const requiredOnFieldCount = selectedCoach
+    ? POSITIONS.reduce((total, position) => total + selectedCoach.slots[position], 0)
+    : 0;
+  const selectedEmergencyCount = POSITIONS.reduce(
+    (total, position) => total + teamState[position].emergencies.length,
+    0
+  );
+  const allowedEmergencyCount = selectedCoach
+    ? POSITIONS.reduce(
+        (total, position) => total + selectedCoach.emergencyLimits[position],
+        0
+      )
+    : 0;
+  const selectedPlayerNames = getAllSelectedPlayers(teamState);
+  const isSelectedTeamReady = Boolean(
+    selectedCoach &&
+      selectedOnFieldCount === requiredOnFieldCount &&
+      selectedEmergencyCount <= allowedEmergencyCount &&
+      new Set(selectedPlayerNames).size === selectedPlayerNames.length
+  );
 
   const canViewSelectedCoach = Boolean(
     selectedCoach && loginSession && (isAdmin || loginSession.coachId === selectedCoach.id)
@@ -2151,6 +2175,20 @@ export default function SelectTeamPage() {
       return;
     }
 
+    if (nextCoachId === selectedCoachId) return;
+
+    if (dirtyCoachIds[selectedCoachId]) {
+      const currentCoachName =
+        coachConfigs.find((coach) => coach.id === selectedCoachId)?.name ?? "this coach";
+      const nextCoachName =
+        coachConfigs.find((coach) => coach.id === nextCoachId)?.name ?? "the selected coach";
+      const confirmed = window.confirm(
+        `${currentCoachName}'s team has unsaved changes. Switch to ${nextCoachName} anyway?`
+      );
+
+      if (!confirmed) return;
+    }
+
     setSelectedCoachId(nextCoachId);
     setSubmitMessage("");
   }
@@ -2393,6 +2431,8 @@ export default function SelectTeamPage() {
         return;
       }
 
+      let adminSubmissionReason: string | null = null;
+      let auditErrorMessage = "";
       const result = validateTeamState(coach, team);
 
       if (isSubmitting) {
@@ -2411,6 +2451,23 @@ export default function SelectTeamPage() {
           setSubmitMessage("Save cancelled. Team not saved.");
           return;
         }
+      }
+
+      if (isAdmin && isSubmitting && source === "manual") {
+        const confirmed = window.confirm(
+          `Submit this team on behalf of ${coach.name}?`
+        );
+
+        if (!confirmed) {
+          setSubmitMessage(`Submission cancelled. ${coach.name}'s team was not submitted.`);
+          return;
+        }
+
+        const enteredReason = window.prompt(
+          "Optional: add a reason for submitting on this coach's behalf.",
+          ""
+        );
+        adminSubmissionReason = enteredReason?.trim() || null;
       }
 
       setIsSavingTeam(true);
@@ -2477,6 +2534,23 @@ export default function SelectTeamPage() {
           setIsSavingTeam(false);
           return;
         }
+
+        if (isAdmin) {
+          const { error: auditError } = await supabase.from("admin_team_audit_log").insert({
+            environment: APP_ENV,
+            coach_id: coach.id,
+            coach_name: coach.name,
+            admin_user_id: loginSession.userId,
+            admin_email: loginSession.email,
+            action: "submit_team_on_behalf",
+            reason: adminSubmissionReason,
+            created_at: nowIso,
+          });
+
+          if (auditError) {
+            auditErrorMessage = ` Audit logging failed: ${auditError.message}`;
+          }
+        }
       }
 
       setCoachMetaById((prev) => ({
@@ -2492,7 +2566,13 @@ export default function SelectTeamPage() {
           ...prev,
           [coach.id]: true,
         }));
-        setSubmitMessage(`Final team submitted for ${coach.name}. It is now locked.`);
+        setSubmitMessage(
+          isAdmin
+            ? `${coach.name}'s team was submitted by Admin at ${formatTimestamp(
+                nowIso
+              )}. ${coach.name} remains locked out of this submitted team.${auditErrorMessage}`
+            : `Final team submitted for ${coach.name}. It is now locked.`
+        );
       } else if (source === "manual") {
         setSubmitMessage(
           result.valid
@@ -2960,6 +3040,20 @@ export default function SelectTeamPage() {
           </div>
         </section>
 
+        {isAdmin && isTeamLocked && selectedCoach ? (
+          <section
+            role="status"
+            className="rounded-2xl border border-sky-400/30 bg-sky-400/10 p-4 text-sky-100"
+          >
+            <div className="text-sm font-semibold uppercase tracking-wide text-sky-300">
+              Admin override active
+            </div>
+            <div className="mt-1 text-sm text-sky-100/90">
+              Coaches remain locked. You are editing {selectedCoachTeamName}&apos;s team.
+            </div>
+          </section>
+        ) : null}
+
         {isAdmin ? (
           <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <div className="grid gap-4 xl:grid-cols-4">
@@ -3214,6 +3308,24 @@ export default function SelectTeamPage() {
             </div>
           ) : null}
 
+          {selectedCoach ? (
+            <div
+              className={`mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-sm ${
+                isSelectedTeamReady
+                  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+                  : "border-amber-400/30 bg-amber-400/10 text-amber-100"
+              }`}
+            >
+              <span className="font-semibold">
+                {isSelectedTeamReady ? "Team ready" : "Team incomplete"}
+              </span>
+              <span>
+                {selectedOnFieldCount}/{requiredOnFieldCount} on-field · {selectedEmergencyCount}/
+                {allowedEmergencyCount} emergencies
+              </span>
+            </div>
+          ) : null}
+
           <div className="mt-4 flex flex-wrap gap-3">
             <button
               type="button"
@@ -3230,7 +3342,11 @@ export default function SelectTeamPage() {
               disabled={!selectedCoach || !canEditSelectedCoach || isSavingTeam}
               className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {isSavingTeam ? "Saving..." : "Save Team"}
+              {isSavingTeam
+                ? "Saving..."
+                : isAdmin && selectedCoach
+                  ? `Save for ${selectedCoachTeamName}`
+                  : "Save Team"}
             </button>
 
             <button
@@ -3268,17 +3384,21 @@ export default function SelectTeamPage() {
               disabled={!selectedCoach || !canEditSelectedCoach || isSavingTeam}
               className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Submit Final Team
+              {isAdmin && selectedCoach
+                ? `Submit for ${selectedCoachTeamName}`
+                : "Submit Final Team"}
             </button>
 
-            <button
-              type="button"
-              onClick={() => void unlockTeam()}
-              disabled={!selectedCoach || !canUnlockSelectedCoach || isSavingTeam}
-              className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Unlock Team
-            </button>
+            {selectedCoachSubmitted ? (
+              <button
+                type="button"
+                onClick={() => void unlockTeam()}
+                disabled={!selectedCoach || !canUnlockSelectedCoach || isSavingTeam}
+                className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isAdmin ? "Reopen Submitted Team" : "Unlock Team"}
+              </button>
+            ) : null}
           </div>
         </section>
 
