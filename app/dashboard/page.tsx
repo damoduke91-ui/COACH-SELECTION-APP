@@ -2173,6 +2173,18 @@ async function handleExportTeamsXlsx() {
   }, [loginSession]);
 
   const currentWeekFixture = useMemo(() => buildDashboardFixtureMatches(fixtureRows), [fixtureRows]);
+  const nextWeekAflRound =
+    nextFixtureRows[0]?.afl_round ??
+    (currentFinalsWeek && currentAflRound && currentAflRound < FINALS_AFL_ROUNDS.at(-1)!
+      ? currentAflRound + 1
+      : null);
+  const currentFixtureRoundLabel = currentFinalsWeek
+    ? `AFL Round ${currentAflRound ?? "—"}, S8 Finals Week ${currentFinalsWeek}`
+    : `Super 8 Round ${currentWeekFixture[0]?.competitionRound ?? "—"} / AFL Round ${currentAflRound ?? "—"}`;
+  const nextFinalsWeek = getFinalsWeekForAflRound(nextWeekAflRound);
+  const nextFixtureRoundLabel = nextFinalsWeek
+    ? `AFL Round ${nextWeekAflRound}, S8 Finals Week ${nextFinalsWeek}`
+    : `AFL Round ${nextWeekAflRound ?? "—"}`;
 
   const currentRoundResultByMatch = useMemo(() => {
     const map = new Map<number, MatchResultRow>();
@@ -2907,8 +2919,7 @@ async function handleExportTeamsXlsx() {
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <h2 className="text-xl font-bold">Current Week Fixture</h2>
             <p className="mt-1 text-xs text-white/60">
-              Super 8 Round {currentWeekFixture[0]?.competitionRound ?? "—"} / AFL Round{" "}
-              {currentAflRound ?? "—"} • {currentRoundStatus} ({currentRoundFinalMatchCount}/{currentRoundExpectedMatchCount} matches final, {currentRoundImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} clubs)
+              {currentFixtureRoundLabel} • {currentRoundStatus} ({currentRoundFinalMatchCount}/{currentRoundExpectedMatchCount} matches final, {currentRoundImportedClubCodes.size}/{EXPECTED_AFL_CLUB_COUNT} clubs)
             </p>
 
             <div className="mt-3 space-y-2">
@@ -2973,7 +2984,7 @@ async function handleExportTeamsXlsx() {
           <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
             <h2 className="text-base font-bold">Next Week</h2>
             <p className="mt-0.5 text-[11px] text-white/50">
-              AFL Round {nextWeekFixture[0]?.aflRound ?? "—"}
+              {nextFixtureRoundLabel}
             </p>
 
             <div className="mt-2 space-y-1.5">
