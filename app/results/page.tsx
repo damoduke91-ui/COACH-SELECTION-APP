@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
+import {
+  buildFinalsBracket,
+  FINALS_AFL_ROUNDS,
+  FINALS_TEAM_NAMES,
+  type FinalsResult,
+  type RegularSeasonResult,
+} from "../../lib/finals";
 
 type LoginSession = {
   userId: string;
@@ -49,6 +56,11 @@ type MatchResultRow = {
   coach_2_name: string;
   coach_2_score: number;
   imported_at: string;
+};
+
+type FinalsResultRow = FinalsResult & {
+  id: number;
+  completed_at: string | null;
 };
 
 type TeamPositionData = {
@@ -635,6 +647,7 @@ export default function ResultsPage() {
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
   const [fixtureRows, setFixtureRows] = useState<FixtureRow[]>([]);
   const [results, setResults] = useState<MatchResultRow[]>([]);
+  const [finalsResults, setFinalsResults] = useState<FinalsResultRow[]>([]);
   const [roundSubmissions, setRoundSubmissions] = useState<RoundSubmissionRow[]>([]);
   const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
@@ -753,6 +766,24 @@ export default function ResultsPage() {
     return rows;
   }, []);
 
+  const refreshFinalsResults = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("finals_results")
+      .select("id, match_code, coach_1_score, coach_2_score, completed_at")
+      .eq("environment", APP_ENV)
+      .eq("season_year", new Date().getFullYear());
+
+    if (error) {
+      setMessage(`Finals results load failed: ${error.message}`);
+      setFinalsResults([]);
+      return [];
+    }
+
+    const rows = (data ?? []) as FinalsResultRow[];
+    setFinalsResults(rows);
+    return rows;
+  }, []);
+
 
   const refreshRoundSubmissions = useCallback(async () => {
     const { data, error } = await supabase
@@ -854,6 +885,7 @@ export default function ResultsPage() {
       refreshCurrentRound(),
       refreshFixtureRows(),
       refreshResults(),
+      refreshFinalsResults(),
       refreshRoundSubmissions(),
       refreshPlayerStats(),
     ]);
@@ -866,14 +898,16 @@ export default function ResultsPage() {
     const resultRounds = resultData.map((row) => row.round_number).filter(Number.isFinite);
     const fixtureRounds = fixtureMatches.map((row) => row.roundNumber).filter(Number.isFinite);
 
+    const currentFinalsWeekIndex = aflRound ? FINALS_AFL_ROUNDS.indexOf(aflRound as (typeof FINALS_AFL_ROUNDS)[number]) : -1;
     const preferredRound =
+      (currentFinalsWeekIndex >= 0 ? 15 + currentFinalsWeekIndex : null) ??
       currentFixtureMatch?.roundNumber ??
       (resultRounds.length > 0 ? Math.max(...resultRounds) : null) ??
       (fixtureRounds.length > 0 ? Math.min(...fixtureRounds) : null);
 
     setSelectedRound((previous) => previous ?? preferredRound);
     setIsLoadingPageData(false);
-  }, [refreshCurrentRound, refreshFixtureRows, refreshResults, refreshRoundSubmissions, refreshPlayerStats]);
+  }, [refreshCurrentRound, refreshFixtureRows, refreshResults, refreshFinalsResults, refreshRoundSubmissions, refreshPlayerStats]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1004,6 +1038,18 @@ export default function ResultsPage() {
         {
           event: "*",
           schema: "public",
+          table: "finals_results",
+          filter: `environment=eq.${APP_ENV}`,
+        },
+        () => {
+          void refreshPageData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
           table: "round_submissions",
           filter: `environment=eq.${APP_ENV}`,
         },
@@ -1032,8 +1078,52 @@ export default function ResultsPage() {
 
   const fixtureMatches = useMemo(() => buildFixtureMatches(fixtureRows), [fixtureRows]);
 
+  const coachIdByFinalsTeamName = useMemo(
+    () => new Map(
+      Object.entries(FINALS_TEAM_NAMES).map(([coachId, teamName]) => [
+        teamName.trim().toLowerCase(),
+        Number(coachId),
+      ])
+    ),
+    []
+  );
+
+  const finalsFixtureMatches = useMemo(() => {
+    const bracket = buildFinalsBracket(results as RegularSeasonResult[], finalsResults);
+    const weekMatchIndexes = new Map<number, number>();
+
+    return bracket.matches.flatMap((match): FixtureMatch[] => {
+      if (!match.home || !match.away) return [];
+
+      const coach1Id = coachIdByFinalsTeamName.get(match.home.name.trim().toLowerCase());
+      const coach2Id = coachIdByFinalsTeamName.get(match.away.name.trim().toLowerCase());
+      if (!coach1Id || !coach2Id) return [];
+
+      const matchupIndex = (weekMatchIndexes.get(match.week) ?? 0) + 1;
+      weekMatchIndexes.set(match.week, matchupIndex);
+
+      return [{
+        key: `finals-${match.code}`,
+        roundNumber: 14 + match.week,
+        aflRound: FINALS_AFL_ROUNDS[match.week - 1],
+        matchupIndex,
+        coach1Id,
+        coach1Name: match.home.name,
+        coach2Id,
+        coach2Name: match.away.name,
+      }];
+    });
+  }, [coachIdByFinalsTeamName, finalsResults, results]);
+
+  const allFixtureMatches = useMemo(
+    () => [...fixtureMatches, ...finalsFixtureMatches],
+    [finalsFixtureMatches, fixtureMatches]
+  );
+
   const currentSuper8Round = useMemo(() => {
     if (!currentAflRound) return null;
+    const finalsWeekIndex = FINALS_AFL_ROUNDS.indexOf(currentAflRound as (typeof FINALS_AFL_ROUNDS)[number]);
+    if (finalsWeekIndex >= 0) return 15 + finalsWeekIndex;
     return fixtureMatches.find((match) => match.aflRound === currentAflRound)?.roundNumber ?? null;
   }, [currentAflRound, fixtureMatches]);
 
@@ -1044,13 +1134,34 @@ export default function ResultsPage() {
       map.set(buildResultKey(result.round_number, result.matchup_index), result);
     }
 
+    const bracket = buildFinalsBracket(results as RegularSeasonResult[], finalsResults);
+    for (const match of finalsFixtureMatches) {
+      const bracketMatch = bracket.matches.find((item) => `finals-${item.code}` === match.key);
+      const savedResult = finalsResults.find((item) => item.match_code === bracketMatch?.code);
+      if (!bracketMatch || !savedResult || savedResult.coach_1_score === null || savedResult.coach_2_score === null) continue;
+
+      map.set(buildResultKey(match.roundNumber, match.matchupIndex), {
+        id: -savedResult.id,
+        round_number: match.roundNumber,
+        afl_round: match.aflRound,
+        matchup_index: match.matchupIndex,
+        coach_1_id: match.coach1Id,
+        coach_1_name: match.coach1Name,
+        coach_1_score: savedResult.coach_1_score,
+        coach_2_id: match.coach2Id,
+        coach_2_name: match.coach2Name,
+        coach_2_score: savedResult.coach_2_score,
+        imported_at: savedResult.completed_at ?? "",
+      });
+    }
+
     return map;
-  }, [results]);
+  }, [finalsFixtureMatches, finalsResults, results]);
 
   const roundButtons = useMemo(() => {
     const roundSet = new Set<number>();
 
-    for (const match of fixtureMatches) {
+    for (const match of allFixtureMatches) {
       roundSet.add(match.roundNumber);
     }
 
@@ -1058,12 +1169,16 @@ export default function ResultsPage() {
       roundSet.add(result.round_number);
     }
 
+    for (let finalsRound = 15; finalsRound <= 18; finalsRound += 1) {
+      roundSet.add(finalsRound);
+    }
+
     return Array.from(roundSet).sort((a, b) => b - a);
-  }, [fixtureMatches, results]);
+  }, [allFixtureMatches, results]);
 
   const selectedRoundFixtureMatches = useMemo(() => {
-    return fixtureMatches.filter((match) => match.roundNumber === selectedRound);
-  }, [fixtureMatches, selectedRound]);
+    return allFixtureMatches.filter((match) => match.roundNumber === selectedRound);
+  }, [allFixtureMatches, selectedRound]);
 
   const selectedRoundResultOnlyMatches = useMemo(() => {
     const fixtureResultKeys = new Set(
@@ -1338,7 +1453,11 @@ export default function ResultsPage() {
               Selected Round
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-3">
-              <span className="text-3xl font-bold">{selectedRound ?? "—"}</span>
+              <span className="text-3xl font-bold">
+                {selectedRound && selectedRound >= 15
+                  ? `Finals Week ${selectedRound - 14}`
+                  : selectedRound ?? "—"}
+              </span>
               <span
                 className={`rounded-full border px-3 py-1 text-xs font-bold ${
                   selectedRoundStatus === "FINAL"
@@ -1391,7 +1510,7 @@ export default function ResultsPage() {
                         : "border-white/10 bg-white/5 text-white/70 hover:bg-white/10"
                     }`}
                   >
-                    S8 R{round}
+                    {round >= 15 ? `S8 Finals Week ${round - 14}` : `S8 R${round}`}
                   </button>
                 ))
               ) : (
@@ -1413,7 +1532,9 @@ export default function ResultsPage() {
               </div>
             ) : selectedRoundMatches.length === 0 ? (
               <div className="rounded-xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-white/70">
-                No fixture rows or results found for Super 8 Round {selectedRound}.
+                {selectedRound >= 15
+                  ? `The Finals Week ${selectedRound - 14} matchup will appear once both competing coaches are known.`
+                  : `No fixture rows or results found for Super 8 Round ${selectedRound}.`}
               </div>
             ) : (
               <div className="grid gap-4 lg:grid-cols-2">
