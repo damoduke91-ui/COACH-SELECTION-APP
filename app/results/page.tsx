@@ -660,14 +660,31 @@ export default function ResultsPage() {
       .select("id, role, coach_id, coach_name")
       .eq("id", userId)
       .eq("environment", APP_ENV)
-      .single();
+      .maybeSingle();
 
     if (error) {
       setMessage(`Profile load failed: ${error.message}`);
       return null;
     }
 
-    const profile = data as UserProfileRow | null;
+    let profile = data as UserProfileRow | null;
+
+    if (!profile && APP_ENV === "preview") {
+      const { data: productionData, error: productionError } = await supabase
+        .from("profiles")
+        .select("id, role, coach_id, coach_name")
+        .eq("id", userId)
+        .eq("environment", "production")
+        .eq("role", "admin")
+        .maybeSingle();
+
+      if (productionError) {
+        setMessage(`Preview admin verification failed: ${productionError.message}`);
+        return null;
+      }
+
+      profile = productionData as UserProfileRow | null;
+    }
 
     if (!profile) {
       setMessage("No profile found for this user.");
@@ -1212,8 +1229,12 @@ export default function ResultsPage() {
       .map((match) => match.aflRound)
       .filter((round): round is number => typeof round === "number" && Number.isFinite(round));
 
+    if (rounds.length === 0 && selectedRound && selectedRound >= 15 && selectedRound <= 18) {
+      return [FINALS_AFL_ROUNDS[selectedRound - 15]];
+    }
+
     return Array.from(new Set(rounds)).sort((a, b) => a - b);
-  }, [selectedRoundMatches]);
+  }, [selectedRound, selectedRoundMatches]);
 
   const selectedRoundImportedClubCodes = useMemo(() => {
     const clubs = new Set<string>();
