@@ -660,14 +660,31 @@ export default function ResultsPage() {
       .select("id, role, coach_id, coach_name")
       .eq("id", userId)
       .eq("environment", APP_ENV)
-      .single();
+      .maybeSingle();
 
     if (error) {
       setMessage(`Profile load failed: ${error.message}`);
       return null;
     }
 
-    const profile = data as UserProfileRow | null;
+    let profile = data as UserProfileRow | null;
+
+    if (!profile && APP_ENV === "preview") {
+      const { data: productionData, error: productionError } = await supabase
+        .from("profiles")
+        .select("id, role, coach_id, coach_name")
+        .eq("id", userId)
+        .eq("environment", "production")
+        .eq("role", "admin")
+        .maybeSingle();
+
+      if (productionError) {
+        setMessage(`Preview admin verification failed: ${productionError.message}`);
+        return null;
+      }
+
+      profile = productionData as UserProfileRow | null;
+    }
 
     if (!profile) {
       setMessage("No profile found for this user.");
