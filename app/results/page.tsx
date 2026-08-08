@@ -1229,8 +1229,12 @@ export default function ResultsPage() {
       .map((match) => match.aflRound)
       .filter((round): round is number => typeof round === "number" && Number.isFinite(round));
 
+    if (rounds.length === 0 && selectedRound && selectedRound >= 15 && selectedRound <= 18) {
+      return [FINALS_AFL_ROUNDS[selectedRound - 15]];
+    }
+
     return Array.from(new Set(rounds)).sort((a, b) => a - b);
-  }, [selectedRoundMatches]);
+  }, [selectedRound, selectedRoundMatches]);
 
   const selectedRoundImportedClubCodes = useMemo(() => {
     const clubs = new Set<string>();
