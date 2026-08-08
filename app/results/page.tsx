@@ -250,46 +250,6 @@ function isUsersMatch(match: FixtureMatch, coachId: number | null | undefined): 
   return match.coach1Id === coachId || match.coach2Id === coachId;
 }
 
-function getResultOutcome(result: MatchResultRow | null) {
-  if (!result) {
-    return {
-      label: "Result not entered",
-      margin: null as number | null,
-      isDraw: false,
-      winnerName: null as string | null,
-      loserName: null as string | null,
-    };
-  }
-
-  const coach1Score = toNumber(result.coach_1_score);
-  const coach2Score = toNumber(result.coach_2_score);
-
-  if (coach1Score === coach2Score) {
-    return {
-      label: `${result.coach_1_name} ${formatScore(coach1Score)} drew with ${result.coach_2_name} ${formatScore(coach2Score)}`,
-      margin: 0,
-      isDraw: true,
-      winnerName: null,
-      loserName: null,
-    };
-  }
-
-  const coach1Won = coach1Score > coach2Score;
-  const winnerName = coach1Won ? result.coach_1_name : result.coach_2_name;
-  const loserName = coach1Won ? result.coach_2_name : result.coach_1_name;
-  const winnerScore = coach1Won ? coach1Score : coach2Score;
-  const loserScore = coach1Won ? coach2Score : coach1Score;
-  const margin = Math.abs(coach1Score - coach2Score);
-
-  return {
-    label: `${winnerName} ${formatScore(winnerScore)} def. ${loserName} ${formatScore(loserScore)}`,
-    margin,
-    isDraw: false,
-    winnerName,
-    loserName,
-  };
-}
-
 const POSITION_ORDER = ["KD", "DEF", "MID", "FOR", "KF", "RUC"];
 const EXPECTED_AFL_CLUB_COUNT = 18;
 
@@ -1007,7 +967,12 @@ export default function ResultsPage() {
 
   useEffect(() => {
     if (!loginSession) return;
-    void refreshPageData();
+
+    const refreshTimer = window.setTimeout(() => {
+      void refreshPageData();
+    }, 0);
+
+    return () => window.clearTimeout(refreshTimer);
   }, [loginSession, refreshPageData]);
 
   useEffect(() => {
