@@ -20,6 +20,20 @@ BEGIN
   target_afl_round := 20 + p_week;
   target_super8_round := 14 + p_week;
 
+  UPDATE public.afl_matches
+  SET afl_round = target_afl_round,
+      updated_at = p_now
+  WHERE environment = 'preview'
+    AND status = 'FIXTURE_ONLY'
+    AND afl_round = ANY (ARRAY[21, 22, 23, 24]);
+
+  IF (SELECT count(*) FROM public.afl_matches
+      WHERE environment = 'preview'
+        AND status = 'FIXTURE_ONLY'
+        AND afl_round = target_afl_round) <> 9 THEN
+    RAISE EXCEPTION 'Preview fixture staging requires exactly nine fixture-only matches.';
+  END IF;
+
   DELETE FROM public.finals_results
   WHERE environment = 'preview' AND season_year = p_season_year;
 
