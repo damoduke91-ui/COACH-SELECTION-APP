@@ -60,6 +60,37 @@ LOG_PATH = SCRIPT_DIR / "afl_stats_scheduler.log"
 STATE_PATH = SCRIPT_DIR / "afl_stats_scheduler_state.json"
 EXPECTED_MATCHES_PER_ROUND = 9
 
+
+def configured_recovery_target() -> tuple[int | None, list[str]]:
+    """Return the explicitly locked recovery round and match IDs, if configured."""
+    forced_round_text = os.environ.get("AFL_STATS_FORCED_ROUND", "").strip()
+    match_ids_text = os.environ.get("AFL_STATS_MATCH_IDS", "").strip()
+
+    if not forced_round_text and not match_ids_text:
+        return None, []
+    if not forced_round_text or not match_ids_text:
+        raise ValueError(
+            "Locked recovery requires both AFL_STATS_FORCED_ROUND and AFL_STATS_MATCH_IDS."
+        )
+    if not forced_round_text.isdigit():
+        raise ValueError("AFL_STATS_FORCED_ROUND must be a whole number from 1 to 24.")
+
+    forced_round = int(forced_round_text)
+    if forced_round < 1 or forced_round > 24:
+        raise ValueError("AFL_STATS_FORCED_ROUND must be a whole number from 1 to 24.")
+
+    supplied_ids = [value.strip() for value in match_ids_text.split(",") if value.strip()]
+    if any(not value.isdigit() for value in supplied_ids):
+        raise ValueError("Every AFL_STATS_MATCH_IDS value must be a numeric FootyWire match ID.")
+
+    match_ids = sorted(set(supplied_ids), key=int)
+    if len(supplied_ids) != EXPECTED_MATCHES_PER_ROUND or len(match_ids) != EXPECTED_MATCHES_PER_ROUND:
+        raise ValueError(
+            f"Locked recovery requires exactly {EXPECTED_MATCHES_PER_ROUND} unique FootyWire match IDs."
+        )
+
+    return forced_round, match_ids
+
 ROUND_FOLDERS = {}
 for round_num in range(0, 25):
     round_dir = SCRIPT_DIR / f"Round {round_num}"
@@ -469,6 +500,10 @@ def fetch_match(mid: str) -> dict:
 def parse_match(html: str, mid: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
 
+    page_text = soup.get_text(" ", strip=True)
+    page_round_match = re.search(r"\bRound\s+(\d+)\b", page_text, re.IGNORECASE)
+    page_round = int(page_round_match.group(1)) if page_round_match else None
+
     title = f"Match {mid}"
     for sel in [".lnormtitle", "h1", ".lheader", "title"]:
         el = soup.select_one(sel)
@@ -572,7 +607,7 @@ def parse_match(html: str, mid: str) -> dict:
                         used.add(title_teams[title_idx])
                         title_idx += 1
 
-    return {"mid": mid, "title": title, "teams": teams}
+    return {"mid": mid, "title": title, "round": page_round, "teams": teams}
 
 
 # ── Excel building ────────────────────────────────────────────────────────────
@@ -1124,7 +1159,18 @@ def run_scheduled_fetch() -> int:
     log("Scheduled AFL stats run started")
 
     try:
-        round_num, match_ids = detect_round_and_match_ids()
+        forced_round, forced_match_ids = configured_recovery_target()
+        recovery_mode = forced_round is not None
+
+        if recovery_mode:
+            round_num = forced_round
+            match_ids = forced_match_ids
+            log(
+                f"Locked recovery mode: AFL Round {round_num} with exactly "
+                f"{len(match_ids)} explicitly supplied match IDs."
+            )
+        else:
+            round_num, match_ids = detect_round_and_match_ids()
         if round_num is None:
             log("Could not detect the current round number from FootyWire.")
             return 1
@@ -1149,7 +1195,7 @@ def run_scheduled_fetch() -> int:
 
         round_is_complete = len(match_ids) >= EXPECTED_MATCHES_PER_ROUND
 
-        if previous_ids == match_ids and LATEST_XLSX_PATH.exists():
+        if not recovery_mode and previous_ids == match_ids and LATEST_XLSX_PATH.exists():
             if round_state.get("complete"):
                 log(
                     f"Round {round_num} is already marked complete with "
@@ -1172,11 +1218,31 @@ def run_scheduled_fetch() -> int:
             try:
                 match_data = fetch_match(mid)
                 player_count = sum(len(team.get("players", [])) for team in match_data.get("teams", []))
+
+                if recovery_mode:
+                    detected_match_round = match_data.get("round")
+                    if detected_match_round != round_num:
+                        raise ValueError(
+                            f"Safety stop: match {mid} identifies as Round "
+                            f"{detected_match_round or 'unknown'}, not requested Round {round_num}."
+                        )
+                    if player_count < 40:
+                        raise ValueError(
+                            f"Safety stop: match {mid} contains only {player_count} player rows."
+                        )
+
                 total_players += player_count
                 all_matches.append(match_data)
                 log(f"Fetched mid={mid} — {match_data['title']} ({player_count} players)")
             except Exception as exc:
                 log(f"Failed mid={mid} — {exc}")
+
+        if recovery_mode and len(all_matches) != EXPECTED_MATCHES_PER_ROUND:
+            log(
+                "Locked recovery stopped before file generation: "
+                f"validated {len(all_matches)} of {EXPECTED_MATCHES_PER_ROUND} required matches."
+            )
+            return 1
 
         if not all_matches:
             log("No matches were fetched successfully. XLSX was not saved.")
