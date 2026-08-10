@@ -7,6 +7,10 @@ on:
         description: Confirmed AFL round from the production admin dashboard
         required: true
         type: string
+      recovery_match_ids:
+        description: Optional locked recovery list of exactly nine comma-separated FootyWire match IDs
+        required: false
+        type: string
       confirmation_phrase:
         description: Production safety confirmation
         required: true
@@ -48,6 +52,8 @@ jobs:
         working-directory: tools/afl-preview-fetcher
         env:
           AFL_STATS_ENVIRONMENT: production
+          AFL_STATS_FORCED_ROUND: ${{ inputs.recovery_match_ids && inputs.expected_round || '' }}
+          AFL_STATS_MATCH_IDS: ${{ inputs.recovery_match_ids || '' }}
         run: |
           & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" afl_stats_scheduled_runner.py
 
