@@ -90,12 +90,23 @@ export async function POST(request: NextRequest) {
 
     const importedAt = new Date().toISOString();
     const fixtureOnly = matches.every((match) => match.status === "FIXTURE_ONLY");
+    let sourceTeamListRound: number | null = null;
     const rows = fixtureOnly
       ? await (async () => {
+          const { data: latestList, error: latestListError } = await supabaseAdmin
+            .from("weekly_team_lists")
+            .select("round")
+            .lte("round", confirmedRound)
+            .order("round", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (latestListError) throw new Error(`Team-list round lookup failed: ${latestListError.message}`);
+          sourceTeamListRound = Number(latestList?.round) || null;
+          if (!sourceTeamListRound) throw new Error(`No team-list snapshot is available at or before AFL Round ${confirmedRound}.`);
           const { data: players, error: playersError } = await supabaseAdmin
             .from("weekly_team_lists")
             .select("player_name,afl_team")
-            .eq("round", confirmedRound);
+            .eq("round", sourceTeamListRound);
           if (playersError) throw new Error(`Round team-list load failed: ${playersError.message}`);
           const teamCodeByName = new Map<string, string>();
           for (const match of matches) {
@@ -145,6 +156,7 @@ export async function POST(request: NextRequest) {
         error: coverageFailure.error,
         clubCount: clubs.size,
         playerCount: rows.length,
+        sourceTeamListRound,
         source: fixtureOnly ? "deterministic-fixture" : "afl-api",
       });
     }
@@ -180,6 +192,7 @@ export async function POST(request: NextRequest) {
       clubCount: clubs.size,
       playerCount: rows.length,
       source: fixtureOnly ? "deterministic-fixture" : "afl-api",
+      sourceTeamListRound,
       message: `Imported ${rows.length} player rows for all ${clubs.size} clubs into Preview AFL Round ${confirmedRound}. Production was not changed.`,
     });
   } catch (error) {
