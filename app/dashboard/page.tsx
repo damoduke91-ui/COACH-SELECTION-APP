@@ -1278,6 +1278,8 @@ const refreshPlayerStats = useCallback(async () => {
     }
   }, [currentAflRound, loginSession?.role]);
 
+  // Retained temporarily for compatibility with local Preview workers; no Vercel control is rendered.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const generatePreviewAflCsvFiles = useCallback(async () => {
     if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
       setMessage("Preview admin access and a current AFL round are required.");
@@ -1342,6 +1344,8 @@ const refreshPlayerStats = useCallback(async () => {
     }
   }, [currentAflRound, loginSession?.role]);
 
+  // Retained temporarily for compatibility with local Preview workers; no Vercel control is rendered.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const checkPreviewCsvImport = useCallback(async () => {
     if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
       setMessage("Preview admin access and a current AFL round are required.");
@@ -1400,12 +1404,12 @@ const refreshPlayerStats = useCallback(async () => {
     }
 
     const confirmed = window.confirm(
-      `Insert new player rows from the generated match CSVs into Preview Round ${currentAflRound}?\n\nExisting rows will be skipped and protected. Production will not be changed.`
+      `Fetch and import all completed AFL player stats into Preview Round ${currentAflRound}?\n\nRows are upserted in Preview only. Production will not be changed.`
     );
     if (!confirmed) return;
 
     setIsImportingPreviewCsv(true);
-    setMessage(`Importing protected CSV rows into Preview Round ${currentAflRound}...`);
+    setMessage(`Importing AFL player stats into Preview Round ${currentAflRound}...`);
 
     try {
       const {
@@ -1417,13 +1421,13 @@ const refreshPlayerStats = useCallback(async () => {
       const accessToken = session?.access_token;
       if (!accessToken) throw new Error("No active session found. Please log in again.");
 
-      const response = await fetch("/api/admin/import-preview-csv-files", {
+      const response = await fetch("/api/admin/preview-afl-csv-pipeline", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ confirmRound: currentAflRound }),
+        body: JSON.stringify({ confirmRound: currentAflRound, dryRun: false }),
       });
 
       const payload = (await response.json().catch(() => null)) as {
@@ -1440,15 +1444,17 @@ const refreshPlayerStats = useCallback(async () => {
       }
 
       await refreshPlayerStats();
-      setMessage(payload.message ?? "Protected Preview CSV import completed.");
+      setMessage(payload.message ?? "Preview AFL stats import completed.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown Preview import error.";
-      setMessage(`Protected Preview CSV import failed: ${message}`);
+      setMessage(`Preview AFL stats import failed: ${message}`);
     } finally {
       setIsImportingPreviewCsv(false);
     }
   }, [currentAflRound, loginSession?.role, refreshPlayerStats]);
 
+  // Retained temporarily for compatibility with local Preview workers; no Vercel control is rendered.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const deletePreviewRoundStats = useCallback(async () => {
     if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
       setMessage("Preview admin access and a current AFL round are required.");
@@ -2397,49 +2403,7 @@ async function handleExportTeamsXlsx() {
                       >
                         {isCheckingPreviewPipeline
                           ? "Checking Preview Pipeline..."
-                          : "Check AFL CSV Pipeline (Dry Run)"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => void generatePreviewAflCsvFiles()}
-                        disabled={
-                          isFetchingPreviewCsv ||
-                          isCheckingPreviewPipeline ||
-                          isCheckingPreviewImport ||
-                          isImportingPreviewCsv ||
-                          isDeletingPreviewStats ||
-                          isClearingLiveScores ||
-                          isCompletingWeek ||
-                          isSavingRound ||
-                          !currentAflRound
-                        }
-                        className="rounded-xl border border-violet-400/30 bg-violet-500/20 px-4 py-3 text-sm font-semibold text-violet-100 transition hover:bg-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isFetchingPreviewCsv
-                          ? "Generating Preview CSVs..."
-                          : "Generate Preview CSVs"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => void checkPreviewCsvImport()}
-                        disabled={
-                          isCheckingPreviewImport ||
-                          isImportingPreviewCsv ||
-                          isDeletingPreviewStats ||
-                          isFetchingPreviewCsv ||
-                          isCheckingPreviewPipeline ||
-                          isClearingLiveScores ||
-                          isCompletingWeek ||
-                          isSavingRound ||
-                          !currentAflRound
-                        }
-                        className="rounded-xl border border-cyan-400/30 bg-cyan-500/20 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isCheckingPreviewImport
-                          ? "Checking Protected Import..."
-                          : "Check Protected CSV Import"}
+                          : "Check Preview AFL Import (Dry Run)"}
                       </button>
 
                       <button
@@ -2459,29 +2423,8 @@ async function handleExportTeamsXlsx() {
                         className="rounded-xl border border-emerald-400/30 bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {isImportingPreviewCsv
-                          ? "Importing Preview CSVs..."
-                          : "Import Protected Preview CSVs"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => void deletePreviewRoundStats()}
-                        disabled={
-                          isDeletingPreviewStats ||
-                          isImportingPreviewCsv ||
-                          isCheckingPreviewImport ||
-                          isFetchingPreviewCsv ||
-                          isCheckingPreviewPipeline ||
-                          isClearingLiveScores ||
-                          isCompletingWeek ||
-                          isSavingRound ||
-                          !currentAflRound
-                        }
-                        className="rounded-xl border border-red-500/50 bg-red-950/40 px-4 py-3 text-sm font-semibold text-red-200 transition hover:bg-red-900/50 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isDeletingPreviewStats
-                          ? "Processing Preview Deletion..."
-                          : "Exception Only: Delete Preview Round Stats"}
+                          ? "Importing Preview AFL Stats..."
+                          : "Import Preview AFL Stats"}
                       </button>
                     </>
                   )}
