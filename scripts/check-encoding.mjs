@@ -1,7 +1,10 @@
+import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 const ROOT = process.cwd();
+const execFileAsync = promisify(execFile);
 const INCLUDED_EXTENSIONS = new Set([
   ".css",
   ".html",
@@ -62,11 +65,16 @@ async function collectFiles(directory) {
 const failures = [];
 
 for (const absolutePath of await collectFiles(ROOT)) {
-  if (path.relative(ROOT, absolutePath) === path.join("scripts", "check-encoding.mjs")) {
-    continue;
+  const content = await readFile(absolutePath, "utf8");
+  const relativePath = path.relative(ROOT, absolutePath);
+
+  if (content.startsWith("\uFEFF")) {
+    failures.push(`${relativePath}:1 - UTF-8 byte-order mark (BOM)`);
   }
 
-  const content = await readFile(absolutePath, "utf8");
+  if (relativePath === path.join("scripts", "check-encoding.mjs")) {
+    continue;
+  }
 
   for (const { label, pattern } of INVALID_PATTERNS) {
     const match = pattern.exec(content);
@@ -76,7 +84,21 @@ for (const absolutePath of await collectFiles(ROOT)) {
     }
 
     const line = content.slice(0, match.index).split(/\r?\n/u).length;
-    failures.push(`${path.relative(ROOT, absolutePath)}:${line} - ${label}`);
+    failures.push(`${relativePath}:${line} - ${label}`);
+  }
+}
+
+const { stdout: gitEolOutput } = await execFileAsync("git", ["ls-files", "--eol"], {
+  cwd: ROOT,
+});
+
+for (const line of gitEolOutput.split(/\r?\n/u)) {
+  const match = /^i\/(\S+)\s+[^\t]*\t(.+)$/u.exec(line);
+  if (!match || match[1] !== "crlf") continue;
+
+  const relativePath = match[2];
+  if (INCLUDED_EXTENSIONS.has(path.extname(relativePath).toLowerCase())) {
+    failures.push(`${relativePath}:1 - committed CRLF line endings (LF required)`);
   }
 }
 
