@@ -632,10 +632,7 @@ const [isSavingRound, setIsSavingRound] = useState(false);
 const [isCompletingWeek, setIsCompletingWeek] = useState(false);
 const [isClearingLiveScores, setIsClearingLiveScores] = useState(false);
 const [isCheckingPreviewPipeline, setIsCheckingPreviewPipeline] = useState(false);
-const [isFetchingPreviewCsv, setIsFetchingPreviewCsv] = useState(false);
-const [isCheckingPreviewImport, setIsCheckingPreviewImport] = useState(false);
-const [isImportingPreviewCsv, setIsImportingPreviewCsv] = useState(false);
-const [isDeletingPreviewStats, setIsDeletingPreviewStats] = useState(false);
+const [isImportingPreviewStats, setIsImportingPreviewStats] = useState(false);
 const [isDeletingProductionCsv, setIsDeletingProductionCsv] = useState(false);
 const [isExportingTeams, setIsExportingTeams] = useState(false);
 const [snapshotRoundInput, setSnapshotRoundInput] = useState("8");
@@ -1219,7 +1216,7 @@ const refreshPlayerStats = useCallback(async () => {
     }
 
     if (loginSession?.role !== "admin") {
-      setMessage("Only a preview admin can check the AFL CSV pipeline.");
+      setMessage("Only a Preview admin can check the AFL stats import.");
       return;
     }
 
@@ -1229,7 +1226,7 @@ const refreshPlayerStats = useCallback(async () => {
     }
 
     setIsCheckingPreviewPipeline(true);
-    setMessage(`Checking the preview AFL CSV pipeline for Round ${currentAflRound}...`);
+    setMessage(`Checking the Preview AFL stats import for Round ${currentAflRound}...`);
 
     try {
       const {
@@ -1278,126 +1275,7 @@ const refreshPlayerStats = useCallback(async () => {
     }
   }, [currentAflRound, loginSession?.role]);
 
-  // Retained temporarily for compatibility with local Preview workers; no Vercel control is rendered.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const generatePreviewAflCsvFiles = useCallback(async () => {
-    if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
-      setMessage("Preview admin access and a current AFL round are required.");
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Fetch completed FootyWire matches and generate local preview CSV files for AFL Round ${currentAflRound}?\n\nThis will not clear scores or upload anything to Supabase.`
-    );
-    if (!confirmed) return;
-
-    setIsFetchingPreviewCsv(true);
-    setMessage(`Generating local preview CSV files for AFL Round ${currentAflRound}...`);
-
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError) throw new Error(sessionError.message);
-      const accessToken = session?.access_token;
-      if (!accessToken) throw new Error("No active session found. Please log in again.");
-
-      const response = await fetch("/api/admin/run-preview-afl-fetcher", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ confirmRound: currentAflRound }),
-      });
-
-      const payload = (await response.json().catch(() => null)) as {
-        success?: boolean;
-        message?: string;
-        error?: string;
-        details?: string;
-        matchCount?: number;
-        playerCount?: number;
-        roundCsv?: string | null;
-        perGameFiles?: string[];
-      } | null;
-
-      if (!response.ok || !payload?.success) {
-        const errorMessage = payload?.error ?? payload?.message ?? "Preview CSV generation failed.";
-        const details = payload?.details ? ` ${payload.details}` : "";
-        throw new Error(`${errorMessage}${details}`);
-      }
-
-      const fileCount = payload.perGameFiles?.length ?? 0;
-      setMessage(
-        `${payload.message ?? "Preview CSV generation completed."} ` +
-          `${payload.matchCount ?? 0} matches, ${payload.playerCount ?? 0} players, ` +
-          `${fileCount} match CSV files${payload.roundCsv ? ` plus ${payload.roundCsv}` : ""}.`
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown preview fetcher error.";
-      setMessage(`Preview CSV generation failed: ${message}`);
-    } finally {
-      setIsFetchingPreviewCsv(false);
-    }
-  }, [currentAflRound, loginSession?.role]);
-
-  // Retained temporarily for compatibility with local Preview workers; no Vercel control is rendered.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const checkPreviewCsvImport = useCallback(async () => {
-    if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
-      setMessage("Preview admin access and a current AFL round are required.");
-      return;
-    }
-
-    setIsCheckingPreviewImport(true);
-    setMessage(`Checking protected CSV imports for Preview Round ${currentAflRound}...`);
-
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-      if (sessionError) throw new Error(sessionError.message);
-
-      const accessToken = session?.access_token;
-      if (!accessToken) throw new Error("No active session found. Please log in again.");
-
-      const response = await fetch("/api/admin/check-preview-csv-import", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ confirmRound: currentAflRound }),
-      });
-
-      const payload = (await response.json().catch(() => null)) as {
-        success?: boolean;
-        dryRun?: boolean;
-        message?: string;
-        error?: string;
-        details?: string;
-      } | null;
-
-      if (!response.ok || !payload?.success || !payload.dryRun) {
-        const errorMessage = payload?.error ?? payload?.message ?? "Protected import check failed.";
-        const details = payload?.details ? ` ${payload.details}` : "";
-        throw new Error(`${errorMessage}${details}`);
-      }
-
-      setMessage(payload.message ?? "Protected preview import check completed. No rows were changed.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown import-check error.";
-      setMessage(`Protected preview import check failed: ${message}`);
-    } finally {
-      setIsCheckingPreviewImport(false);
-    }
-  }, [currentAflRound, loginSession?.role]);
-
-  const importPreviewCsvFiles = useCallback(async () => {
+  const importPreviewAflStats = useCallback(async () => {
     if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
       setMessage("Preview admin access and a current AFL round are required.");
       return;
@@ -1408,7 +1286,7 @@ const refreshPlayerStats = useCallback(async () => {
     );
     if (!confirmed) return;
 
-    setIsImportingPreviewCsv(true);
+    setIsImportingPreviewStats(true);
     setMessage(`Importing AFL player stats into Preview Round ${currentAflRound}...`);
 
     try {
@@ -1449,84 +1327,7 @@ const refreshPlayerStats = useCallback(async () => {
       const message = error instanceof Error ? error.message : "Unknown Preview import error.";
       setMessage(`Preview AFL stats import failed: ${message}`);
     } finally {
-      setIsImportingPreviewCsv(false);
-    }
-  }, [currentAflRound, loginSession?.role, refreshPlayerStats]);
-
-  // Retained temporarily for compatibility with local Preview workers; no Vercel control is rendered.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const deletePreviewRoundStats = useCallback(async () => {
-    if (APP_ENV !== "preview" || loginSession?.role !== "admin" || !currentAflRound) {
-      setMessage("Preview admin access and a current AFL round are required.");
-      return;
-    }
-
-    setIsDeletingPreviewStats(true);
-    setMessage(`Inspecting Preview Round ${currentAflRound} deletion...`);
-
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-      if (sessionError) throw new Error(sessionError.message);
-
-      const accessToken = session?.access_token;
-      if (!accessToken) throw new Error("No active session found. Please log in again.");
-
-      const requestDeletion = async (body: Record<string, unknown>) => {
-        const response = await fetch("/api/admin/delete-preview-round-stats", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
-        const payload = (await response.json().catch(() => null)) as {
-          success?: boolean;
-          message?: string;
-          error?: string;
-          details?: string;
-          affectedRowCount?: number;
-          requiredConfirmation?: string;
-        } | null;
-        if (!response.ok || !payload?.success) {
-          const errorMessage = payload?.error ?? payload?.message ?? "Preview deletion failed.";
-          const details = payload?.details ? ` ${payload.details}` : "";
-          throw new Error(`${errorMessage}${details}`);
-        }
-        return payload;
-      };
-
-      const inspection = await requestDeletion({
-        action: "inspect",
-        confirmRound: currentAflRound,
-      });
-      const requiredConfirmation = inspection.requiredConfirmation;
-      if (!requiredConfirmation) throw new Error("The server did not provide a confirmation phrase.");
-
-      const enteredConfirmation = window.prompt(
-        `${inspection.affectedRowCount ?? 0} Preview player-stat rows will be permanently deleted for AFL Round ${currentAflRound}.\n\nProduction will not be changed.\n\nType this exact phrase to continue:\n${requiredConfirmation}`
-      );
-
-      if (enteredConfirmation === null) {
-        setMessage("Preview deletion cancelled. No rows were changed.");
-        return;
-      }
-
-      const result = await requestDeletion({
-        action: "delete",
-        confirmRound: currentAflRound,
-        confirmation: enteredConfirmation,
-      });
-      await refreshPlayerStats();
-      setMessage(result.message ?? "Preview round rows were deleted.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown Preview deletion error.";
-      setMessage(`Preview deletion failed: ${message}`);
-    } finally {
-      setIsDeletingPreviewStats(false);
+      setIsImportingPreviewStats(false);
     }
   }, [currentAflRound, loginSession?.role, refreshPlayerStats]);
 
@@ -2372,10 +2173,7 @@ async function handleExportTeamsXlsx() {
                       isCompletingWeek ||
                       isClearingLiveScores ||
                       isCheckingPreviewPipeline ||
-                      isFetchingPreviewCsv ||
-                      isCheckingPreviewImport ||
-                      isImportingPreviewCsv ||
-                      isDeletingPreviewStats ||
+                      isImportingPreviewStats ||
                       isDeletingProductionCsv
                     }
                     className="rounded-xl border border-yellow-400/30 bg-yellow-500/20 px-4 py-3 text-sm font-semibold text-yellow-100 transition hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-60"
@@ -2390,10 +2188,7 @@ async function handleExportTeamsXlsx() {
                         onClick={() => void checkPreviewAflCsvPipeline()}
                         disabled={
                           isCheckingPreviewPipeline ||
-                          isFetchingPreviewCsv ||
-                          isCheckingPreviewImport ||
-                          isImportingPreviewCsv ||
-                          isDeletingPreviewStats ||
+                          isImportingPreviewStats ||
                           isClearingLiveScores ||
                           isCompletingWeek ||
                           isSavingRound ||
@@ -2408,12 +2203,9 @@ async function handleExportTeamsXlsx() {
 
                       <button
                         type="button"
-                        onClick={() => void importPreviewCsvFiles()}
+                        onClick={() => void importPreviewAflStats()}
                         disabled={
-                          isImportingPreviewCsv ||
-                          isDeletingPreviewStats ||
-                          isCheckingPreviewImport ||
-                          isFetchingPreviewCsv ||
+                          isImportingPreviewStats ||
                           isCheckingPreviewPipeline ||
                           isClearingLiveScores ||
                           isCompletingWeek ||
@@ -2422,7 +2214,7 @@ async function handleExportTeamsXlsx() {
                         }
                         className="rounded-xl border border-emerald-400/30 bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {isImportingPreviewCsv
+                        {isImportingPreviewStats
                           ? "Importing Preview AFL Stats..."
                           : "Import Preview AFL Stats"}
                       </button>
@@ -2456,10 +2248,7 @@ async function handleExportTeamsXlsx() {
                       isCompletingWeek ||
                       isSavingRound ||
                       isCheckingPreviewPipeline ||
-                      isFetchingPreviewCsv ||
-                      isCheckingPreviewImport ||
-                      isImportingPreviewCsv ||
-                      isDeletingPreviewStats ||
+                      isImportingPreviewStats ||
                       isDeletingProductionCsv
                     }
                     className="rounded-xl border border-red-400/30 bg-red-500/20 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-60"
@@ -2479,10 +2268,7 @@ async function handleExportTeamsXlsx() {
                       isSavingRound ||
                       isClearingLiveScores ||
                       isCheckingPreviewPipeline ||
-                      isFetchingPreviewCsv ||
-                      isCheckingPreviewImport ||
-                      isImportingPreviewCsv ||
-                      isDeletingPreviewStats ||
+                      isImportingPreviewStats ||
                       isDeletingProductionCsv ||
                       currentFinalsWeek !== null ||
                       currentRoundStatus !== "FINAL" ||

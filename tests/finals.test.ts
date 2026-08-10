@@ -14,6 +14,7 @@ import {
   getPreviewFinalsScenario,
 } from "../lib/previewFinalsScenarios.ts";
 import { buildDeterministicPreviewStats } from "../lib/previewAflStats.ts";
+import { validatePreviewImportAccess, validatePreviewImportCoverage, validatePreviewImportRound } from "../lib/previewImportGuards.ts";
 
 const regularSeasonResults: RegularSeasonResult[] = [
   { round_number: 1, coach_1_name: "Seed 1", coach_1_score: 500, coach_2_name: "Seed 5", coach_2_score: 100 },
@@ -134,4 +135,20 @@ test("builds repeatable Preview fixture stats for mapped players", () => {
   assert.equal(first.length, 2);
   assert.deepEqual(first.map((row) => row.afl_team_code), ["ONE", "TWO"]);
   assert.ok(first.every((row) => row.d === row.k + row.hb && row.af > 0));
+});
+
+test("guards the Preview import route environment, admin, and round", () => {
+  assert.equal(validatePreviewImportAccess("preview", true), null);
+  assert.equal(validatePreviewImportAccess("production", true)?.status, 403);
+  assert.equal(validatePreviewImportAccess("preview", false)?.status, 403);
+  assert.equal(validatePreviewImportRound(21, 21), null);
+  assert.equal(validatePreviewImportRound(21, 22)?.status, 409);
+  assert.equal(validatePreviewImportRound(0, 21)?.status, 400);
+});
+
+test("guards the Preview import route match and club coverage", () => {
+  assert.equal(validatePreviewImportCoverage(21, 9, 18, 468), null);
+  assert.equal(validatePreviewImportCoverage(21, 8, 18, 468)?.status, 422);
+  assert.equal(validatePreviewImportCoverage(21, 9, 17, 450)?.status, 422);
+  assert.equal(validatePreviewImportCoverage(21, 9, 18, 0)?.status, 422);
 });
