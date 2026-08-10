@@ -7,9 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check:encoding": "node scripts/check-encoding.mjs",
-    "check:preview": "npm run check:encoding && npm run typecheck && npm run build"
+    "check:preview": "npm run check:encoding && npm test && npm run typecheck && npm run build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.3",
