@@ -14,6 +14,14 @@ export const maxDuration = 60;
 
 const EXPECTED_MATCH_COUNT = 9;
 const EXPECTED_CLUB_COUNT = 18;
+const WEEKLY_LIST_TEAM_ALIASES: Record<string, string> = {
+  adelaide: "adelaide crows",
+  brisbane: "brisbane lions",
+  geelong: "geelong cats",
+  "gold coast": "gold coast suns",
+  sydney: "sydney swans",
+  "west coast": "west coast eagles",
+};
 
 function response(status: number, payload: Record<string, unknown>) {
   return NextResponse.json(payload, { status });
@@ -114,6 +122,10 @@ export async function POST(request: NextRequest) {
                 normaliseClub(match.away_app_team_code ?? match.away_team_code),
               );
             }
+          }
+          for (const [weeklyListName, fixtureName] of Object.entries(WEEKLY_LIST_TEAM_ALIASES)) {
+            const code = teamCodeByName.get(fixtureName);
+            if (code) teamCodeByName.set(weeklyListName, code);
           }
           return buildDeterministicPreviewStats({
             aflRound: confirmedRound,
