@@ -83,10 +83,12 @@ export default function FinalsPage() {
   const [message, setMessage] = useState("");
   const [savingCode, setSavingCode] = useState<FinalsMatchCode | null>(null);
   const [completingWeek, setCompletingWeek] = useState(false);
+  const [stagingWeek, setStagingWeek] = useState<number | null>(null);
+  const [currentPreviewWeek, setCurrentPreviewWeek] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Partial<Record<FinalsMatchCode, [string, string]>>>({});
 
   const refresh = useCallback(async () => {
-    const [regular, finals, submissionRows] = await Promise.all([
+    const [regular, finals, submissionRows, settings] = await Promise.all([
       supabase
         .from("super8_match_results")
         .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
@@ -103,6 +105,11 @@ export default function FinalsPage() {
         .eq("is_submitted", true)
         .gte("round_number", 15)
         .lte("round_number", 18),
+      supabase
+        .from("app_settings")
+        .select("current_afl_round, current_super8_round")
+        .eq("environment", APP_ENV)
+        .maybeSingle(),
     ]);
     const statQueries = await Promise.all(
       FINALS_AFL_ROUNDS.map((aflRound) =>
@@ -122,6 +129,13 @@ export default function FinalsPage() {
       setFinalsResults((finals.data ?? []) as FinalsResult[]);
     }
     if (!submissionRows.error) setSubmissions((submissionRows.data ?? []) as typeof submissions);
+    if (!settings.error && settings.data) {
+      const aflWeek = FINALS_AFL_ROUNDS.indexOf(
+        Number(settings.data.current_afl_round) as (typeof FINALS_AFL_ROUNDS)[number],
+      ) + 1;
+      const super8Week = Number(settings.data.current_super8_round) - 14;
+      setCurrentPreviewWeek(aflWeek >= 1 && aflWeek <= 4 && aflWeek === super8Week ? aflWeek : null);
+    }
     const statError = statQueries.find((query) => query.error)?.error;
     if (statError) {
       setMessage(`Finals live score load failed: ${statError.message}`);
@@ -319,6 +333,39 @@ export default function FinalsPage() {
     }
   }
 
+  async function stagePreviewWeek(week: number) {
+    if (
+      !window.confirm(
+        `Stage Preview Finals Week ${week}? This clears all Preview-only Finals results, submissions, stats and finalisation rows, then creates deterministic prerequisite results. Production is never changed.`,
+      )
+    ) return;
+
+    setStagingWeek(week);
+    setMessage("");
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) {
+      setStagingWeek(null);
+      router.replace("/login");
+      return;
+    }
+
+    try {
+      const result = await fetch("/api/admin/stage-preview-finals", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ week }),
+      });
+      const payload = (await result.json()) as { message?: string; error?: string };
+      setMessage(payload.message ?? payload.error ?? "Preview Finals staging returned no message.");
+      if (result.ok) await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not stage the Preview Finals week.");
+    } finally {
+      setStagingWeek(null);
+    }
+  }
+
   if (!role) {
     return <main className="min-h-screen bg-neutral-950 p-8 text-white">Loading finals...</main>;
   }
@@ -365,6 +412,36 @@ export default function FinalsPage() {
 
         {role === "admin" ? (
           <>
+          {APP_ENV === "preview" ? (
+            <section className="rounded-2xl border border-sky-300/30 bg-sky-300/10 p-5">
+              <h2 className="text-xl font-bold text-sky-200">Preview Finals Scenarios</h2>
+              <p className="mt-1 text-sm text-white/70">
+                Start any Finals week from a clean, repeatable Preview-only state. Earlier
+                matchups receive fixed results so the bracket is ready for the selected week.
+              </p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                {[1, 2, 3, 4].map((week) => (
+                  <button
+                    key={week}
+                    type="button"
+                    onClick={() => void stagePreviewWeek(week)}
+                    disabled={stagingWeek !== null}
+                    aria-pressed={currentPreviewWeek === week}
+                    className={`rounded-xl px-4 py-3 font-black disabled:opacity-50 ${
+                      currentPreviewWeek === week
+                        ? "bg-sky-200 text-neutral-950 ring-2 ring-white"
+                        : "border border-sky-200/30 bg-sky-950/40 text-sky-100 hover:bg-sky-900/60"
+                    }`}
+                  >
+                    {stagingWeek === week ? "Staging..." : `Stage Week ${week}`}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-sky-100/70">
+                Current matching Round Control: {currentPreviewWeek ? `Finals Week ${currentPreviewWeek}` : "not set to Finals"}.
+              </p>
+            </section>
+          ) : null}
           <section className="rounded-2xl border border-yellow-300/30 bg-yellow-300/10 p-5">
             <h2 className="text-xl font-bold text-yellow-300">Complete Finals Week</h2>
             <p className="mt-1 text-sm text-white/70">

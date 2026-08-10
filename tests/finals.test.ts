@@ -9,6 +9,10 @@ import {
   type FinalsResult,
   type RegularSeasonResult,
 } from "../lib/finals.ts";
+import {
+  buildPreviewFinalsPrerequisites,
+  getPreviewFinalsScenario,
+} from "../lib/previewFinalsScenarios.ts";
 
 const regularSeasonResults: RegularSeasonResult[] = [
   { round_number: 1, coach_1_name: "Seed 1", coach_1_score: 500, coach_2_name: "Seed 5", coach_2_score: 100 },
@@ -85,4 +89,29 @@ test("does not progress a tied or incomplete final", () => {
   assert.equal(bracket.matches[0]?.winner, null);
   assert.equal(bracket.matches[1]?.complete, false);
   assert.equal(bracket.matches[1]?.winner, null);
+});
+
+test("defines matching deterministic Preview staging rounds for Finals Weeks 1-4", () => {
+  assert.deepEqual(
+    [1, 2, 3, 4].map((week) => getPreviewFinalsScenario(week)),
+    [
+      { week: 1, aflRound: 21, super8Round: 15, prerequisiteMatches: [] },
+      { week: 2, aflRound: 22, super8Round: 16, prerequisiteMatches: ["QF", "EF"] },
+      { week: 3, aflRound: 23, super8Round: 17, prerequisiteMatches: ["QF", "EF", "SF1", "SF2"] },
+      { week: 4, aflRound: 24, super8Round: 18, prerequisiteMatches: ["QF", "EF", "SF1", "SF2", "PF"] },
+    ],
+  );
+  assert.equal(getPreviewFinalsScenario(0), null);
+  assert.equal(getPreviewFinalsScenario(5), null);
+});
+
+test("stages only completed prerequisite matches with stable non-drawn scores", () => {
+  assert.deepEqual(buildPreviewFinalsPrerequisites(1), []);
+  assert.deepEqual(buildPreviewFinalsPrerequisites(4), [
+    { match_code: "QF", coach_1_score: 101, coach_2_score: 91 },
+    { match_code: "EF", coach_1_score: 102, coach_2_score: 92 },
+    { match_code: "SF1", coach_1_score: 103, coach_2_score: 93 },
+    { match_code: "SF2", coach_1_score: 104, coach_2_score: 94 },
+    { match_code: "PF", coach_1_score: 105, coach_2_score: 95 },
+  ]);
 });
