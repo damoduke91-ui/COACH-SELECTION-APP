@@ -13,6 +13,7 @@ import {
   buildPreviewFinalsPrerequisites,
   getPreviewFinalsScenario,
 } from "../lib/previewFinalsScenarios.ts";
+import { buildDeterministicPreviewStats } from "../lib/previewAflStats.ts";
 
 const regularSeasonResults: RegularSeasonResult[] = [
   { round_number: 1, coach_1_name: "Seed 1", coach_1_score: 500, coach_2_name: "Seed 5", coach_2_score: 100 },
@@ -114,4 +115,23 @@ test("stages only completed prerequisite matches with stable non-drawn scores", 
     { match_code: "SF2", coach_1_score: 104, coach_2_score: 94 },
     { match_code: "PF", coach_1_score: 105, coach_2_score: 95 },
   ]);
+});
+
+test("builds repeatable Preview fixture stats for mapped players", () => {
+  const params = {
+    aflRound: 21,
+    players: [
+      { player_name: "Player One", afl_team: "Club One" },
+      { player_name: "Player Two", afl_team: "Club Two" },
+      { player_name: "Unmapped Player", afl_team: "Unknown" },
+    ],
+    teamCodeByName: new Map([["club one", "ONE"], ["club two", "TWO"]]),
+    importedAt: "2026-08-10T00:00:00.000Z",
+  };
+  const first = buildDeterministicPreviewStats(params);
+  const second = buildDeterministicPreviewStats(params);
+  assert.deepEqual(first, second);
+  assert.equal(first.length, 2);
+  assert.deepEqual(first.map((row) => row.afl_team_code), ["ONE", "TWO"]);
+  assert.ok(first.every((row) => row.d === row.k + row.hb && row.af > 0));
 });

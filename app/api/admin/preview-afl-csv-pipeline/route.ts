@@ -7,6 +7,7 @@ import {
   mapAflPlayerStats,
 } from "../../../../lib/aflLiveStats";
 import { APP_ENV, supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { buildDeterministicPreviewStats } from "../../../../lib/previewAflStats";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -90,15 +91,50 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const aliases = await loadAflPlayerNameAliases(supabaseAdmin, "preview");
-    const token = await fetchAflToken();
     const importedAt = new Date().toISOString();
-    const mappedGroups = await Promise.all(
-      matches.map(async (match) =>
-        mapAflPlayerStats(match, await fetchAflPlayerStats(match.afl_match_provider_id, token), importedAt, aliases),
-      ),
-    );
-    const rows = mappedGroups.flat().map((mapped) => mapped.row);
+    const fixtureOnly = matches.every((match) => match.status === "FIXTURE_ONLY");
+    const rows = fixtureOnly
+      ? await (async () => {
+          const { data: players, error: playersError } = await supabaseAdmin
+            .from("weekly_team_lists")
+            .select("player_name,afl_team")
+            .eq("round", confirmedRound);
+          if (playersError) throw new Error(`Round team-list load failed: ${playersError.message}`);
+          const teamCodeByName = new Map<string, string>();
+          for (const match of matches) {
+            if (match.home_team_name && (match.home_app_team_code ?? match.home_team_code)) {
+              teamCodeByName.set(
+                match.home_team_name.trim().toLowerCase(),
+                normaliseClub(match.home_app_team_code ?? match.home_team_code),
+              );
+            }
+            if (match.away_team_name && (match.away_app_team_code ?? match.away_team_code)) {
+              teamCodeByName.set(
+                match.away_team_name.trim().toLowerCase(),
+                normaliseClub(match.away_app_team_code ?? match.away_team_code),
+              );
+            }
+          }
+          return buildDeterministicPreviewStats({
+            aflRound: confirmedRound,
+            players: (players ?? []) as Array<{ player_name: string; afl_team: string }>,
+            teamCodeByName,
+            importedAt,
+          });
+        })()
+      : await (async () => {
+          if (matches.some((match) => match.status === "FIXTURE_ONLY")) {
+            throw new Error("Preview round mixes fixture-only and provider-backed matches.");
+          }
+          const aliases = await loadAflPlayerNameAliases(supabaseAdmin, "preview");
+          const token = await fetchAflToken();
+          const mappedGroups = await Promise.all(
+            matches.map(async (match) =>
+              mapAflPlayerStats(match, await fetchAflPlayerStats(match.afl_match_provider_id, token), importedAt, aliases),
+            ),
+          );
+          return mappedGroups.flat().map((mapped) => mapped.row);
+        })();
     const clubs = new Set(rows.map((row) => normaliseClub(row.afl_team_code)).filter(Boolean));
 
     if (clubs.size !== EXPECTED_CLUB_COUNT || rows.length === 0) {
@@ -107,6 +143,7 @@ export async function POST(request: NextRequest) {
         error: `AFL Round ${confirmedRound} is incomplete: ${clubs.size}/${EXPECTED_CLUB_COUNT} clubs and ${rows.length} player rows were returned.`,
         clubCount: clubs.size,
         playerCount: rows.length,
+        source: fixtureOnly ? "deterministic-fixture" : "afl-api",
       });
     }
 
@@ -140,6 +177,7 @@ export async function POST(request: NextRequest) {
       matchCount: matches.length,
       clubCount: clubs.size,
       playerCount: rows.length,
+      source: fixtureOnly ? "deterministic-fixture" : "afl-api",
       message: `Imported ${rows.length} player rows for all ${clubs.size} clubs into Preview AFL Round ${confirmedRound}. Production was not changed.`,
     });
   } catch (error) {
