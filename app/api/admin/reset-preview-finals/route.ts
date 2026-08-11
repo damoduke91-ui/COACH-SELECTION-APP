@@ -48,6 +48,8 @@ async function isAdmin(request: NextRequest): Promise<boolean> {
 
 async function countRows(
   table: "finals_results" | "afl_player_round_stats" | "afl_round_finalisation" | "round_submissions",
+  // Supabase returns a table-specific fluent builder that cannot be expressed across this union.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   configure: (query: any) => any,
 ): Promise<number> {
   const query = supabaseAdmin.from(table).select("*", { count: "exact", head: true });
@@ -168,72 +170,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const seasonYear = new Date().getFullYear();
-    const operations = [
-      supabaseAdmin
-        .from("finals_results")
-        .delete()
-        .eq("environment", "preview")
-        .eq("season_year", seasonYear),
-      supabaseAdmin
-        .from("afl_player_round_stats")
-        .delete()
-        .eq("environment", "preview")
-        .in("afl_round", FINALS_AFL_ROUNDS),
-      supabaseAdmin
-        .from("afl_round_finalisation")
-        .delete()
-        .eq("environment", "preview")
-        .in("afl_round", FINALS_AFL_ROUNDS),
-      supabaseAdmin
-        .from("round_submissions")
-        .delete()
-        .eq("environment", "preview")
-        .in("round_number", FINALS_SUPER8_ROUNDS),
-    ];
-
-    for (const operation of operations) {
-      const { error } = await operation;
-      if (error) {
-        return response(500, {
-          success: false,
-          error: "Preview finals reset stopped after a database operation failed.",
-          details: error.message,
-        });
-      }
-    }
-
     const resetAt = new Date().toISOString();
-    const { error: unlockError } = await supabaseAdmin
-      .from("coach_team_selections")
-      .update({ is_submitted: false, submitted_at: null, updated_at: resetAt })
-      .eq("environment", "preview");
-
-    if (unlockError) {
+    const { error: resetError } = await supabaseAdmin.rpc("stage_preview_finals_scenario", {
+      p_week: 1,
+      p_season_year: new Date().getFullYear(),
+      p_prerequisites: [],
+      p_now: resetAt,
+    });
+    if (resetError) {
       return response(500, {
         success: false,
-        error: "Preview finals data was cleared, but teams could not be unlocked.",
-        details: unlockError.message,
+        error: "Preview Finals reset could not be committed atomically.",
+        details: resetError.message,
       });
     }
-
-    const { error: roundError } = await supabaseAdmin
-      .from("app_settings")
-      .update({
-        current_afl_round: RESET_AFL_ROUND,
-        current_super8_round: RESET_SUPER8_ROUND,
-        updated_at: resetAt,
-      })
-      .eq("environment", "preview");
-
-    if (roundError) {
-      return response(500, {
-        success: false,
-        error: "Preview finals data was cleared, but Round Control could not be reset.",
-        details: roundError.message,
-      });
-    }
-
     const remaining = await inspectPreviewFinals();
     if (Object.values(remaining).some((count) => count !== 0)) {
       return response(500, {
