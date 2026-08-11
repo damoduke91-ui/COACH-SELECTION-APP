@@ -15,6 +15,7 @@ import {
 } from "../lib/previewFinalsScenarios.ts";
 import { buildDeterministicPreviewStats } from "../lib/previewAflStats.ts";
 import { validatePreviewImportAccess, validatePreviewImportCoverage, validatePreviewImportRound } from "../lib/previewImportGuards.ts";
+import { calculateFinalsReadiness } from "../lib/finalsReadiness.ts";
 
 const regularSeasonResults: RegularSeasonResult[] = [
   { round_number: 1, coach_1_name: "Seed 1", coach_1_score: 500, coach_2_name: "Seed 5", coach_2_score: 100 },
@@ -151,4 +152,29 @@ test("guards the Preview import route match and club coverage", () => {
   assert.equal(validatePreviewImportCoverage(21, 8, 18, 468)?.status, 422);
   assert.equal(validatePreviewImportCoverage(21, 9, 17, 450)?.status, 422);
   assert.equal(validatePreviewImportCoverage(21, 9, 18, 0)?.status, 422);
+});
+
+test("requires aligned rounds, both matchup submissions, and 18 imported clubs", () => {
+  const bracket = buildFinalsBracket(regularSeasonResults, []);
+  const matches = bracket.matches.map((match) => match.week === 1 ? {
+    ...match,
+    home: match.code === "QF" ? { seed: 2, name: "Kalamata Pythons" } : { seed: 4, name: "Spread Eagle" },
+    away: match.code === "QF" ? { seed: 3, name: "Damos Magpies" } : { seed: 5, name: "Push Up Kings" },
+  } : match);
+  const clubs = Array.from({ length: 18 }, (_, index) => ({ afl_round: 21, afl_team_code: `C${index}` }));
+  const ready = calculateFinalsReadiness({
+    week: 1,
+    aflRound: 21,
+    super8Round: 15,
+    matches,
+    submittedCoachIds: [2, 3, 4, 5],
+    statRows: clubs,
+  });
+  assert.equal(ready.requiredTeamCount, 4);
+  assert.equal(ready.submittedTeamCount, 4);
+  assert.equal(ready.importedClubCount, 18);
+  assert.equal(ready.canComplete, true);
+  assert.equal(calculateFinalsReadiness({ ...{
+    week: 1, aflRound: 21, super8Round: 15, matches, statRows: clubs,
+  }, submittedCoachIds: [2, 3, 4] }).canComplete, false);
 });

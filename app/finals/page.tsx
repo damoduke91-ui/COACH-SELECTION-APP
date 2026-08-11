@@ -18,6 +18,7 @@ import {
   type FinalsLiveStat,
 } from "../../lib/finalsLiveScores";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { calculateFinalsReadiness } from "../../lib/finalsReadiness";
 
 function TeamLine({
   team,
@@ -85,6 +86,9 @@ export default function FinalsPage() {
   const [completingWeek, setCompletingWeek] = useState(false);
   const [stagingWeek, setStagingWeek] = useState<number | null>(null);
   const [currentPreviewWeek, setCurrentPreviewWeek] = useState<number | null>(null);
+  const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
+  const [currentSuper8Round, setCurrentSuper8Round] = useState<number | null>(null);
+  const [resettingPreview, setResettingPreview] = useState(false);
   const [drafts, setDrafts] = useState<Partial<Record<FinalsMatchCode, [string, string]>>>({});
 
   const refresh = useCallback(async () => {
@@ -130,6 +134,8 @@ export default function FinalsPage() {
     }
     if (!submissionRows.error) setSubmissions((submissionRows.data ?? []) as typeof submissions);
     if (!settings.error && settings.data) {
+      setCurrentAflRound(Number(settings.data.current_afl_round) || null);
+      setCurrentSuper8Round(Number(settings.data.current_super8_round) || null);
       const aflWeek = FINALS_AFL_ROUNDS.indexOf(
         Number(settings.data.current_afl_round) as (typeof FINALS_AFL_ROUNDS)[number],
       ) + 1;
@@ -234,6 +240,20 @@ export default function FinalsPage() {
         ? liveScores.get(`${finalsMatch.week}:${finalsMatch.away.name.trim().toLowerCase()}`)
         : undefined) ?? finalsMatch.awayScore,
   });
+
+  const readiness = useMemo(
+    () => calculateFinalsReadiness({
+      week: currentPreviewWeek,
+      aflRound: currentAflRound,
+      super8Round: currentSuper8Round,
+      matches: bracket.matches,
+      submittedCoachIds: submissions
+        .filter((row) => row.round_number === currentSuper8Round)
+        .map((row) => row.coach_id),
+      statRows: liveStats,
+    }),
+    [bracket.matches, currentAflRound, currentPreviewWeek, currentSuper8Round, liveStats, submissions],
+  );
 
   async function saveResult(finalsMatch: FinalsMatch) {
     const draft = drafts[finalsMatch.code] ?? [
@@ -366,6 +386,57 @@ export default function FinalsPage() {
     }
   }
 
+  async function resetPreviewFinals() {
+    setResettingPreview(true);
+    setMessage("");
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) {
+      setResettingPreview(false);
+      router.replace("/login");
+      return;
+    }
+    try {
+      const requestReset = async (body: Record<string, unknown>) => {
+        const result = await fetch("/api/admin/reset-preview-finals", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await result.json() as {
+          message?: string; error?: string; requiredConfirmation?: string;
+          currentAflRound?: number; currentSuper8Round?: number;
+          counts?: Record<string, number>;
+        };
+        if (!result.ok) throw new Error(payload.error ?? "Preview Finals reset failed.");
+        return payload;
+      };
+      const inspection = await requestReset({ action: "inspect" });
+      const counts = inspection.counts ?? {};
+      const summary = Object.entries(counts).map(([key, count]) => `${key}: ${count}`).join("\n");
+      const phrase = inspection.requiredConfirmation ?? "RESET PREVIEW FINALS";
+      const entered = window.prompt(
+        `Preview Finals reset inspection (no rows changed):\n\n${summary}\n\nType exactly: ${phrase}`,
+      );
+      if (entered === null) {
+        setMessage("Preview Finals reset cancelled. No rows were changed.");
+        return;
+      }
+      const result = await requestReset({
+        action: "reset",
+        confirmation: entered,
+        confirmAflRound: inspection.currentAflRound,
+        confirmSuper8Round: inspection.currentSuper8Round,
+      });
+      setMessage(result.message ?? "Preview Finals reset complete.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not reset Preview Finals.");
+    } finally {
+      setResettingPreview(false);
+    }
+  }
+
   if (!role) {
     return <main className="min-h-screen bg-neutral-950 p-8 text-white">Loading finals...</main>;
   }
@@ -440,8 +511,37 @@ export default function FinalsPage() {
               <p className="mt-3 text-xs text-sky-100/70">
                 Current matching Round Control: {currentPreviewWeek ? `Finals Week ${currentPreviewWeek}` : "not set to Finals"}.
               </p>
+              <button
+                type="button"
+                onClick={() => void resetPreviewFinals()}
+                disabled={resettingPreview || stagingWeek !== null}
+                className="mt-4 rounded-xl border border-red-300/40 bg-red-950/50 px-4 py-3 text-sm font-bold text-red-100 disabled:opacity-50"
+              >
+                {resettingPreview ? "Inspecting Preview Reset..." : "Reset Preview Finals"}
+              </button>
             </section>
           ) : null}
+          <section className="rounded-2xl border border-emerald-300/30 bg-emerald-300/10 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-xl font-bold text-emerald-200">Finals Week Readiness</h2>
+              <span className={`rounded-full px-3 py-1 text-xs font-black ${readiness.canComplete ? "bg-emerald-300 text-neutral-950" : "bg-amber-300 text-neutral-950"}`}>
+                {readiness.canComplete ? "READY TO COMPLETE" : "NOT READY"}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ["Round alignment", readiness.roundAligned ? "Aligned" : "Mismatch"],
+                ["Bracket", readiness.bracketReady ? "Matchups ready" : "Waiting"],
+                ["Team submissions", `${readiness.submittedTeamCount}/${readiness.requiredTeamCount}`],
+                ["AFL stats", `${readiness.importedClubCount}/18 clubs • ${readiness.playerRowCount} players`],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <div className="text-xs uppercase tracking-wide text-white/50">{label}</div>
+                  <div className="mt-1 font-bold text-white">{value}</div>
+                </div>
+              ))}
+            </div>
+          </section>
           <section className="rounded-2xl border border-yellow-300/30 bg-yellow-300/10 p-5">
             <h2 className="text-xl font-bold text-yellow-300">Complete Finals Week</h2>
             <p className="mt-1 text-sm text-white/70">
@@ -452,7 +552,7 @@ export default function FinalsPage() {
             <button
               type="button"
               onClick={() => void completeFinalsWeek()}
-              disabled={completingWeek}
+              disabled={completingWeek || !readiness.canComplete}
               className="mt-4 rounded-xl bg-yellow-300 px-5 py-3 font-black text-neutral-950 disabled:opacity-50"
             >
               {completingWeek ? "Checking and completing..." : "Complete Current Finals Week"}
