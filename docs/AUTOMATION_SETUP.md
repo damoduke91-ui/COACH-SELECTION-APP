@@ -11,7 +11,8 @@ The `Supabase migrations` workflow is intentionally disabled until migration his
    - `SUPABASE_DB_PASSWORD`
 3. Reconcile migrations previously applied manually with `supabase migration repair` before the first automated push. Confirm `supabase migration list --linked` shows local and remote history aligned.
 4. Add repository variable `SUPABASE_MIGRATIONS_ENABLED=true` only after that reconciliation.
-5. Run the workflow manually once and review the protected-environment approval and migration output.
+5. Run the workflow manually once with `apply_migrations` disabled. This verifies credentials and displays migration history without applying SQL.
+6. Reconcile any history mismatch, then run manually with `apply_migrations` enabled.
 
 After enablement, changes under `supabase/migrations/` on `master` trigger the protected workflow automatically.
 
