@@ -2112,6 +2112,17 @@ async function handleExportTeamsXlsx() {
               Follow the top-five premiership race.
             </div>
           </Link>
+          {loginSession.role === "admin" ? (
+            <Link
+              href="/admin-teams"
+              className="rounded-2xl border border-cyan-300/25 bg-cyan-300/10 p-5 transition hover:bg-cyan-300/20"
+            >
+              <div className="text-lg font-bold text-cyan-200">Admin Team Audit Log</div>
+              <div className="mt-2 text-sm text-cyan-100/75">
+                Review team submissions made by administrators.
+              </div>
+            </Link>
+          ) : null}
         </section>
 
         {loginSession.role === "admin" && (

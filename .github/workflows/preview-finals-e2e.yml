@@ -1,0 +1,41 @@
+name: Preview Finals browser test
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_url:
+        description: Vercel Preview deployment URL
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-finals-e2e
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: preview-testing
+    env:
+      PREVIEW_BASE_URL: ${{ inputs.preview_url }}
+      E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
