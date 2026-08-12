@@ -11,6 +11,11 @@ on:
         required: true
         default: false
         type: boolean
+      export_reconciliation_audit:
+        description: Export read-only Production schema and migration history
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -41,6 +46,22 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase migration list --linked
+      - name: Export reconciliation audit
+        if: github.event_name == 'workflow_dispatch' && inputs.export_reconciliation_audit
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          mkdir -p reconciliation-audit
+          supabase db dump --linked --schema public --file reconciliation-audit/production-public-schema.sql --password "$SUPABASE_DB_PASSWORD"
+          supabase db dump --linked --schema supabase_migrations --data-only --file reconciliation-audit/migration-history.sql --password "$SUPABASE_DB_PASSWORD"
+      - name: Upload reconciliation audit
+        if: github.event_name == 'workflow_dispatch' && inputs.export_reconciliation_audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-reconciliation-audit
+          path: reconciliation-audit/
+          retention-days: 7
       - name: Apply pending migrations
         if: >-
           (github.event_name == 'workflow_dispatch' && inputs.apply_migrations) ||
