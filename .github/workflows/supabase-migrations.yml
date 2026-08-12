@@ -57,7 +57,7 @@ jobs:
           set -o pipefail
           plan="$(supabase db push --linked --include-all --dry-run --password "$SUPABASE_DB_PASSWORD" 2>&1)"
           printf '%s\n' "$plan"
-          grep -Fq "Linked project is up to date." <<< "$plan"
+          grep -Fq "Remote database is up to date." <<< "$plan"
       - name: Preview pending migration SQL
         if: >-
           (github.event_name == 'workflow_dispatch' && inputs.apply_migrations) ||
