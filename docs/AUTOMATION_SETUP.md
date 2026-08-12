@@ -2,17 +2,16 @@
 
 ## Supabase migrations
 
-The `Supabase migrations` workflow is intentionally disabled until migration history and credentials are configured.
+The Production migration history was reconciled and verified on August 12, 2026. Local and remote history contain the same 17 versions through `202608100002`.
 
 1. Create a protected GitHub environment named `production-database` and require approval.
 2. Add environment secrets:
    - `SUPABASE_ACCESS_TOKEN`
    - `SUPABASE_PROJECT_REF`
    - `SUPABASE_DB_PASSWORD`
-3. Reconcile migrations previously applied manually with `supabase migration repair` before the first automated push. Confirm `supabase migration list --linked` shows local and remote history aligned.
-4. Add repository variable `SUPABASE_MIGRATIONS_ENABLED=true` only after that reconciliation.
-5. Run the workflow manually once with `apply_migrations` disabled. This verifies credentials and displays migration history without applying SQL.
-6. Reconcile any history mismatch, then run manually with `apply_migrations` enabled.
+3. Confirm `supabase migration list --linked` shows local and remote history aligned before enabling or re-enabling automatic pushes.
+4. Add repository variable `SUPABASE_MIGRATIONS_ENABLED=true` after that verification.
+5. Run the workflow manually with `apply_migrations` disabled whenever credentials or migration history need to be reverified without applying SQL.
 
 After enablement, changes under `supabase/migrations/` on `master` trigger the protected workflow automatically.
 

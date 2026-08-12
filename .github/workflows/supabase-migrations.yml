@@ -11,16 +11,6 @@ on:
         required: true
         default: false
         type: boolean
-      export_reconciliation_audit:
-        description: Export read-only Production schema and migration history
-        required: true
-        default: false
-        type: boolean
-      repair_verified_history:
-        description: Mark the audited historical migrations as applied
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -47,42 +37,6 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
       - name: Show pending migrations
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase migration list --linked
-      - name: Export reconciliation audit
-        if: github.event_name == 'workflow_dispatch' && inputs.export_reconciliation_audit
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: |
-          mkdir -p reconciliation-audit
-          supabase db dump --linked --schema public --file reconciliation-audit/production-public-schema.sql --password "$SUPABASE_DB_PASSWORD"
-          supabase db dump --linked --schema supabase_migrations --data-only --file reconciliation-audit/migration-history.sql --password "$SUPABASE_DB_PASSWORD"
-          supabase migration fetch --linked
-          cp -R supabase/migrations reconciliation-audit/fetched-migrations
-      - name: Upload reconciliation audit
-        if: github.event_name == 'workflow_dispatch' && inputs.export_reconciliation_audit
-        uses: actions/upload-artifact@v4
-        with:
-          name: supabase-reconciliation-audit
-          path: reconciliation-audit/
-          retention-days: 7
-      - name: Repair verified migration history
-        if: github.event_name == 'workflow_dispatch' && inputs.repair_verified_history
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: >-
-          supabase migration repair
-          202607210005 202607210006 202607270001 202607280001
-          202607280002 202607290001 202607310007 202607310008
-          202608010001 202608010002 202608030010 202608070001
-          202608100001 202608100002
-          --status applied --linked --password "$SUPABASE_DB_PASSWORD"
-      - name: Verify repaired migration history
-        if: github.event_name == 'workflow_dispatch' && inputs.repair_verified_history
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
