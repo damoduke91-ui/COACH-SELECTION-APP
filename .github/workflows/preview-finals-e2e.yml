@@ -24,6 +24,7 @@ jobs:
       PREVIEW_BASE_URL: ${{ inputs.preview_url }}
       E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
       E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
@@ -32,6 +33,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - name: Verify browser-test configuration
+        run: |
+          test -n "$PREVIEW_BASE_URL"
+          test -n "$E2E_ADMIN_EMAIL"
+          test -n "$E2E_ADMIN_PASSWORD"
+          test -n "$VERCEL_AUTOMATION_BYPASS_SECRET"
       - run: npm run test:e2e
       - if: failure()
         uses: actions/upload-artifact@v4
