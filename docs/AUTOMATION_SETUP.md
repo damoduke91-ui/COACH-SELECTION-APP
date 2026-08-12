@@ -27,4 +27,14 @@ A weekly scheduled run performs a read-only drift check. It fails when local and
 4. Open **Actions -> Preview Finals browser test -> Run workflow**.
 5. Enter the immutable Vercel Preview deployment URL.
 
-Playwright sends the Vercel bypass secret only as protected request headers. The test then signs in, verifies readiness, stages Week 4, and resets Preview back to a clean Week 1 state. Failure traces and screenshots are retained as a workflow artifact.
+Playwright sends the Vercel bypass secret only as protected request headers and rejects non-HTTPS targets. The serial Preview journey then:
+
+- signs in and verifies the Dashboard does not redirect back through Login after authentication
+- stages Finals Week 1 and checks Dashboard Current Week and Next Week finals labels and fixtures
+- checks unresolved Finals bracket entries use the **To be decided** placeholder
+- navigates from Dashboard to Fixture, Ladder, Results, and Finals
+- verifies the Results tabs for Finals Weeks 1–4
+- stages Week 4, verifies readiness reporting, and resets Preview back to a clean Week 1 state
+- logs out and confirms the Login page is restored
+
+The journey mutates Preview data only and runs serially to prevent shared scenario state from racing. Failure traces and screenshots are retained as a workflow artifact.
