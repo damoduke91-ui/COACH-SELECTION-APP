@@ -55,6 +55,8 @@ jobs:
           mkdir -p reconciliation-audit
           supabase db dump --linked --schema public --file reconciliation-audit/production-public-schema.sql --password "$SUPABASE_DB_PASSWORD"
           supabase db dump --linked --schema supabase_migrations --data-only --file reconciliation-audit/migration-history.sql --password "$SUPABASE_DB_PASSWORD"
+          supabase migration fetch --linked
+          cp -R supabase/migrations reconciliation-audit/fetched-migrations
       - name: Upload reconciliation audit
         if: github.event_name == 'workflow_dispatch' && inputs.export_reconciliation_audit
         uses: actions/upload-artifact@v4
