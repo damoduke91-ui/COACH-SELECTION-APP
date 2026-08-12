@@ -4,6 +4,8 @@ on:
   push:
     branches: [master]
     paths: ["supabase/migrations/**"]
+  schedule:
+    - cron: "17 20 * * 0"
   workflow_dispatch:
     inputs:
       apply_migrations:
@@ -21,15 +23,18 @@ concurrency:
 
 jobs:
   migrate:
-    if: github.event_name == 'workflow_dispatch' || vars.SUPABASE_MIGRATIONS_ENABLED == 'true'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      vars.SUPABASE_MIGRATIONS_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production-database
     steps:
-      - uses: actions/checkout@v5
-      - uses: supabase/setup-cli@v1
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
         with:
-          version: latest
+          version: 2.113.0
       - name: Link protected Supabase project
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -41,6 +46,26 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase migration list --linked
+      - name: Verify migration history drift
+        if: >-
+          github.event_name == 'schedule' ||
+          (github.event_name == 'workflow_dispatch' && inputs.apply_migrations == false)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -o pipefail
+          plan="$(supabase db push --linked --include-all --dry-run --password "$SUPABASE_DB_PASSWORD" 2>&1)"
+          printf '%s\n' "$plan"
+          grep -Fq "Linked project is up to date." <<< "$plan"
+      - name: Preview pending migration SQL
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.apply_migrations) ||
+          (github.event_name == 'push' && vars.SUPABASE_MIGRATIONS_ENABLED == 'true')
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db push --linked --include-all --dry-run --password "$SUPABASE_DB_PASSWORD"
       - name: Apply pending migrations
         if: >-
           (github.event_name == 'workflow_dispatch' && inputs.apply_migrations) ||

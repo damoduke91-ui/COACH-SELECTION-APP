@@ -13,7 +13,9 @@ The Production migration history was reconciled and verified on August 12, 2026.
 4. Add repository variable `SUPABASE_MIGRATIONS_ENABLED=true` after that verification.
 5. Run the workflow manually with `apply_migrations` disabled whenever credentials or migration history need to be reverified without applying SQL.
 
-After enablement, changes under `supabase/migrations/` on `master` trigger the protected workflow automatically.
+The workflow pins Supabase CLI `2.113.0`, previews pending SQL with `db push --dry-run`, and only then applies it. After enablement, changes under `supabase/migrations/` on `master` trigger the protected workflow automatically.
+
+A weekly scheduled run performs a read-only drift check. It fails when local and remote migration history differ and never applies SQL.
 
 ## Preview Finals browser test
 
