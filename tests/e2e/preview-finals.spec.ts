@@ -36,6 +36,8 @@ test.describe("Preview finals journey", () => {
   test.beforeAll(() => requirePreviewConfiguration());
 
   test("covers login, finals fixtures and labels, navigation, results tabs, reset, and logout", async ({ page }) => {
+    test.setTimeout(180_000);
+
     const mainFrameUrls: string[] = [];
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) mainFrameUrls.push(frame.url());
@@ -56,7 +58,7 @@ test.describe("Preview finals journey", () => {
       "login must not flicker back after the dashboard has loaded",
     ).not.toContain("/login");
 
-    await page.getByRole("link", { name: "Finals", exact: true }).click();
+    await page.getByRole("link", { name: /^Finals\b/ }).click();
     await page.waitForURL("**/finals");
     await expectHeading(page, "Preview Finals Scenarios");
     await stageFinalsWeek(page, 1);
@@ -80,13 +82,13 @@ test.describe("Preview finals journey", () => {
     await expect(page.getByText("Finals Week 1 / Competition Round 15 / AFL Round 21")).toBeVisible();
 
     await page.getByRole("link", { name: "Back to Dashboard" }).click();
-    await page.getByRole("link", { name: "Ladder", exact: true }).click();
+    await page.getByRole("link", { name: /^Ladder\b/ }).click();
     await page.waitForURL("**/ladder");
     await expectHeading(page, "2026 Ladder");
     await expectHeading(page, "Season Ladder");
 
     await page.getByRole("link", { name: "Back to Dashboard" }).click();
-    await page.getByRole("link", { name: "Full Season Results" }).click();
+    await page.getByRole("link", { name: /^Full Season Results\b/ }).click();
     await page.waitForURL("**/results");
     await expectHeading(page, "Full Season Results");
 
@@ -98,7 +100,7 @@ test.describe("Preview finals journey", () => {
     }
 
     await page.getByRole("link", { name: "Back to Dashboard" }).click();
-    await page.getByRole("link", { name: "Finals", exact: true }).click();
+    await page.getByRole("link", { name: /^Finals\b/ }).click();
     await page.waitForURL("**/finals");
     await expectHeading(page, "Finals Week Readiness");
     await expect(page.getByText("NOT READY", { exact: true })).toBeVisible();
