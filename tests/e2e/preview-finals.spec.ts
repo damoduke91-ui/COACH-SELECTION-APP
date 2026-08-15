@@ -18,6 +18,12 @@ async function expectHeading(page: Page, name: string | RegExp) {
   await expect(page.getByRole("heading", { name })).toBeVisible();
 }
 
+async function returnToDashboard(page: Page) {
+  await page.getByRole("link", { name: "Back to Dashboard" }).click();
+  await page.waitForURL("**/dashboard");
+  await expectHeading(page, /Dashboard/);
+}
+
 async function stageFinalsWeek(page: Page, week: number) {
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: `Stage Week ${week}` }).click();
@@ -64,8 +70,7 @@ test.describe("Preview finals journey", () => {
     await stageFinalsWeek(page, 1);
     await expect(page.getByText("To be decided", { exact: true }).first()).toBeVisible();
 
-    await page.getByRole("link", { name: "Back to Dashboard" }).click();
-    await page.waitForURL("**/dashboard");
+    await returnToDashboard(page);
 
     const currentWeek = page.getByRole("heading", { name: "Current Week Fixture" }).locator("..");
     await expect(currentWeek).toContainText("AFL Round 21, S8 Finals Week 1");
@@ -81,13 +86,13 @@ test.describe("Preview finals journey", () => {
     await expectHeading(page, "Finals Fixture");
     await expect(page.getByText("Finals Week 1 / Competition Round 15 / AFL Round 21")).toBeVisible();
 
-    await page.getByRole("link", { name: "Back to Dashboard" }).click();
+    await returnToDashboard(page);
     await page.getByRole("link", { name: /^Ladder\b/ }).click();
     await page.waitForURL("**/ladder");
     await expectHeading(page, "2026 Ladder");
     await expectHeading(page, "Season Ladder");
 
-    await page.getByRole("link", { name: "Back to Dashboard" }).click();
+    await returnToDashboard(page);
     await page.getByRole("link", { name: /^Full Season Results\b/ }).click();
     await page.waitForURL("**/results");
     await expectHeading(page, "Full Season Results");
@@ -99,7 +104,7 @@ test.describe("Preview finals journey", () => {
       await expect(page.getByText(`Finals Week ${week}`, { exact: true })).toBeVisible();
     }
 
-    await page.getByRole("link", { name: "Back to Dashboard" }).click();
+    await returnToDashboard(page);
     await page.getByRole("link", { name: /^Finals\b/ }).click();
     await page.waitForURL("**/finals");
     await expectHeading(page, "Finals Week Readiness");
@@ -111,7 +116,7 @@ test.describe("Preview finals journey", () => {
     await expect(page.getByText("Team submissions").locator("..")).toContainText("0/4");
     await expect(page.getByText("AFL stats").locator("..")).toContainText("0/18 clubs");
 
-    await page.getByRole("link", { name: "Back to Dashboard" }).click();
+    await returnToDashboard(page);
     await page.getByRole("button", { name: "Log Out" }).click();
     await page.waitForURL("**/login");
     await expectHeading(page, "Coach Team Login");
