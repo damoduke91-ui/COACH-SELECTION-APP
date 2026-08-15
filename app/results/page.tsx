@@ -1374,7 +1374,11 @@ export default function ResultsPage() {
 
   return (
     <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
-      <div className="mx-auto max-w-7xl space-y-6">
+      <div
+        className={`mx-auto space-y-6 ${
+          selectedRound === 17 || selectedRound === 18 ? "max-w-[1600px]" : "max-w-7xl"
+        }`}
+      >
         <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -1652,13 +1656,7 @@ export default function ResultsPage() {
                         ) : null}
                       </div>
 
-                      <div
-                        className={`mt-4 grid gap-4 ${
-                          match.roundNumber === 17 || match.roundNumber === 18
-                            ? ""
-                            : "xl:grid-cols-2"
-                        }`}
-                      >
+                      <div className="mt-4 grid gap-3 xl:grid-cols-2">
                         {coachDetails.map(({
                           coachId,
                           coachName,
@@ -1700,23 +1698,23 @@ export default function ResultsPage() {
                                   Player breakdown will appear once a submitted team exists for this coach.
                                 </div>
                               ) : (
-                                <div className="mt-4 overflow-x-auto">
-                                  <table className="min-w-[980px] w-full border-separate border-spacing-0 text-left text-xs">
+                                <div className="mt-3 overflow-x-auto">
+                                  <table className="min-w-[700px] w-full border-separate border-spacing-0 text-left text-[11px]">
                                     <thead>
                                       <tr className="text-white/50">
-                                        <th className="border-b border-white/10 px-2 py-2 font-semibold">Pos</th>
-                                        <th className="border-b border-white/10 px-2 py-2 font-semibold">Sel</th>
-                                        <th className="border-b border-white/10 px-2 py-2 font-semibold">Player</th>
-                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">Pts</th>
-                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">D</th>
-                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">M</th>
-                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">G</th>
-                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">B</th>
-                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">T</th>
-                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">HO</th>
-                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">FF</th>
-                                        <th className="border-b border-white/10 px-2 py-2 text-right font-semibold">FA</th>
-                                        <th className="border-b border-white/10 px-2 py-2 font-semibold">Status</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 font-semibold">Pos</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 font-semibold">Sel</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 font-semibold">Player</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">Pts</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">D</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">M</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">G</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">B</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">T</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">HO</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">FF</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">FA</th>
+                                        <th className="border-b border-white/10 px-1 py-1.5 font-semibold">Status</th>
                                       </tr>
                                     </thead>
                                     <tbody>
@@ -1731,10 +1729,10 @@ export default function ResultsPage() {
                                                 : "text-white/35"
                                           }`}
                                         >
-                                          <td className="border-b border-white/5 px-2 py-2 font-semibold">{row.position}</td>
-                                          <td className="border-b border-white/5 px-2 py-2">
+                                          <td className="border-b border-white/5 px-1 py-1.5 font-semibold">{row.position}</td>
+                                          <td className="border-b border-white/5 px-1 py-1.5">
                                             <span
-                                              className={`rounded-md border px-2 py-0.5 font-bold ${
+                                              className={`rounded border px-1.5 py-0.5 font-bold ${
                                                 row.countsToTotal
                                                   ? "border-green-400/30 bg-green-500/15 text-green-100"
                                                   : "border-white/10 bg-white/5 text-white/55"
@@ -1743,25 +1741,25 @@ export default function ResultsPage() {
                                               {row.selectedType}
                                             </span>
                                           </td>
-                                          <td className="border-b border-white/5 px-2 py-2">
+                                          <td className="border-b border-white/5 px-1 py-1.5">
                                             <div className="font-semibold">{row.playerName}</div>
                                             {row.playerClub ? (
                                               <div className="text-[11px] text-white/40">{row.playerClub}</div>
                                             ) : null}
                                           </td>
-                                          <td className="border-b border-white/5 px-2 py-2 text-right font-bold">
+                                          <td className="border-b border-white/5 px-1 py-1.5 text-right font-bold">
                                             {row.points === null ? "—" : formatScore(row.points)}
                                           </td>
-                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "d")}</td>
-                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "m")}</td>
-                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "g")}</td>
-                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "b")}</td>
-                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "t")}</td>
-                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "ho")}</td>
-                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "ff")}</td>
-                                          <td className="border-b border-white/5 px-2 py-2 text-right">{getStatNumber(row.stat, "fa")}</td>
-                                          <td className="border-b border-white/5 px-2 py-2">
-                                            <span className="text-[11px]">{getPlayingStatus(row)}</span>
+                                          <td className="border-b border-white/5 px-1 py-1.5 text-right">{getStatNumber(row.stat, "d")}</td>
+                                          <td className="border-b border-white/5 px-1 py-1.5 text-right">{getStatNumber(row.stat, "m")}</td>
+                                          <td className="border-b border-white/5 px-1 py-1.5 text-right">{getStatNumber(row.stat, "g")}</td>
+                                          <td className="border-b border-white/5 px-1 py-1.5 text-right">{getStatNumber(row.stat, "b")}</td>
+                                          <td className="border-b border-white/5 px-1 py-1.5 text-right">{getStatNumber(row.stat, "t")}</td>
+                                          <td className="border-b border-white/5 px-1 py-1.5 text-right">{getStatNumber(row.stat, "ho")}</td>
+                                          <td className="border-b border-white/5 px-1 py-1.5 text-right">{getStatNumber(row.stat, "ff")}</td>
+                                          <td className="border-b border-white/5 px-1 py-1.5 text-right">{getStatNumber(row.stat, "fa")}</td>
+                                          <td className="border-b border-white/5 px-1 py-1.5">
+                                            <span className="text-[10px]">{getPlayingStatus(row)}</span>
                                           </td>
                                         </tr>
                                       ))}
