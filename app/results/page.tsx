@@ -1523,7 +1523,11 @@ export default function ResultsPage() {
                   : `No fixture rows or results found for Super 8 Round ${selectedRound}.`}
               </div>
             ) : (
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div
+                className={`grid gap-4 ${
+                  selectedRound === 17 || selectedRound === 18 ? "" : "lg:grid-cols-2"
+                }`}
+              >
                 {selectedRoundMatches.map((match) => {
                   const key = buildResultKey(match.roundNumber, match.matchupIndex);
                   const result = resultByRoundAndMatch.get(key) ?? null;
@@ -1648,7 +1652,13 @@ export default function ResultsPage() {
                         ) : null}
                       </div>
 
-                      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                      <div
+                        className={`mt-4 grid gap-4 ${
+                          match.roundNumber === 17 || match.roundNumber === 18
+                            ? ""
+                            : "xl:grid-cols-2"
+                        }`}
+                      >
                         {coachDetails.map(({
                           coachId,
                           coachName,
@@ -1779,4 +1789,3 @@ export default function ResultsPage() {
     </main>
   );
 }
-
