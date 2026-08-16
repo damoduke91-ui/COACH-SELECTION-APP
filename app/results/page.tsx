@@ -1553,7 +1553,7 @@ export default function ResultsPage() {
             ) : (
               <div
                 className={`grid gap-4 ${
-                  selectedRound === 17 || selectedRound === 18 ? "" : "lg:grid-cols-2"
+                  resultsViewMode === "compact" ? "lg:grid-cols-2" : ""
                 }`}
               >
                 {selectedRoundMatches.map((match) => {
@@ -1617,7 +1617,7 @@ export default function ResultsPage() {
                   return (
                     <div
                       key={match.key}
-                      className={`rounded-2xl border p-5 ${
+                      className={`min-w-0 rounded-2xl border p-5 ${
                         isUserMatch
                           ? "border-green-400/40 bg-green-500/10"
                           : "border-white/10 bg-black/20"
@@ -1693,7 +1693,7 @@ export default function ResultsPage() {
                           return (
                             <div
                               key={`${match.key}-${coachId}-breakdown`}
-                              className="rounded-xl border border-white/10 bg-neutral-950/50 p-4"
+                              className="min-w-0 rounded-xl border border-white/10 bg-neutral-950/50 p-4"
                             >
                               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                                 <div>
