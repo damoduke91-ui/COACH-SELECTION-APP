@@ -1185,10 +1185,14 @@ export default function ResultsPage() {
 
   const selectedRoundMatches = useMemo(() => {
     return [...selectedRoundFixtureMatches, ...selectedRoundResultOnlyMatches].sort((a, b) => {
+      const aIsUserMatch = isUsersMatch(a, loginSession?.coachId);
+      const bIsUserMatch = isUsersMatch(b, loginSession?.coachId);
+
+      if (aIsUserMatch !== bIsUserMatch) return aIsUserMatch ? -1 : 1;
       if ((a.aflRound ?? 0) !== (b.aflRound ?? 0)) return (a.aflRound ?? 0) - (b.aflRound ?? 0);
       return a.matchupIndex - b.matchupIndex;
     });
-  }, [selectedRoundFixtureMatches, selectedRoundResultOnlyMatches]);
+  }, [loginSession?.coachId, selectedRoundFixtureMatches, selectedRoundResultOnlyMatches]);
 
   const selectedRoundAflRounds = useMemo(() => {
     const rounds = selectedRoundMatches
