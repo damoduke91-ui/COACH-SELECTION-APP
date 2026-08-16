@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
 import {
@@ -611,6 +611,7 @@ export default function ResultsPage() {
   const [roundSubmissions, setRoundSubmissions] = useState<RoundSubmissionRow[]>([]);
   const [playerStats, setPlayerStats] = useState<AflPlayerRoundStatRow[]>([]);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [resultsViewMode, setResultsViewMode] = useState<"compact" | "full">("compact");
   const [isLoadingPageData, setIsLoadingPageData] = useState(false);
   const [autoSaveMessage, setAutoSaveMessage] = useState("");
 
@@ -1511,6 +1512,29 @@ export default function ResultsPage() {
             </div>
           </div>
 
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+            <div className="text-xs text-white/50">
+              Compact compares both coaches side by side. Full width gives each team more room.
+            </div>
+            <div className="flex rounded-lg border border-white/10 bg-black/20 p-1" aria-label="Results view">
+              {(["compact", "full"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setResultsViewMode(mode)}
+                  aria-pressed={resultsViewMode === mode}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                    resultsViewMode === mode
+                      ? "bg-violet-500 text-white"
+                      : "text-white/60 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  {mode === "compact" ? "Side by side" : "Full width"}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="mt-6">
             {isLoadingPageData ? (
               <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/70">
@@ -1656,7 +1680,7 @@ export default function ResultsPage() {
                         ) : null}
                       </div>
 
-                      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                      <div className={`mt-4 grid gap-3 ${resultsViewMode === "compact" ? "xl:grid-cols-2" : ""}`}>
                         {coachDetails.map(({
                           coachId,
                           coachName,
@@ -1698,54 +1722,99 @@ export default function ResultsPage() {
                                   Player breakdown will appear once a submitted team exists for this coach.
                                 </div>
                               ) : (
-                                <div className="mt-3 overflow-x-auto">
+                                <div className="mt-3">
+                                  <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-white/50">
+                                    <span className="font-semibold text-white/65">Row guide:</span>
+                                    <span><span className="mr-1 inline-block h-2 w-2 rounded-sm bg-green-500/60" />Counting</span>
+                                    <span><span className="mr-1 inline-block h-2 w-2 rounded-sm bg-amber-500/60" />Replacement</span>
+                                    <span><span className="mr-1 inline-block h-2 w-2 rounded-sm bg-violet-500/50" />Emergency only</span>
+                                    <details className="relative">
+                                      <summary className="cursor-pointer font-semibold text-sky-200/80 hover:text-sky-100">
+                                        Stat guide
+                                      </summary>
+                                      <div className="absolute right-0 z-40 mt-1 w-64 rounded-lg border border-white/15 bg-neutral-900 p-3 text-[11px] leading-5 text-white/70 shadow-xl">
+                                        D Disposals • M Marks • G Goals • B Behinds • T Tackles • HO Hitouts • FF Frees For • FA Frees Against
+                                      </div>
+                                    </details>
+                                  </div>
+
+                                  <div className="max-h-[70vh] overflow-auto rounded-lg border border-white/5">
                                   <table className="min-w-[700px] w-full border-separate border-spacing-0 text-left text-[11px]">
                                     <thead>
                                       <tr className="text-white/50">
-                                        <th className="border-b border-white/10 px-1 py-1.5 font-semibold">Pos</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 font-semibold">Sel</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 font-semibold">Player</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">Pts</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">D</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">M</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">G</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">B</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">T</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">HO</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">FF</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 text-right font-semibold">FA</th>
-                                        <th className="border-b border-white/10 px-1 py-1.5 font-semibold">Status</th>
+                                        <th className="sticky left-0 top-0 z-30 min-w-32 border-b border-white/10 bg-neutral-950 px-1 py-1.5 font-semibold">Player</th>
+                                        <th className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 font-semibold">Pos</th>
+                                        <th className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 font-semibold">Sel</th>
+                                        <th className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 text-right font-semibold">Pts</th>
+                                        <th title="Disposals" className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 text-right font-semibold">D</th>
+                                        <th title="Marks" className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 text-right font-semibold">M</th>
+                                        <th title="Goals" className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 text-right font-semibold">G</th>
+                                        <th title="Behinds" className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 text-right font-semibold">B</th>
+                                        <th title="Tackles" className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 text-right font-semibold">T</th>
+                                        <th title="Hitouts" className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 text-right font-semibold">HO</th>
+                                        <th title="Frees For" className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 text-right font-semibold">FF</th>
+                                        <th title="Frees Against" className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 text-right font-semibold">FA</th>
+                                        <th className="sticky top-0 z-20 border-b border-white/10 bg-neutral-950 px-1 py-1.5 font-semibold">Status</th>
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {rows.map((row) => (
+                                      {rows.map((row, rowIndex) => {
+                                        const startsPosition = rowIndex === 0 || rows[rowIndex - 1]?.position !== row.position;
+                                        const positionRows = startsPosition
+                                          ? rows.filter((candidate) => candidate.position === row.position)
+                                          : [];
+                                        const positionTotal = startsPosition ? calculateTeamTotal(positionRows) : 0;
+
+                                        return (
+                                        <Fragment key={row.key}>
+                                        {startsPosition ? (
+                                          <tr>
+                                            <td colSpan={13} className="sticky left-0 border-y border-white/10 bg-white/[0.06] px-2 py-1.5">
+                                              <div className="flex items-center justify-between gap-3 font-bold text-white/75">
+                                                <span>{row.position}</span>
+                                                <span className="text-violet-100">{formatScore(positionTotal)} pts</span>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        ) : null}
                                         <tr
-                                          key={row.key}
                                           className={`${
-                                            row.countsToTotal
+                                            row.replacedPlayerName
+                                              ? "bg-amber-500/15 text-amber-50"
+                                              : row.countsToTotal
                                               ? "bg-green-500/10 text-white"
                                               : row.played
-                                                ? "text-white/70"
+                                                ? "bg-violet-500/[0.08] text-white/70"
                                                 : "text-white/35"
                                           }`}
                                         >
+                                          <td className={`sticky left-0 z-10 border-b border-white/5 px-1 py-1.5 ${
+                                            row.replacedPlayerName
+                                              ? "bg-amber-950"
+                                              : row.countsToTotal
+                                                ? "bg-green-950"
+                                                : row.played
+                                                  ? "bg-violet-950"
+                                                  : "bg-neutral-950"
+                                          }`}>
+                                            <div className="font-semibold">{row.playerName}</div>
+                                            {row.playerClub ? (
+                                              <div className="text-[10px] text-white/40">{row.playerClub}</div>
+                                            ) : null}
+                                          </td>
                                           <td className="border-b border-white/5 px-1 py-1.5 font-semibold">{row.position}</td>
                                           <td className="border-b border-white/5 px-1 py-1.5">
                                             <span
                                               className={`rounded border px-1.5 py-0.5 font-bold ${
-                                                row.countsToTotal
+                                                row.replacedPlayerName
+                                                  ? "border-amber-400/40 bg-amber-500/20 text-amber-100"
+                                                  : row.countsToTotal
                                                   ? "border-green-400/30 bg-green-500/15 text-green-100"
                                                   : "border-white/10 bg-white/5 text-white/55"
                                               }`}
                                             >
                                               {row.selectedType}
                                             </span>
-                                          </td>
-                                          <td className="border-b border-white/5 px-1 py-1.5">
-                                            <div className="font-semibold">{row.playerName}</div>
-                                            {row.playerClub ? (
-                                              <div className="text-[11px] text-white/40">{row.playerClub}</div>
-                                            ) : null}
                                           </td>
                                           <td className="border-b border-white/5 px-1 py-1.5 text-right font-bold">
                                             {row.points === null ? "—" : formatScore(row.points)}
@@ -1762,9 +1831,11 @@ export default function ResultsPage() {
                                             <span className="text-[10px]">{getPlayingStatus(row)}</span>
                                           </td>
                                         </tr>
-                                      ))}
+                                        </Fragment>
+                                      )})}
                                     </tbody>
                                   </table>
+                                  </div>
                                 </div>
                               )}
                             </div>
