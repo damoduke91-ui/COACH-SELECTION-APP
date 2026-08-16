@@ -1514,7 +1514,7 @@ export default function ResultsPage() {
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
             <div className="text-xs text-white/50">
-              Compact compares both coaches side by side. Full width gives each team more room.
+              Side by side shows two games per row. Full width shows one game per row with both teams together.
             </div>
             <div className="flex rounded-lg border border-white/10 bg-black/20 p-1" aria-label="Results view">
               {(["compact", "full"] as const).map((mode) => (
@@ -1680,7 +1680,7 @@ export default function ResultsPage() {
                         ) : null}
                       </div>
 
-                      <div className={`mt-4 grid gap-3 ${resultsViewMode === "compact" ? "xl:grid-cols-2" : ""}`}>
+                      <div className="mt-4 grid gap-3 xl:grid-cols-2">
                         {coachDetails.map(({
                           coachId,
                           coachName,
