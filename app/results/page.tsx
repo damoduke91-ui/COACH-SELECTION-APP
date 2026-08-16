@@ -1748,8 +1748,8 @@ export default function ResultsPage() {
                                     </details>
                                   </div>
 
-                                  <div className="max-h-[70vh] overflow-auto rounded-lg border border-white/5">
-                                  <table className="min-w-[700px] w-full border-separate border-spacing-0 text-left text-[11px]">
+                                  <div className="rounded-lg border border-white/5">
+                                  <table className="w-full border-separate border-spacing-0 text-left text-[11px]">
                                     <thead>
                                       <tr className="text-white/50">
                                         <th className="sticky left-0 top-0 z-30 min-w-32 border-b border-white/10 bg-neutral-950 px-1 py-1.5 font-semibold">Player</th>
