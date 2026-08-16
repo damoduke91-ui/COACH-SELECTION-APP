@@ -1194,6 +1194,9 @@ export default function ResultsPage() {
     });
   }, [loginSession?.coachId, selectedRoundFixtureMatches, selectedRoundResultOnlyMatches]);
 
+  const isSingleMatchRound = selectedRoundMatches.length === 1;
+  const effectiveResultsViewMode = isSingleMatchRound ? "full" : resultsViewMode;
+
   const selectedRoundAflRounds = useMemo(() => {
     const rounds = selectedRoundMatches
       .map((match) => match.aflRound)
@@ -1518,7 +1521,9 @@ export default function ResultsPage() {
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
             <div className="text-xs text-white/50">
-              Side by side shows two games per row. Full width shows one game per row with both teams together.
+              {isSingleMatchRound
+                ? "This round has one game, so it is shown full width automatically."
+                : "Side by side shows two games per row. Full width shows one game per row with both teams together."}
             </div>
             <div className="flex rounded-lg border border-white/10 bg-black/20 p-1" aria-label="Results view">
               {(["compact", "full"] as const).map((mode) => (
@@ -1526,12 +1531,13 @@ export default function ResultsPage() {
                   key={mode}
                   type="button"
                   onClick={() => setResultsViewMode(mode)}
-                  aria-pressed={resultsViewMode === mode}
+                  disabled={isSingleMatchRound}
+                  aria-pressed={effectiveResultsViewMode === mode}
                   className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                    resultsViewMode === mode
+                    effectiveResultsViewMode === mode
                       ? "bg-violet-500 text-white"
                       : "text-white/60 hover:bg-white/10 hover:text-white"
-                  }`}
+                  } disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent`}
                 >
                   {mode === "compact" ? "Side by side" : "Full width"}
                 </button>
@@ -1557,7 +1563,7 @@ export default function ResultsPage() {
             ) : (
               <div
                 className={`grid gap-4 ${
-                  resultsViewMode === "compact" ? "lg:grid-cols-2" : ""
+                  effectiveResultsViewMode === "compact" ? "lg:grid-cols-2" : ""
                 }`}
               >
                 {selectedRoundMatches.map((match) => {
