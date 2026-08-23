@@ -121,6 +121,7 @@ test("stages only completed prerequisite matches with stable non-drawn scores", 
 
 test("builds repeatable Preview fixture stats for mapped players", () => {
   const params = {
+    seasonYear: 2026,
     aflRound: 21,
     players: [
       { player_name: "Player One", afl_team: "Club One" },
