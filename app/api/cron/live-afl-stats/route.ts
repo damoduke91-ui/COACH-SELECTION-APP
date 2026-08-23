@@ -135,6 +135,21 @@ async function loadCurrentSettings(
   };
 }
 
+async function loadSeasonStatus(
+  supabase: AdminSupabaseClient,
+  environment: string,
+  seasonYear: number
+): Promise<string> {
+  const { data, error } = await supabase
+    .from("competition_seasons")
+    .select("status")
+    .eq("environment", environment)
+    .eq("season_year", seasonYear)
+    .single();
+  if (error) throw new Error(`Season status load failed: ${error.message}`);
+  return String(data?.status ?? "");
+}
+
 async function refreshMatchStatuses(params: {
   supabase: AdminSupabaseClient;
   environment: string;
@@ -442,6 +457,17 @@ export async function GET(request: NextRequest) {
     let targetRound: number | null = null;
     const controlledSettings = await loadCurrentSettings(supabase, environment);
     const seasonYear = controlledSettings.seasonYear;
+    const seasonStatus = await loadSeasonStatus(supabase, environment, seasonYear);
+    if (!['draft', 'active'].includes(seasonStatus)) {
+      return NextResponse.json({
+        importedAt,
+        environment,
+        seasonYear,
+        seasonStatus,
+        action: "skipped",
+        reason: "The controlled season is completed or archived; live-stat writes are disabled.",
+      });
+    }
 
     if (roundParam) {
       targetRound = Number(roundParam);
