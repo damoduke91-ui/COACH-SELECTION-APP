@@ -317,3 +317,96 @@ GRANT EXECUTE ON FUNCTION public.upsert_live_match_if_unprotected(text, integer,
   TO service_role;
 GRANT EXECUTE ON FUNCTION public.delete_protected_round_csv(text, integer, integer)
   TO service_role;
+
+CREATE OR REPLACE FUNCTION public.archive_production_season(
+  p_season_year integer,
+  p_payload jsonb,
+  p_source_row_counts jsonb,
+  p_checksum text,
+  p_premier_name text,
+  p_confirmation text
+)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  archive_id bigint;
+  expected_count integer;
+  actual_count integer;
+  table_name text;
+BEGIN
+  IF p_confirmation <> format('ARCHIVE PRODUCTION %s SNOW COAST', p_season_year) THEN
+    RAISE EXCEPTION 'Typed Production archive confirmation did not match.';
+  END IF;
+  IF p_season_year <> 2026 THEN
+    RAISE EXCEPTION 'This closeout function is restricted to the verified 2026 season.';
+  END IF;
+  IF btrim(COALESCE(p_premier_name, '')) <> 'Snow Coast' THEN
+    RAISE EXCEPTION 'The verified 2026 Premier must be Snow Coast.';
+  END IF;
+  IF p_payload IS NULL OR p_source_row_counts IS NULL THEN
+    RAISE EXCEPTION 'Archive payload and source row counts are required.';
+  END IF;
+  IF length(btrim(COALESCE(p_checksum, ''))) <> 64 THEN
+    RAISE EXCEPTION 'A SHA-256 archive checksum is required.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.finals_results
+    WHERE environment = 'production' AND season_year = p_season_year
+      AND match_code = 'GF' AND coach_1_score = 1975 AND coach_2_score = 1701
+      AND completed_at IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION 'The verified 2026 Grand Final result is not present.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.competition_seasons
+    WHERE environment = 'production' AND season_year = p_season_year AND status = 'active'
+  ) THEN
+    RAISE EXCEPTION 'The verified Production season is not active.';
+  END IF;
+
+  FOREACH table_name IN ARRAY ARRAY[
+    'super8_match_results', 'finals_results', 'season_fixture',
+    'coach_team_selections', 'round_submissions', 'afl_player_round_stats',
+    'afl_matches', 'afl_round_finalisation', 'weekly_team_lists',
+    'admin_team_audit_log'
+  ] LOOP
+    expected_count := NULLIF(p_source_row_counts ->> table_name, '')::integer;
+    IF expected_count IS NULL THEN
+      RAISE EXCEPTION 'Archive row count is missing for %.', table_name;
+    END IF;
+    EXECUTE format(
+      'SELECT count(*) FROM public.%I WHERE environment = $1 AND season_year = $2',
+      table_name
+    ) INTO actual_count USING 'production', p_season_year;
+    IF actual_count <> expected_count THEN
+      RAISE EXCEPTION 'Archive row count changed for %: expected %, found %.',
+        table_name, expected_count, actual_count;
+    END IF;
+  END LOOP;
+
+  PERFORM pg_advisory_xact_lock(hashtext('archive_production_season'), p_season_year);
+  INSERT INTO public.season_archives (
+    environment, season_year, payload, source_row_counts, checksum, created_by
+  ) VALUES (
+    'production', p_season_year, p_payload, p_source_row_counts, p_checksum, auth.uid()
+  ) RETURNING id INTO archive_id;
+
+  UPDATE public.competition_seasons
+  SET status = 'archived', premier_name = p_premier_name,
+      completed_at = COALESCE(completed_at, now()), archived_at = now(),
+      locked_at = now(), updated_at = now()
+  WHERE environment = 'production' AND season_year = p_season_year AND status = 'active';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Production season state changed before archive commit.';
+  END IF;
+  RETURN archive_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.archive_production_season(integer, jsonb, jsonb, text, text, text)
+  FROM public, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.archive_production_season(integer, jsonb, jsonb, text, text, text)
+  TO service_role;
