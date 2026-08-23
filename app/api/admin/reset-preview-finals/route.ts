@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { APP_ENV, supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { requireSeasonYear } from "../../../../lib/season";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ const CONFIRMATION_PHRASE = "RESET PREVIEW FINALS";
 type AppSettingsRow = {
   current_afl_round: number | null;
   current_super8_round: number | null;
+  season_year: number | null;
 };
 
 function response(status: number, payload: Record<string, unknown>) {
@@ -58,26 +60,26 @@ async function countRows(
   return count ?? 0;
 }
 
-async function inspectPreviewFinals() {
-  const seasonYear = new Date().getFullYear();
+async function inspectPreviewFinals(seasonYear: number) {
   const [finalsResults, playerStats, finalisationRows, submissions, lockedTeams] = await Promise.all([
     countRows("finals_results", (query) =>
       query.eq("environment", "preview").eq("season_year", seasonYear),
     ),
     countRows("afl_player_round_stats", (query) =>
-      query.eq("environment", "preview").in("afl_round", FINALS_AFL_ROUNDS),
+      query.eq("environment", "preview").eq("season_year", seasonYear).in("afl_round", FINALS_AFL_ROUNDS),
     ),
     countRows("afl_round_finalisation", (query) =>
-      query.eq("environment", "preview").in("afl_round", FINALS_AFL_ROUNDS),
+      query.eq("environment", "preview").eq("season_year", seasonYear).in("afl_round", FINALS_AFL_ROUNDS),
     ),
     countRows("round_submissions", (query) =>
-      query.eq("environment", "preview").in("round_number", FINALS_SUPER8_ROUNDS),
+      query.eq("environment", "preview").eq("season_year", seasonYear).in("round_number", FINALS_SUPER8_ROUNDS),
     ),
     (async () => {
       const { count, error } = await supabaseAdmin
         .from("coach_team_selections")
         .select("coach_id", { count: "exact", head: true })
         .eq("environment", "preview")
+        .eq("season_year", seasonYear)
         .eq("is_submitted", true);
       if (error) throw new Error(`coach_team_selections: ${error.message}`);
       return count ?? 0;
@@ -109,7 +111,7 @@ export async function POST(request: NextRequest) {
 
     const { data: settingsData, error: settingsError } = await supabaseAdmin
       .from("app_settings")
-      .select("current_afl_round, current_super8_round")
+      .select("current_afl_round, current_super8_round, season_year")
       .eq("environment", "preview")
       .maybeSingle();
 
@@ -124,6 +126,7 @@ export async function POST(request: NextRequest) {
     const settings = settingsData as AppSettingsRow;
     const currentAflRound = Number(settings.current_afl_round);
     const currentSuper8Round = Number(settings.current_super8_round);
+    const seasonYear = requireSeasonYear(settings.season_year);
     const aflIndex = FINALS_AFL_ROUNDS.indexOf(currentAflRound);
     const super8Index = FINALS_SUPER8_ROUNDS.indexOf(currentSuper8Round);
 
@@ -134,7 +137,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const counts = await inspectPreviewFinals();
+    const counts = await inspectPreviewFinals(seasonYear);
 
     if (body.action === "inspect") {
       return response(200, {
@@ -173,7 +176,7 @@ export async function POST(request: NextRequest) {
     const resetAt = new Date().toISOString();
     const { error: resetError } = await supabaseAdmin.rpc("stage_preview_finals_scenario", {
       p_week: 1,
-      p_season_year: new Date().getFullYear(),
+      p_season_year: seasonYear,
       p_prerequisites: [],
       p_now: resetAt,
     });
@@ -184,7 +187,7 @@ export async function POST(request: NextRequest) {
         details: resetError.message,
       });
     }
-    const remaining = await inspectPreviewFinals();
+    const remaining = await inspectPreviewFinals(seasonYear);
     if (Object.values(remaining).some((count) => count !== 0)) {
       return response(500, {
         success: false,
