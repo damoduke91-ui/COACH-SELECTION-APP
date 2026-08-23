@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { useActiveSeason } from "../../lib/activeSeason";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
 import {
   buildFinalsBracket,
@@ -600,6 +601,7 @@ function parseTeamData(value: unknown): CoachTeamData {
 
 export default function ResultsPage() {
   const router = useRouter();
+  const { seasonYear } = useActiveSeason();
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
@@ -689,12 +691,14 @@ export default function ResultsPage() {
   }, []);
 
   const refreshFixtureRows = useCallback(async () => {
+    if (!seasonYear) return [];
     const { data, error } = await supabase
       .from("season_fixture")
       .select(
         "id, environment, competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
       )
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .order("competition_round", { ascending: true })
       .order("afl_round", { ascending: true })
       .order("matchup_index", { ascending: true })
@@ -709,14 +713,17 @@ export default function ResultsPage() {
     const rows = sortFixtureRows((data ?? []) as FixtureRow[]);
     setFixtureRows(rows);
     return rows;
-  }, []);
+  }, [seasonYear]);
 
   const refreshResults = useCallback(async () => {
+    if (!seasonYear) return [];
     const { data, error } = await supabase
       .from("super8_match_results")
       .select(
         "id, round_number, afl_round, matchup_index, coach_1_id, coach_1_name, coach_1_score, coach_2_id, coach_2_name, coach_2_score, imported_at"
       )
+      .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .order("round_number", { ascending: true })
       .order("matchup_index", { ascending: true });
 
@@ -742,14 +749,15 @@ export default function ResultsPage() {
 
     setResults(rows);
     return rows;
-  }, []);
+  }, [seasonYear]);
 
   const refreshFinalsResults = useCallback(async () => {
+    if (!seasonYear) return [];
     const { data, error } = await supabase
       .from("finals_results")
       .select("id, match_code, coach_1_score, coach_2_score, completed_at")
       .eq("environment", APP_ENV)
-      .eq("season_year", new Date().getFullYear());
+      .eq("season_year", seasonYear);
 
     if (error) {
       setMessage(`Finals results load failed: ${error.message}`);
@@ -760,14 +768,16 @@ export default function ResultsPage() {
     const rows = (data ?? []) as FinalsResultRow[];
     setFinalsResults(rows);
     return rows;
-  }, []);
+  }, [seasonYear]);
 
 
   const refreshRoundSubmissions = useCallback(async () => {
+    if (!seasonYear) return [];
     const { data, error } = await supabase
       .from("round_submissions")
       .select("id, coach_id, coach_name, round_number, team_data, submitted_at")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("is_submitted", true)
       .order("round_number", { ascending: false })
       .order("submitted_at", { ascending: false });
@@ -789,9 +799,10 @@ export default function ResultsPage() {
 
     setRoundSubmissions(rows);
     return rows;
-  }, []);
+  }, [seasonYear]);
 
   const refreshPlayerStats = useCallback(async () => {
+    if (!seasonYear) return [];
     const pageSize = 1000;
     let from = 0;
     let allRows: Record<string, unknown>[] = [];
@@ -805,6 +816,7 @@ export default function ResultsPage() {
           "id, afl_round, afl_team_name, afl_team_code, player_name, k, hb, d, m, g, b, t, ho, ga, i50, cl, cg, r50, ff, fa, af, sc, imported_at"
         )
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .order("afl_round", { ascending: true })
         .order("player_name", { ascending: true })
         .range(from, to);
@@ -853,7 +865,7 @@ export default function ResultsPage() {
 
     setPlayerStats(rows);
     return rows;
-  }, []);
+  }, [seasonYear]);
 
   const refreshPageData = useCallback(async () => {
     setIsLoadingPageData(true);
@@ -1256,6 +1268,7 @@ export default function ResultsPage() {
     let isCancelled = false;
 
     async function autoSaveCompletedMatches() {
+      if (!seasonYear) return;
       const savedLabels: string[] = [];
 
       for (const match of fixtureMatches) {
@@ -1314,6 +1327,8 @@ export default function ResultsPage() {
         if (existingResultAlreadyMatches) continue;
 
         const payload = {
+          environment: APP_ENV,
+          season_year: seasonYear,
           round_number: match.roundNumber,
           afl_round: match.aflRound,
           matchup_index: match.matchupIndex,
@@ -1328,7 +1343,9 @@ export default function ResultsPage() {
 
         const { error } = await supabase
           .from("super8_match_results")
-          .upsert(payload, { onConflict: "round_number,matchup_index" });
+          .upsert(payload, {
+            onConflict: "environment,season_year,round_number,matchup_index",
+          });
 
         if (error) {
           if (!isCancelled) {
@@ -1358,6 +1375,7 @@ export default function ResultsPage() {
     refreshResults,
     resultByRoundAndMatch,
     roundSubmissions.length,
+    seasonYear,
     submissionByRoundAndCoach,
   ]);
 
