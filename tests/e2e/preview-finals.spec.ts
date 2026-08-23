@@ -19,7 +19,10 @@ async function expectHeading(page: Page, name: string | RegExp) {
 }
 
 async function returnToDashboard(page: Page) {
-  await page.getByRole("link", { name: "Back to Dashboard" }).click();
+  const backToDashboard = page
+    .getByRole("link", { name: /Back to Dashboard/ })
+    .or(page.getByRole("button", { name: /Back to Dashboard/ }));
+  await backToDashboard.click();
   await page.waitForURL("**/dashboard");
   await expectHeading(page, /Dashboard/);
 }
