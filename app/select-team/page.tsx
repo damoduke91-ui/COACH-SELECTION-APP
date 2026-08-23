@@ -9,6 +9,7 @@ import {
   getPlayersForCoach,
 } from "../../lib/playersByCoach";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { useActiveSeason } from "../../lib/activeSeason";
 import {
   buildFinalsSeeds,
   FINALS_TEAM_NAMES,
@@ -39,6 +40,7 @@ type SavedTeamRow = {
   submitted_at: string | null;
   updated_at: string;
   environment: "production" | "preview";
+  season_year: number;
 };
 
 type CoachMeta = {
@@ -102,6 +104,7 @@ type RoundSubmissionRow = {
   submitted_at: string | null;
   updated_at: string | null;
   environment: "production" | "preview";
+  season_year: number;
   round_number: number;
   afl_round: number | null;
   lockout_at: string;
@@ -1090,6 +1093,7 @@ async function saveAppSettingsRow(
 
 export default function SelectTeamPage() {
   const router = useRouter();
+  const { seasonYear, isLoading: isLoadingSeason, error: seasonError } = useActiveSeason();
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
@@ -1494,6 +1498,7 @@ export default function SelectTeamPage() {
         .from("season_fixture")
         .select("competition_round")
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .eq("afl_round", currentAflRound)
         .order("competition_round", { ascending: false })
         .limit(1);
@@ -1508,9 +1513,13 @@ export default function SelectTeamPage() {
     }
 
     return 1;
-  }, [currentAflRound, currentSuper8Round]);
+  }, [currentAflRound, currentSuper8Round, seasonYear]);
 
   const createScheduledLockoutSnapshot = useCallback(async () => {
+    if (seasonYear === null) {
+      return;
+    }
+
     if (!lockoutScheduleAt) {
       return;
     }
@@ -1533,7 +1542,8 @@ export default function SelectTeamPage() {
         .select(
           "coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment"
         )
-        .eq("environment", APP_ENV);
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear);
 
       if (selectionError) {
         setSubmitMessage(`Auto snapshot load failed: ${selectionError.message}`);
@@ -1547,6 +1557,7 @@ export default function SelectTeamPage() {
       }
 
       const snapshotCreatedAt = new Date().toISOString();
+      const snapshotSeasonYear = seasonYear;
       const snapshotRows: RoundSubmissionRow[] = coachConfigs.map((coach) => {
         const existingRow = selectionMap.get(coach.id);
 
@@ -1558,6 +1569,7 @@ export default function SelectTeamPage() {
           submitted_at: existingRow?.submitted_at ?? null,
           updated_at: existingRow?.updated_at ?? null,
           environment: APP_ENV,
+          season_year: snapshotSeasonYear,
           round_number: snapshotRoundNumber,
           afl_round: currentAflRound,
           lockout_at: lockoutScheduleAt,
@@ -1567,7 +1579,9 @@ export default function SelectTeamPage() {
 
       const { error: upsertError } = await supabase
         .from("round_submissions")
-        .upsert(snapshotRows, { onConflict: "coach_id,round_number,environment" });
+        .upsert(snapshotRows, {
+          onConflict: "environment,season_year,coach_id,round_number",
+        });
 
       if (upsertError) {
         setSubmitMessage(`Auto snapshot save failed: ${upsertError.message}`);
@@ -1579,7 +1593,7 @@ export default function SelectTeamPage() {
     } finally {
       snapshotInFlightRef.current = false;
     }
-  }, [coachConfigs, currentAflRound, getSnapshotRoundNumber, lockoutScheduleAt]);
+  }, [coachConfigs, currentAflRound, getSnapshotRoundNumber, lockoutScheduleAt, seasonYear]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1614,6 +1628,8 @@ export default function SelectTeamPage() {
       const { data } = await supabase
         .from("super8_match_results")
         .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .lte("round_number", 14);
       if (!mounted) return;
       setFinalsWeekOneEligibleNames(
@@ -1628,7 +1644,7 @@ export default function SelectTeamPage() {
     return () => {
       mounted = false;
     };
-  }, [currentAflRound, currentSuper8Round]);
+  }, [currentAflRound, currentSuper8Round, seasonYear]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1651,6 +1667,8 @@ export default function SelectTeamPage() {
       const { data, error } = await supabase
         .from("weekly_team_lists")
         .select("round, player_name, afl_team, role1, role2")
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .eq("round", playerStatusRound);
 
       if (!isMounted) return;
@@ -1671,7 +1689,7 @@ export default function SelectTeamPage() {
     return () => {
       isMounted = false;
     };
-  }, [playerStatusRound]);
+  }, [playerStatusRound, seasonYear]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1692,6 +1710,7 @@ export default function SelectTeamPage() {
           "afl_round, home_app_team_code, away_app_team_code, home_team_name, away_team_name, utc_start_time, venue"
         )
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .eq("afl_round", currentAflRound)
         .order("utc_start_time", { ascending: true });
 
@@ -1705,7 +1724,7 @@ export default function SelectTeamPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentAflRound]);
+  }, [currentAflRound, seasonYear]);
 
   useEffect(() => {
     const channel = supabase
@@ -1789,6 +1808,7 @@ export default function SelectTeamPage() {
         )
         .eq("coach_id", selectedCoach.id)
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .maybeSingle();
 
       if (error) {
@@ -1842,7 +1862,7 @@ export default function SelectTeamPage() {
     }
 
     void loadCoachTeam();
-  }, [selectedCoach, loadedCoachIds, loginSession]);
+  }, [selectedCoach, loadedCoachIds, loginSession, seasonYear]);
 
   useEffect(() => {
     async function loadAllCoachTeamsForAdmin() {
@@ -1855,7 +1875,8 @@ export default function SelectTeamPage() {
         .select(
           "coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment"
         )
-        .eq("environment", APP_ENV);
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear);
 
       if (error) {
         setSubmitMessage(`Admin summary load failed: ${error.message}`);
@@ -1935,7 +1956,7 @@ export default function SelectTeamPage() {
     }
 
     void loadAllCoachTeamsForAdmin();
-  }, [loginSession, isAdmin]);
+  }, [loginSession, isAdmin, seasonYear]);
 
   useEffect(() => {
     async function loadOpponentTeam() {
@@ -1968,6 +1989,7 @@ export default function SelectTeamPage() {
         )
         .eq("coach_id", opponentCoachId)
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .maybeSingle();
 
       if (error) {
@@ -2308,6 +2330,7 @@ export default function SelectTeamPage() {
         .select("team_data, round_number, snapshot_created_at, is_submitted")
         .eq("coach_id", selectedCoach.id)
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .order("round_number", { ascending: false })
         .order("snapshot_created_at", { ascending: false })
         .limit(1);
@@ -2490,6 +2513,7 @@ export default function SelectTeamPage() {
         coach_name: coach.name,
         team_data: team,
         environment: APP_ENV,
+        season_year: seasonYear,
         is_submitted: isSubmitting ? true : alreadySubmitted,
         submitted_at: isSubmitting ? nowIso : existingMeta?.submittedAt ?? null,
         updated_at: nowIso,
@@ -2497,7 +2521,7 @@ export default function SelectTeamPage() {
 
       const { error } = await supabase
         .from("coach_team_selections")
-        .upsert(payload, { onConflict: "coach_id,environment" });
+        .upsert(payload, { onConflict: "environment,season_year,coach_id" });
 
       if (error) {
         setSubmitMessage(
@@ -2519,6 +2543,7 @@ export default function SelectTeamPage() {
           submitted_at: nowIso,
           updated_at: nowIso,
           environment: APP_ENV,
+          season_year: seasonYear,
           round_number: snapshotRoundNumber,
           afl_round: currentAflRound,
           lockout_at: lockoutScheduleAt ?? nowIso,
@@ -2527,7 +2552,9 @@ export default function SelectTeamPage() {
 
         const { error: snapshotError } = await supabase
           .from("round_submissions")
-          .upsert(snapshotPayload, { onConflict: "coach_id,round_number,environment" });
+          .upsert(snapshotPayload, {
+            onConflict: "environment,season_year,coach_id,round_number",
+          });
 
         if (snapshotError) {
           setSubmitMessage(`Team submitted, but snapshot save failed: ${snapshotError.message}`);
@@ -2538,6 +2565,7 @@ export default function SelectTeamPage() {
         if (isAdmin) {
           const { error: auditError } = await supabase.from("admin_team_audit_log").insert({
             environment: APP_ENV,
+            season_year: seasonYear,
             coach_id: coach.id,
             coach_name: coach.name,
             admin_user_id: loginSession.userId,
@@ -2602,6 +2630,7 @@ export default function SelectTeamPage() {
       submittedCoachIds,
       currentAflRound,
       lockoutScheduleAt,
+      seasonYear,
     ]
   );
 
@@ -2630,6 +2659,7 @@ export default function SelectTeamPage() {
       coach_name: selectedCoach.name,
       team_data: teamState,
       environment: APP_ENV,
+      season_year: seasonYear,
       is_submitted: false,
       submitted_at: null,
       updated_at: nowIso,
@@ -2637,7 +2667,7 @@ export default function SelectTeamPage() {
 
     const { error } = await supabase
       .from("coach_team_selections")
-      .upsert(payload, { onConflict: "coach_id,environment" });
+      .upsert(payload, { onConflict: "environment,season_year,coach_id" });
 
     if (error) {
       setSubmitMessage(`Unlock failed: ${error.message}`);
@@ -2702,6 +2732,7 @@ export default function SelectTeamPage() {
       coach_name: coach.name,
       team_data: emptyTeamState(),
       environment: APP_ENV,
+      season_year: seasonYear,
       is_submitted: false,
       submitted_at: null,
       updated_at: nowIso,
@@ -2709,7 +2740,7 @@ export default function SelectTeamPage() {
 
     const { error } = await supabase
       .from("coach_team_selections")
-      .upsert(resetRows, { onConflict: "coach_id,environment" });
+      .upsert(resetRows, { onConflict: "environment,season_year,coach_id" });
 
     if (error) {
       setSubmitMessage(`Reset all teams failed: ${error.message}`);
@@ -2915,7 +2946,7 @@ export default function SelectTeamPage() {
 
  
 
-  if (isAuthenticating) {
+  if (isAuthenticating || isLoadingSeason) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
         <div className="mx-auto max-w-7xl">
@@ -2923,6 +2954,21 @@ export default function SelectTeamPage() {
             <div className="text-2xl font-bold">Loading team selection...</div>
             <div className="mt-2 text-sm text-white/70">
               Checking session and loading current environment.
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (seasonError || seasonYear === null) {
+    return (
+      <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
+        <div className="mx-auto max-w-7xl">
+          <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-6 text-center">
+            <div className="text-2xl font-bold">Season unavailable</div>
+            <div className="mt-2 text-sm text-red-100/80">
+              {seasonError ?? "No active season is configured for this environment."}
             </div>
           </div>
         </div>
