@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { APP_ENV, supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { requireSeasonYear } from "../../../../lib/season";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ type ProfileRow = {
 
 type AppSettingsRow = {
   current_afl_round: number | null;
+  season_year: number | null;
 };
 
 type FinalisationRow = {
@@ -76,7 +78,7 @@ export async function POST(request: NextRequest) {
 
     const { data: settingsData, error: settingsError } = await supabaseAdmin
       .from("app_settings")
-      .select("current_afl_round")
+      .select("current_afl_round, season_year")
       .eq("environment", APP_ENV)
       .maybeSingle();
 
@@ -91,6 +93,7 @@ export async function POST(request: NextRequest) {
     const currentAflRound = toPositiveInteger(
       (settingsData as AppSettingsRow | null)?.current_afl_round
     );
+    const seasonYear = requireSeasonYear((settingsData as AppSettingsRow | null)?.season_year);
 
     if (!currentAflRound) {
       return jsonResponse(400, {
@@ -110,6 +113,7 @@ export async function POST(request: NextRequest) {
       .from("afl_round_finalisation")
       .select("expected_match_count, csv_imported_at, active_source")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("afl_round", currentAflRound)
       .maybeSingle();
 
@@ -137,6 +141,7 @@ export async function POST(request: NextRequest) {
       .from("afl_matches")
       .select("final_imported_at")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("afl_round", currentAflRound);
 
     if (matchError) {
@@ -165,6 +170,7 @@ export async function POST(request: NextRequest) {
       .from("afl_player_round_stats")
       .delete()
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("afl_round", currentAflRound)
       .select("id");
 
@@ -179,6 +185,8 @@ export async function POST(request: NextRequest) {
     const { data: deletedResults, error: resultsDeleteError } = await supabaseAdmin
       .from("super8_match_results")
       .delete()
+      .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("afl_round", currentAflRound)
       .eq("score_source", "live_fallback")
       .select("id");
@@ -197,6 +205,7 @@ export async function POST(request: NextRequest) {
       .upsert(
         {
           environment: APP_ENV,
+          season_year: seasonYear,
           afl_round: currentAflRound,
           expected_match_count: expectedMatchCount,
           final_match_count: finalMatchCount,
@@ -207,7 +216,7 @@ export async function POST(request: NextRequest) {
           updated_at: clearedAt,
         },
         {
-          onConflict: "environment,afl_round",
+          onConflict: "environment,season_year,afl_round",
         }
       );
 
