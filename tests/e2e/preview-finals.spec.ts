@@ -64,6 +64,28 @@ test.describe("Preview finals journey", () => {
       "login must not flicker back after the dashboard has loaded",
     ).not.toContain("/login");
 
+    await page.getByRole("link", { name: /Admin Team Audit Log/ }).click();
+    await page.waitForURL("**/admin-teams");
+    await expectHeading(page, "Admin Team Audit Log");
+    await expect(page.getByRole("columnheader", { name: "Time" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Coach" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Admin" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Action" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Reason" })).toBeVisible();
+
+    await returnToDashboard(page);
+    await page.getByRole("link", { name: /Coach Selection/ }).click();
+    await page.waitForURL("**/select-team");
+    await expectHeading(page, "Coach Team Selection");
+    await expectHeading(page, "Admin Controls");
+    await expectHeading(page, "Team Controls");
+    const teamControls = page.getByRole("heading", { name: "Team Controls" }).locator("..").locator("..");
+    await expect(teamControls.getByRole("combobox")).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Save for / })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Submit for / })).toBeVisible();
+
+    await returnToDashboard(page);
+
     await page.getByRole("link", { name: /^Finals\b/ }).click();
     await page.waitForURL("**/finals");
     await expectHeading(page, "Preview Finals Scenarios");
