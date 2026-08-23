@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { useActiveSeason } from "../../lib/activeSeason";
 
 type AuditRow = {
   id: number;
   environment: "production" | "preview";
+  season_year: number;
   coach_id: number;
   coach_name: string;
   admin_email: string;
@@ -18,16 +20,19 @@ type AuditRow = {
 
 export default function AdminTeamsPage() {
   const router = useRouter();
+  const { seasonYear, isLoading: isLoadingSeason, error: seasonError } = useActiveSeason();
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
   const loadAudit = useCallback(async () => {
+    if (seasonYear === null) return;
     setLoading(true);
     const { data, error } = await supabase
       .from("admin_team_audit_log")
-      .select("id,environment,coach_id,coach_name,admin_email,action,reason,created_at")
+      .select("id,environment,season_year,coach_id,coach_name,admin_email,action,reason,created_at")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .order("created_at", { ascending: false })
       .limit(100);
     if (error) {
@@ -38,7 +43,7 @@ export default function AdminTeamsPage() {
       setMessage("");
     }
     setLoading(false);
-  }, []);
+  }, [seasonYear]);
 
   useEffect(() => {
     let mounted = true;
@@ -61,6 +66,18 @@ export default function AdminTeamsPage() {
     void bootstrap();
     return () => { mounted = false; };
   }, [loadAudit, router]);
+
+  if (isLoadingSeason) {
+    return <main className="min-h-screen bg-slate-950 p-8 text-white">Loading active season…</main>;
+  }
+
+  if (seasonError || seasonYear === null) {
+    return (
+      <main className="min-h-screen bg-slate-950 p-8 text-red-200">
+        {seasonError ?? "No active season is configured for this environment."}
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
