@@ -121,7 +121,9 @@ export async function GET(request: NextRequest) {
       const { error: matchUpdateError } = await supabase
         .from("afl_matches")
         .update(matchUpdatePayload)
-        .eq("id", match.id);
+        .eq("id", match.id)
+        .eq("environment", environment)
+        .eq("season_year", seasonYear);
 
       if (matchUpdateError) {
         throw new Error(`Match update failed: ${matchUpdateError.message}`);
