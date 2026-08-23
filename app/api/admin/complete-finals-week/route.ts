@@ -14,6 +14,7 @@ import {
   type FinalsLiveStat,
 } from "../../../../lib/finalsLiveScores";
 import { APP_ENV, supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { requireSeasonYear } from "../../../../lib/season";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,7 @@ type ProfileRow = {
 type AppSettingsRow = {
   current_afl_round: number | null;
   current_super8_round: number | null;
+  season_year: number | null;
 };
 
 type SubmissionRow = {
@@ -90,7 +92,7 @@ export async function POST(request: NextRequest) {
 
     const { data: settingsData, error: settingsError } = await supabaseAdmin
       .from("app_settings")
-      .select("current_afl_round, current_super8_round")
+      .select("current_afl_round, current_super8_round, season_year")
       .eq("environment", APP_ENV)
       .maybeSingle();
 
@@ -118,12 +120,14 @@ export async function POST(request: NextRequest) {
 
     const finalsWeek = weekFromAfl;
     const matchCodes = MATCHES_BY_WEEK[finalsWeek];
-    const seasonYear = new Date().getFullYear();
+    const seasonYear = requireSeasonYear(settings.season_year);
 
     const [regularQuery, finalsQuery, statsQuery, submissionsQuery] = await Promise.all([
       supabaseAdmin
         .from("super8_match_results")
         .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .lte("round_number", 14),
       supabaseAdmin
         .from("finals_results")
@@ -134,11 +138,13 @@ export async function POST(request: NextRequest) {
         .from("afl_player_round_stats")
         .select("afl_round, afl_team_code, player_name, d, m, g, b, t, ho, ff, fa")
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .eq("afl_round", aflRound),
       supabaseAdmin
         .from("round_submissions")
         .select("coach_id, coach_name, team_data, is_submitted")
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .eq("round_number", super8Round)
         .eq("is_submitted", true),
     ]);

@@ -19,6 +19,7 @@ import {
 } from "../../lib/finalsLiveScores";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { calculateFinalsReadiness } from "../../lib/finalsReadiness";
+import { INITIAL_SEASON_YEAR, requireSeasonYear } from "../../lib/season";
 
 function TeamLine({
   team,
@@ -88,32 +89,43 @@ export default function FinalsPage() {
   const [currentPreviewWeek, setCurrentPreviewWeek] = useState<number | null>(null);
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
   const [currentSuper8Round, setCurrentSuper8Round] = useState<number | null>(null);
+  const [seasonYear, setSeasonYear] = useState(INITIAL_SEASON_YEAR);
   const [resettingPreview, setResettingPreview] = useState(false);
   const [drafts, setDrafts] = useState<Partial<Record<FinalsMatchCode, [string, string]>>>({});
 
   const refresh = useCallback(async () => {
-    const [regular, finals, submissionRows, settings] = await Promise.all([
+    const settings = await supabase
+      .from("app_settings")
+      .select("current_afl_round, current_super8_round, season_year")
+      .eq("environment", APP_ENV)
+      .maybeSingle();
+    if (settings.error || !settings.data) {
+      setMessage(`Season settings load failed: ${settings.error?.message ?? "No active settings."}`);
+      return;
+    }
+    const activeSeasonYear = requireSeasonYear(settings.data.season_year);
+    setSeasonYear(activeSeasonYear);
+
+    const [regular, finals, submissionRows] = await Promise.all([
       supabase
         .from("super8_match_results")
         .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
+        .eq("environment", APP_ENV)
+        .eq("season_year", activeSeasonYear)
         .lte("round_number", 14),
       supabase
         .from("finals_results")
         .select("match_code, coach_1_score, coach_2_score")
         .eq("environment", APP_ENV)
-        .eq("season_year", new Date().getFullYear()),
+        .eq("season_year", activeSeasonYear),
       supabase
         .from("round_submissions")
         .select("coach_id, coach_name, round_number, team_data")
         .eq("environment", APP_ENV)
+        .eq("season_year", activeSeasonYear)
         .eq("is_submitted", true)
         .gte("round_number", 15)
         .lte("round_number", 18),
-      supabase
-        .from("app_settings")
-        .select("current_afl_round, current_super8_round")
-        .eq("environment", APP_ENV)
-        .maybeSingle(),
     ]);
     const statQueries = await Promise.all(
       FINALS_AFL_ROUNDS.map((aflRound) =>
@@ -121,6 +133,7 @@ export default function FinalsPage() {
           .from("afl_player_round_stats")
           .select("afl_round, afl_team_code, player_name, d, m, g, b, t, ho, ff, fa")
           .eq("environment", APP_ENV)
+          .eq("season_year", activeSeasonYear)
           .eq("afl_round", aflRound),
       ),
     );
@@ -133,7 +146,7 @@ export default function FinalsPage() {
       setFinalsResults((finals.data ?? []) as FinalsResult[]);
     }
     if (!submissionRows.error) setSubmissions((submissionRows.data ?? []) as typeof submissions);
-    if (!settings.error && settings.data) {
+    if (settings.data) {
       setCurrentAflRound(Number(settings.data.current_afl_round) || null);
       setCurrentSuper8Round(Number(settings.data.current_super8_round) || null);
       const aflWeek = FINALS_AFL_ROUNDS.indexOf(
@@ -274,7 +287,7 @@ export default function FinalsPage() {
     const { error } = await supabase.from("finals_results").upsert(
       {
         environment: APP_ENV,
-        season_year: new Date().getFullYear(),
+        season_year: seasonYear,
         match_code: finalsMatch.code,
         coach_1_score: homeScore,
         coach_2_score: awayScore,
@@ -299,7 +312,7 @@ export default function FinalsPage() {
         updated_at: new Date().toISOString(),
       })
       .eq("environment", APP_ENV)
-      .eq("season_year", new Date().getFullYear())
+      .eq("season_year", seasonYear)
       .eq("match_code", finalsMatch.code);
     setSavingCode(null);
     if (error) {
