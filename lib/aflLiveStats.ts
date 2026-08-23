@@ -3,6 +3,7 @@ import { SupabaseClient } from "@supabase/supabase-js";
 export type AflMatchRow = {
   id: number;
   environment: string;
+  season_year: number;
   afl_round: number;
   afl_match_id: number;
   afl_match_provider_id: string;
@@ -52,6 +53,7 @@ export type AflPlayerStatsResponse = {
 
 export type AflPlayerRoundStatUpsertRow = {
   environment: string;
+  season_year: number;
   afl_round: number;
   afl_team_name: string | null;
   afl_team_code: string;
@@ -209,6 +211,7 @@ export function mapAflPlayerStat(
     afl_player_name: aflPlayerName,
     row: {
       environment: match.environment,
+      season_year: match.season_year,
       afl_round: match.afl_round,
       afl_team_name: teamInfo.name,
       afl_team_code: teamInfo.code,
