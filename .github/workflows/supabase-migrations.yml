@@ -47,9 +47,7 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase migration list --linked
       - name: Verify migration history drift
-        if: >-
-          github.event_name == 'schedule' ||
-          (github.event_name == 'workflow_dispatch' && inputs.apply_migrations == false)
+        if: github.event_name == 'schedule'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -60,7 +58,7 @@ jobs:
           grep -Fq "Remote database is up to date." <<< "$plan"
       - name: Preview pending migration SQL
         if: >-
-          (github.event_name == 'workflow_dispatch' && inputs.apply_migrations) ||
+          github.event_name == 'workflow_dispatch' ||
           (github.event_name == 'push' && vars.SUPABASE_MIGRATIONS_ENABLED == 'true')
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
