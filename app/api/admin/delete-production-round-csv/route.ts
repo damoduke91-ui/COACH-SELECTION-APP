@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { APP_ENV, supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { requireSeasonYear } from "../../../../lib/season";
 
 export const dynamic = "force-dynamic";
 
-type AppSettingsRow = { current_afl_round: number | null };
+type AppSettingsRow = { current_afl_round: number | null; season_year: number | null };
 type DeleteResult = {
   status?: string;
   deleted_rows?: number;
@@ -73,7 +74,7 @@ export async function POST(request: NextRequest) {
 
     const { data: settingsData, error: settingsError } = await supabaseAdmin
       .from("app_settings")
-      .select("current_afl_round")
+      .select("current_afl_round, season_year")
       .eq("environment", "production")
       .maybeSingle();
 
@@ -89,6 +90,7 @@ export async function POST(request: NextRequest) {
       (settingsData as AppSettingsRow | null)?.current_afl_round
     );
     const requestedRound = toPositiveInteger(body.confirmRound);
+    const seasonYear = requireSeasonYear((settingsData as AppSettingsRow | null)?.season_year);
     if (!currentRound || requestedRound !== currentRound) {
       return jsonResponse(400, {
         success: false,
@@ -100,6 +102,7 @@ export async function POST(request: NextRequest) {
       .from("afl_player_round_stats")
       .select("id", { count: "exact", head: true })
       .eq("environment", "production")
+      .eq("season_year", seasonYear)
       .eq("afl_round", currentRound)
       .eq("score_source", "csv");
 
@@ -137,7 +140,7 @@ export async function POST(request: NextRequest) {
 
     const { data, error: deleteError } = await supabaseAdmin.rpc(
       "delete_protected_round_csv",
-      { p_environment: "production", p_afl_round: currentRound }
+      { p_environment: "production", p_season_year: seasonYear, p_afl_round: currentRound }
     );
 
     if (deleteError) {
