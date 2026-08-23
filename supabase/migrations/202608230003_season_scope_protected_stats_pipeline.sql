@@ -1,6 +1,71 @@
 -- Make protected live/CSV operations season-aware. Old signatures are removed
 -- so stale callers fail closed instead of mutating a same-numbered prior round.
 
+-- Remove legacy non-primary uniqueness that does not include season_year. Those
+-- keys would otherwise reject a valid 2027 row that shares a 2026 round/key.
+DO $$
+DECLARE
+  target_table text;
+  legacy_constraint record;
+  legacy_index record;
+BEGIN
+  FOREACH target_table IN ARRAY ARRAY[
+    'coach_team_selections', 'round_submissions', 'season_fixture',
+    'super8_match_results', 'afl_player_round_stats', 'afl_matches',
+    'afl_round_finalisation', 'weekly_team_lists', 'super8_ladder_snapshots'
+  ] LOOP
+    FOR legacy_constraint IN
+      SELECT constraint_name
+      FROM information_schema.table_constraints tc
+      WHERE tc.table_schema = 'public'
+        AND tc.table_name = target_table
+        AND tc.constraint_type = 'UNIQUE'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM information_schema.constraint_column_usage ccu
+          WHERE ccu.constraint_schema = tc.constraint_schema
+            AND ccu.constraint_name = tc.constraint_name
+            AND ccu.table_name = tc.table_name
+            AND ccu.column_name = 'season_year'
+        )
+    LOOP
+      EXECUTE format(
+        'ALTER TABLE public.%I DROP CONSTRAINT %I',
+        target_table,
+        legacy_constraint.constraint_name
+      );
+    END LOOP;
+
+    FOR legacy_index IN
+      SELECT index_class.relname AS index_name
+      FROM pg_index index_info
+      JOIN pg_class table_class ON table_class.oid = index_info.indrelid
+      JOIN pg_namespace table_namespace ON table_namespace.oid = table_class.relnamespace
+      JOIN pg_class index_class ON index_class.oid = index_info.indexrelid
+      WHERE table_namespace.nspname = 'public'
+        AND table_class.relname = target_table
+        AND index_info.indisunique
+        AND NOT index_info.indisprimary
+        AND NOT EXISTS (
+          SELECT 1
+          FROM unnest(index_info.indkey) AS key(attnum)
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = table_class.oid
+           AND attribute.attnum = key.attnum
+          WHERE attribute.attname = 'season_year'
+        )
+    LOOP
+      EXECUTE format('DROP INDEX IF EXISTS public.%I', legacy_index.index_name);
+    END LOOP;
+  END LOOP;
+END;
+$$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS season_fixture_season_match_key
+  ON public.season_fixture (environment, season_year, competition_round, matchup_index, coach_id);
+CREATE UNIQUE INDEX IF NOT EXISTS afl_matches_season_match_key
+  ON public.afl_matches (environment, season_year, afl_match_id);
+
 DROP FUNCTION IF EXISTS public.replace_preview_match_with_csv(text, integer, text[], jsonb);
 DROP FUNCTION IF EXISTS public.upsert_preview_live_match(text, integer, text[], jsonb);
 DROP FUNCTION IF EXISTS public.replace_match_with_protected_csv(text, integer, text[], jsonb);
