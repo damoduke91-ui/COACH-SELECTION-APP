@@ -9,24 +9,29 @@ import {
   type RegularSeasonResult,
 } from "../../lib/finals";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { useActiveSeason } from "../../lib/activeSeason";
 
 export default function FinalsFixtureSection() {
+  const { seasonYear } = useActiveSeason();
   const [regularResults, setRegularResults] = useState<RegularSeasonResult[]>([]);
   const [finalsResults, setFinalsResults] = useState<FinalsResult[]>([]);
 
   useEffect(() => {
+    if (!seasonYear) return;
     let mounted = true;
     async function load() {
       const [regular, finals] = await Promise.all([
         supabase
           .from("super8_match_results")
           .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
+          .eq("environment", APP_ENV)
+          .eq("season_year", seasonYear)
           .lte("round_number", 14),
         supabase
           .from("finals_results")
           .select("match_code, coach_1_score, coach_2_score")
           .eq("environment", APP_ENV)
-          .eq("season_year", new Date().getFullYear()),
+          .eq("season_year", seasonYear),
       ]);
       if (!mounted) return;
       setRegularResults((regular.data ?? []) as RegularSeasonResult[]);
@@ -36,7 +41,7 @@ export default function FinalsFixtureSection() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [seasonYear]);
 
   const bracket = useMemo(
     () => buildFinalsBracket(regularResults, finalsResults),

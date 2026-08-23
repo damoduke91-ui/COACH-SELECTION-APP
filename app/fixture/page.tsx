@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { useActiveSeason } from "../../lib/activeSeason";
 import FinalsFixtureSection from "./FinalsFixtureSection";
 
 type LoginSession = {
@@ -163,6 +164,7 @@ function isUsersMatch(match: FixtureMatch, coachId: number | null | undefined): 
 
 export default function FixturePage() {
   const router = useRouter();
+  const { seasonYear, isLoading: isLoadingSeason, error: seasonError } = useActiveSeason();
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
@@ -242,6 +244,7 @@ export default function FixturePage() {
   }, []);
 
   const refreshFixture = useCallback(async () => {
+    if (!seasonYear) return;
     setIsLoadingFixture(true);
 
     await refreshCurrentRound();
@@ -252,6 +255,7 @@ export default function FixturePage() {
         "id, environment, competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
       )
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .order("competition_round", { ascending: true })
       .order("afl_round", { ascending: true })
       .order("matchup_index", { ascending: true })
@@ -266,7 +270,7 @@ export default function FixturePage() {
 
     setFixtureRows(sortFixtureRows((data ?? []) as FixtureRow[]));
     setIsLoadingFixture(false);
-  }, [refreshCurrentRound]);
+  }, [refreshCurrentRound, seasonYear]);
 
   useEffect(() => {
     let isMounted = true;
@@ -410,12 +414,22 @@ export default function FixturePage() {
     );
   }, [currentFixtureGroup, loginSession?.coachId]);
 
-  if (isAuthenticating) {
+  if (isAuthenticating || isLoadingSeason) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
         <div className="mx-auto max-w-6xl rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="text-lg font-semibold">Checking session...</div>
         </div>
+      </main>
+    );
+  }
+
+  if (seasonError || !seasonYear) {
+    return (
+      <main className="min-h-screen bg-neutral-950 p-6 text-white">
+        <p className="rounded-xl border border-red-400/30 bg-red-950/40 p-4">
+          Season settings load failed: {seasonError ?? "No active season is configured."}
+        </p>
       </main>
     );
   }

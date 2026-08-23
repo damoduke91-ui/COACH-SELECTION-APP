@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { useActiveSeason } from "../../lib/activeSeason";
 
 type LoginSession = {
   userId: string;
@@ -49,6 +50,7 @@ function toNumber(value: unknown): number | null {
 
 export default function LadderPage() {
   const router = useRouter();
+  const { seasonYear, isLoading: isLoadingSeason, error: seasonError } = useActiveSeason();
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
@@ -189,7 +191,7 @@ export default function LadderPage() {
   }, [loadProfileForUser, router]);
 
   useEffect(() => {
-    if (!loginSession) return;
+    if (!loginSession || !seasonYear) return;
 
     let isMounted = true;
 
@@ -201,6 +203,8 @@ export default function LadderPage() {
         .select(
           "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
         )
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .order("round_number", { ascending: true })
         .order("matchup_index", { ascending: true });
 
@@ -236,7 +240,7 @@ export default function LadderPage() {
     return () => {
       isMounted = false;
     };
-  }, [loginSession]);
+  }, [loginSession, seasonYear]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -333,12 +337,22 @@ export default function LadderPage() {
     return rows;
   }, [results]);
 
-  if (isAuthenticating) {
+  if (isAuthenticating || isLoadingSeason) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
         <div className="mx-auto max-w-6xl rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="text-lg font-semibold">Checking session...</div>
         </div>
+      </main>
+    );
+  }
+
+  if (seasonError || !seasonYear) {
+    return (
+      <main className="min-h-screen bg-neutral-950 p-6 text-white">
+        <p className="rounded-xl border border-red-400/30 bg-red-950/40 p-4">
+          Season settings load failed: {seasonError ?? "No active season is configured."}
+        </p>
       </main>
     );
   }

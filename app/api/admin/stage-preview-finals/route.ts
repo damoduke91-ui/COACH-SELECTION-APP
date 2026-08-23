@@ -4,6 +4,7 @@ import {
   getPreviewFinalsScenario,
 } from "../../../../lib/previewFinalsScenarios";
 import { APP_ENV, supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { requireSeasonYear } from "../../../../lib/season";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,13 @@ export async function POST(request: NextRequest) {
       return response(400, { success: false, error: "Finals week must be an integer from 1 to 4." });
     }
 
-    const seasonYear = new Date().getFullYear();
+    const { data: settings, error: settingsError } = await supabaseAdmin
+      .from("app_settings")
+      .select("season_year")
+      .eq("environment", "preview")
+      .single();
+    if (settingsError) throw new Error(`Season load failed: ${settingsError.message}`);
+    const seasonYear = requireSeasonYear(settings?.season_year);
     const prerequisites = buildPreviewFinalsPrerequisites(week);
     const now = new Date().toISOString();
     const { error: stagingError } = await supabaseAdmin.rpc("stage_preview_finals_scenario", {

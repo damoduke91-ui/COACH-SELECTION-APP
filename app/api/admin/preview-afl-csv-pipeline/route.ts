@@ -8,6 +8,7 @@ import {
 } from "../../../../lib/aflLiveStats";
 import { APP_ENV, supabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { buildDeterministicPreviewStats } from "../../../../lib/previewAflStats";
+import { requireSeasonYear } from "../../../../lib/season";
 import { validatePreviewImportAccess, validatePreviewImportCoverage, validatePreviewImportRound } from "../../../../lib/previewImportGuards";
 
 export const dynamic = "force-dynamic";
@@ -69,17 +70,19 @@ export async function POST(request: NextRequest) {
     const dryRun = body.dryRun !== false;
     const { data: settings, error: settingsError } = await supabaseAdmin
       .from("app_settings")
-      .select("current_afl_round")
+      .select("current_afl_round, season_year")
       .eq("environment", "preview")
       .maybeSingle();
     if (settingsError) throw new Error(`Round Control load failed: ${settingsError.message}`);
+    const seasonYear = requireSeasonYear(settings?.season_year);
     const roundFailure = validatePreviewImportRound(confirmedRound, Number(settings?.current_afl_round) || null);
     if (roundFailure) return response(roundFailure.status, { success: false, error: roundFailure.error });
 
     const { data: matchData, error: matchError } = await supabaseAdmin
       .from("afl_matches")
-      .select("id,environment,afl_round,afl_match_id,afl_match_provider_id,home_team_provider_id,away_team_provider_id,home_team_code,away_team_code,home_app_team_code,away_app_team_code,home_team_name,away_team_name,status")
+      .select("id,environment,season_year,afl_round,afl_match_id,afl_match_provider_id,home_team_provider_id,away_team_provider_id,home_team_code,away_team_code,home_app_team_code,away_app_team_code,home_team_name,away_team_name,status")
       .eq("environment", "preview")
+      .eq("season_year", seasonYear)
       .eq("afl_round", confirmedRound)
       .order("afl_match_id");
     if (matchError) throw new Error(`AFL fixture load failed: ${matchError.message}`);
@@ -96,6 +99,8 @@ export async function POST(request: NextRequest) {
           const { data: latestList, error: latestListError } = await supabaseAdmin
             .from("weekly_team_lists")
             .select("round")
+            .eq("environment", "preview")
+            .eq("season_year", seasonYear)
             .lte("round", confirmedRound)
             .order("round", { ascending: false })
             .limit(1)
@@ -106,6 +111,8 @@ export async function POST(request: NextRequest) {
           const { data: players, error: playersError } = await supabaseAdmin
             .from("weekly_team_lists")
             .select("player_name,afl_team")
+            .eq("environment", "preview")
+            .eq("season_year", seasonYear)
             .eq("round", sourceTeamListRound);
           if (playersError) throw new Error(`Round team-list load failed: ${playersError.message}`);
           const teamCodeByName = new Map<string, string>();
@@ -128,6 +135,7 @@ export async function POST(request: NextRequest) {
             if (code) teamCodeByName.set(weeklyListName, code);
           }
           return buildDeterministicPreviewStats({
+            seasonYear,
             aflRound: confirmedRound,
             players: (players ?? []) as Array<{ player_name: string; afl_team: string }>,
             teamCodeByName,
@@ -180,7 +188,9 @@ export async function POST(request: NextRequest) {
 
     const { error: upsertError } = await supabaseAdmin
       .from("afl_player_round_stats")
-      .upsert(rows, { onConflict: "environment,afl_round,afl_team_code,player_name" });
+      .upsert(rows, {
+        onConflict: "environment,season_year,afl_round,afl_team_code,player_name",
+      });
     if (upsertError) throw new Error(`Stats upsert failed: ${upsertError.message}`);
 
     return response(200, {

@@ -334,6 +334,7 @@ function buildFixtureMatches(rows: FixtureRow[]): FixtureMatch[] {
 async function updateFinalisationProgress(params: {
   supabase: AdminSupabaseClient;
   environment: string;
+  seasonYear: number;
   aflRound: number;
   expectedMatchCount: number;
   finalMatchCount: number;
@@ -346,6 +347,7 @@ async function updateFinalisationProgress(params: {
 }): Promise<void> {
   const payload: Record<string, unknown> = {
     environment: params.environment,
+    season_year: params.seasonYear,
     afl_round: params.aflRound,
     expected_match_count: params.expectedMatchCount,
     final_match_count: params.finalMatchCount,
@@ -359,7 +361,7 @@ async function updateFinalisationProgress(params: {
   if (params.activeSource) payload.active_source = params.activeSource;
 
   const { error } = await params.supabase.from("afl_round_finalisation").upsert(payload, {
-    onConflict: "environment,afl_round",
+    onConflict: "environment,season_year,afl_round",
   });
 
   if (error) throw new Error(`Finalisation progress update failed: ${error.message}`);
@@ -368,16 +370,18 @@ async function updateFinalisationProgress(params: {
 export async function finaliseSuper8RoundFromLiveStats(params: {
   supabase: AdminSupabaseClient;
   environment: string;
+  seasonYear: number;
   aflRound: number;
   finalisedAt: string;
 }): Promise<LiveFinalisationResult> {
-  const { supabase, environment, aflRound, finalisedAt } = params;
+  const { supabase, environment, seasonYear, aflRound, finalisedAt } = params;
 
   try {
     const { data: finalisationData, error: finalisationError } = await supabase
       .from("afl_round_finalisation")
       .select("expected_match_count, live_ready_at, live_finalised_at, csv_imported_at, active_source")
       .eq("environment", environment)
+      .eq("season_year", seasonYear)
       .eq("afl_round", aflRound)
       .maybeSingle();
 
@@ -394,11 +398,13 @@ export async function finaliseSuper8RoundFromLiveStats(params: {
           .from("afl_matches")
           .select("status, final_imported_at")
           .eq("environment", environment)
+          .eq("season_year", seasonYear)
           .eq("afl_round", aflRound),
         supabase
           .from("afl_player_round_stats")
           .select("afl_team_code, player_name, d, m, g, b, t, ho, ff, fa")
           .eq("environment", environment)
+          .eq("season_year", seasonYear)
           .eq("afl_round", aflRound),
       ]);
 
@@ -425,6 +431,7 @@ export async function finaliseSuper8RoundFromLiveStats(params: {
     await updateFinalisationProgress({
       supabase,
       environment,
+      seasonYear,
       aflRound,
       expectedMatchCount,
       finalMatchCount,
@@ -472,6 +479,7 @@ export async function finaliseSuper8RoundFromLiveStats(params: {
         "competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
       )
       .eq("environment", environment)
+      .eq("season_year", seasonYear)
       .eq("afl_round", aflRound);
 
     if (fixtureError) throw new Error(`Super 8 fixture load failed: ${fixtureError.message}`);
@@ -487,6 +495,7 @@ export async function finaliseSuper8RoundFromLiveStats(params: {
       .from("round_submissions")
       .select("coach_id, round_number, team_data, submitted_at")
       .eq("environment", environment)
+      .eq("season_year", seasonYear)
       .eq("is_submitted", true)
       .in("round_number", super8Rounds)
       .order("submitted_at", { ascending: false });
@@ -546,6 +555,8 @@ export async function finaliseSuper8RoundFromLiveStats(params: {
       }
 
       resultRows.push({
+        environment,
+        season_year: seasonYear,
         round_number: match.roundNumber,
         afl_round: match.aflRound,
         matchup_index: match.matchupIndex,
@@ -562,7 +573,7 @@ export async function finaliseSuper8RoundFromLiveStats(params: {
     }
 
     const { error: resultError } = await supabase.from("super8_match_results").upsert(resultRows, {
-      onConflict: "round_number,matchup_index",
+      onConflict: "environment,season_year,round_number,matchup_index",
     });
 
     if (resultError) throw new Error(`Live fallback result save failed: ${resultError.message}`);
@@ -570,6 +581,7 @@ export async function finaliseSuper8RoundFromLiveStats(params: {
     await updateFinalisationProgress({
       supabase,
       environment,
+      seasonYear,
       aflRound,
       expectedMatchCount,
       finalMatchCount,

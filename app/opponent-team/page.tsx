@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { COACHES } from "../../lib/coachConfig";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { useActiveSeason } from "../../lib/activeSeason";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
 import {
   buildFinalsBracket,
@@ -797,6 +798,7 @@ function CoachLivePanel({
 
 export default function OpponentTeamPage() {
   const router = useRouter();
+  const { seasonYear } = useActiveSeason();
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
@@ -883,23 +885,26 @@ export default function OpponentTeamPage() {
   }, []);
 
   const refreshFinals = useCallback(async () => {
+    if (!seasonYear) return;
     const [regular, finals] = await Promise.all([
       supabase
         .from("super8_match_results")
         .select("round_number, coach_1_name, coach_1_score, coach_2_name, coach_2_score")
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .lte("round_number", 14),
       supabase
         .from("finals_results")
         .select("match_code, coach_1_score, coach_2_score")
         .eq("environment", APP_ENV)
-        .eq("season_year", new Date().getFullYear()),
+        .eq("season_year", seasonYear),
     ]);
     setRegularResults((regular.data ?? []) as RegularSeasonResult[]);
     if (!finals.error) setFinalsResults((finals.data ?? []) as FinalsResult[]);
-  }, []);
+  }, [seasonYear]);
 
   const refreshFixtureRows = useCallback(async (aflRound: number | null) => {
-    if (!aflRound) {
+    if (!aflRound || !seasonYear) {
       setFixtureRows([]);
       return [];
     }
@@ -910,6 +915,7 @@ export default function OpponentTeamPage() {
         "id, environment, competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
       )
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("afl_round", aflRound)
       .order("competition_round", { ascending: true })
       .order("matchup_index", { ascending: true })
@@ -924,13 +930,15 @@ export default function OpponentTeamPage() {
     const rows = sortFixtureRows((data ?? []) as FixtureRow[]);
     setFixtureRows(rows);
     return rows;
-  }, []);
+  }, [seasonYear]);
 
   const refreshRoundSubmissions = useCallback(async () => {
+    if (!seasonYear) return [];
     const { data, error } = await supabase
       .from("round_submissions")
       .select("id, coach_id, coach_name, round_number, team_data, submitted_at")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("is_submitted", true)
       .order("round_number", { ascending: false })
       .order("submitted_at", { ascending: false });
@@ -952,10 +960,10 @@ export default function OpponentTeamPage() {
 
     setRoundSubmissions(rows);
     return rows;
-  }, []);
+  }, [seasonYear]);
 
   const refreshPlayerStats = useCallback(async (aflRound: number | null) => {
-    if (!aflRound) {
+    if (!aflRound || !seasonYear) {
       setPlayerStats([]);
       return [];
     }
@@ -973,6 +981,7 @@ export default function OpponentTeamPage() {
           "id, afl_round, afl_team_name, afl_team_code, player_name, k, hb, d, m, g, b, t, ho, ga, i50, cl, cg, r50, ff, fa, af, sc, imported_at"
         )
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .eq("afl_round", aflRound)
         .order("player_name", { ascending: true })
         .range(from, to);
@@ -1018,7 +1027,7 @@ export default function OpponentTeamPage() {
 
     setPlayerStats(rows);
     return rows;
-  }, []);
+  }, [seasonYear]);
 
   const refreshPageData = useCallback(async () => {
     setIsLoadingPageData(true);

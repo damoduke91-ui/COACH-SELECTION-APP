@@ -12,6 +12,7 @@ function stableHash(value: string): number {
 }
 
 export function buildDeterministicPreviewStats(params: {
+  seasonYear: number;
   aflRound: number;
   players: PreviewTeamListPlayer[];
   teamCodeByName: Map<string, string>;
@@ -33,6 +34,7 @@ export function buildDeterministicPreviewStats(params: {
 
     return [{
       environment: "preview",
+      season_year: params.seasonYear,
       afl_round: params.aflRound,
       afl_team_name: player.afl_team,
       afl_team_code: teamCode,

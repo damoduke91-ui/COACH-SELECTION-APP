@@ -8,6 +8,7 @@ import {
   loadAflPlayerNameAliases,
   mapAflPlayerStats,
 } from "../../../../lib/aflLiveStats";
+import { requireSeasonYear } from "../../../../lib/season";
 
 function getEnv(name: string): string {
   const value = process.env[name];
@@ -47,13 +48,18 @@ export async function GET(request: NextRequest) {
         persistSession: false,
       },
     });
+    const { data: settings, error: settingsError } = await supabase
+      .from("app_settings").select("season_year").eq("environment", environment).single();
+    if (settingsError) throw new Error(`Season load failed: ${settingsError.message}`);
+    const seasonYear = requireSeasonYear(settings?.season_year);
 
     const { data: match, error: matchError } = await supabase
       .from("afl_matches")
       .select(
-        "id, environment, afl_round, afl_match_id, afl_match_provider_id, home_team_provider_id, away_team_provider_id, home_team_code, away_team_code, home_app_team_code, away_app_team_code, home_team_name, away_team_name"
+        "id, environment, season_year, afl_round, afl_match_id, afl_match_provider_id, home_team_provider_id, away_team_provider_id, home_team_code, away_team_code, home_app_team_code, away_app_team_code, home_team_name, away_team_name"
       )
       .eq("environment", environment)
+      .eq("season_year", seasonYear)
       .eq("afl_match_id", matchId)
       .single();
 
@@ -88,6 +94,7 @@ export async function GET(request: NextRequest) {
       .from("afl_player_round_stats")
       .select("afl_team_code, player_name")
       .eq("environment", environment)
+      .eq("season_year", seasonYear)
       .eq("afl_round", match.afl_round)
       .in("afl_team_code", teamCodes);
 

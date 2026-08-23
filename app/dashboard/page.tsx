@@ -16,6 +16,7 @@ import {
 } from "../../lib/finals";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
 import { APP_ENV, supabase } from "../../lib/supabase";
+import { useActiveSeason } from "../../lib/activeSeason";
 
 type PositionKey = "KD" | "DEF" | "MID" | "FOR" | "KF" | "RUC";
 
@@ -633,6 +634,7 @@ rows.push({
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { seasonYear, isLoading: isLoadingSeason, error: seasonError } = useActiveSeason();
   const coachConfigs = useMemo(() => normaliseCoachConfigs(), []);
 
   const [loginSession, setLoginSession] = useState<LoginSession | null>(null);
@@ -719,10 +721,12 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
   }, []);
 
   const refreshDashboardData = useCallback(async () => {
+    if (!seasonYear) return;
     const { data, error } = await supabase
       .from("coach_team_selections")
       .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
-      .eq("environment", APP_ENV);
+      .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear);
 
     if (error) {
       setMessage(`Dashboard load failed: ${error.message}`);
@@ -736,7 +740,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
     }
 
     setTeamRowsByCoachId(nextMap);
-  }, []);
+  }, [seasonYear]);
 
   const refreshCurrentRound = useCallback(async () => {
     const { data, error } = await supabase
@@ -769,7 +773,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
   const refreshFixtureForRound = useCallback(async (aflRound: number | null) => {
     setIsLoadingFixture(true);
 
-    if (!aflRound || !Number.isFinite(aflRound)) {
+    if (!aflRound || !Number.isFinite(aflRound) || !seasonYear) {
       setFixtureRows([]);
       setNextFixtureRows([]);
       setIsLoadingFixture(false);
@@ -780,6 +784,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
       .from("season_fixture")
       .select("afl_round")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .gt("afl_round", aflRound)
       .order("afl_round", { ascending: true })
       .limit(1);
@@ -807,6 +812,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
         "id, environment, competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
       )
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .in("afl_round", fixtureRoundNumbers);
 
     if (error) {
@@ -825,10 +831,10 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
         : []
     );
     setIsLoadingFixture(false);
-  }, []);
+  }, [seasonYear]);
 
   const refreshRoundFinalisation = useCallback(async (aflRound: number | null) => {
-    if (!aflRound || !Number.isFinite(aflRound)) {
+    if (!aflRound || !Number.isFinite(aflRound) || !seasonYear) {
       setCurrentRoundFinalisation(null);
       return;
     }
@@ -837,6 +843,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
       .from("afl_round_finalisation")
       .select("afl_round, expected_match_count, final_match_count, live_cleared_at")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("afl_round", aflRound)
       .maybeSingle();
 
@@ -863,7 +870,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
       live_cleared_at:
         typeof data.live_cleared_at === "string" ? data.live_cleared_at : null,
     });
-  }, []);
+  }, [seasonYear]);
 
   const refreshDashboardFixture = useCallback(async () => {
     const aflRound = await refreshCurrentRound();
@@ -874,6 +881,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
   }, [refreshCurrentRound, refreshFixtureForRound, refreshRoundFinalisation]);
 
 const refreshPlayerStats = useCallback(async () => {
+  if (!seasonYear) return;
   const pageSize = 1000;
   let from = 0;
   let allRows: Record<string, unknown>[] = [];
@@ -885,6 +893,7 @@ const refreshPlayerStats = useCallback(async () => {
       .from("afl_player_round_stats")
       .select("afl_round, afl_team_code")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .order("afl_round", { ascending: true })
       .range(from, to);
 
@@ -918,7 +927,7 @@ const refreshPlayerStats = useCallback(async () => {
   }));
 
   setPlayerStats(rows);
-}, []);
+}, [seasonYear]);
 
   const saveCurrentRound = useCallback(async () => {
     if (loginSession?.role !== "admin") {
@@ -946,6 +955,7 @@ const refreshPlayerStats = useCallback(async () => {
         .from("season_fixture")
         .select("competition_round")
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .eq("afl_round", parsedRound)
         .order("competition_round", { ascending: true })
         .limit(1)
@@ -1012,6 +1022,7 @@ const refreshPlayerStats = useCallback(async () => {
     refreshRoundFinalisation,
     roundInput,
     roundStageInput,
+    seasonYear,
   ]);
 
 
@@ -1517,17 +1528,20 @@ const refreshPlayerStats = useCallback(async () => {
 
   useEffect(() => {
   async function loadResults() {
+    if (!seasonYear) return;
     const [regularResponse, finalsResponse] = await Promise.all([
       supabase
         .from("super8_match_results")
         .select(
           "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
-        ),
+        )
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear),
       supabase
         .from("finals_results")
         .select("match_code, coach_1_score, coach_2_score")
         .eq("environment", APP_ENV)
-        .eq("season_year", new Date().getFullYear()),
+        .eq("season_year", seasonYear),
     ]);
 
     if (regularResponse.error) {
@@ -1547,7 +1561,7 @@ const refreshPlayerStats = useCallback(async () => {
   }
 
   loadResults();
-}, []);
+}, [seasonYear]);
 
   useEffect(() => {
     if (!loginSession) return;
@@ -1800,6 +1814,7 @@ async function handleExportSnapshotRoundXlsx() {
       .from("round_submissions")
       .select("coach_id, coach_name, team_data")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("round_number", parsedRound);
 
     if (error) {
@@ -2050,12 +2065,22 @@ async function handleExportTeamsXlsx() {
   return `Super 8 Round ${currentSuper8Round} has ${matchupCount} matchups`;
 }, [currentWeekFixture]);
 
-  if (isAuthenticating) {
+  if (isAuthenticating || isLoadingSeason) {
     return (
       <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white">
         <div className="mx-auto max-w-6xl rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="text-lg font-semibold">Checking session...</div>
         </div>
+      </main>
+    );
+  }
+
+  if (seasonError || !seasonYear) {
+    return (
+      <main className="min-h-screen bg-neutral-950 p-6 text-white">
+        <p className="rounded-xl border border-red-400/30 bg-red-950/40 p-4">
+          Season settings load failed: {seasonError ?? "No active season is configured."}
+        </p>
       </main>
     );
   }

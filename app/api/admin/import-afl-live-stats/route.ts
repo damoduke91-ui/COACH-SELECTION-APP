@@ -9,6 +9,7 @@ import {
   loadAflPlayerNameAliases,
   mapAflPlayerStats,
 } from "../../../../lib/aflLiveStats";
+import { requireSeasonYear } from "../../../../lib/season";
 
 function getEnv(name: string): string {
   const value = process.env[name];
@@ -50,12 +51,21 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    const { data: settings, error: settingsError } = await supabase
+      .from("app_settings")
+      .select("season_year")
+      .eq("environment", environment)
+      .single();
+    if (settingsError) throw new Error(`Season load failed: ${settingsError.message}`);
+    const seasonYear = requireSeasonYear(settings?.season_year);
+
     const { data: match, error: matchError } = await supabase
       .from("afl_matches")
       .select(
-        "id, environment, afl_round, afl_match_id, afl_match_provider_id, home_team_provider_id, away_team_provider_id, home_team_code, away_team_code, home_app_team_code, away_app_team_code, home_team_name, away_team_name, status"
+        "id, environment, season_year, afl_round, afl_match_id, afl_match_provider_id, home_team_provider_id, away_team_provider_id, home_team_code, away_team_code, home_app_team_code, away_app_team_code, home_team_name, away_team_name, status"
       )
       .eq("environment", environment)
+      .eq("season_year", seasonYear)
       .eq("afl_match_id", matchId)
       .single();
 
@@ -89,7 +99,7 @@ export async function GET(request: NextRequest) {
       const { error: upsertError } = await supabase
         .from("afl_player_round_stats")
         .upsert(upsertRows, {
-          onConflict: "environment,afl_round,afl_team_code,player_name",
+          onConflict: "environment,season_year,afl_round,afl_team_code,player_name",
         });
 
       if (upsertError) {
@@ -111,7 +121,9 @@ export async function GET(request: NextRequest) {
       const { error: matchUpdateError } = await supabase
         .from("afl_matches")
         .update(matchUpdatePayload)
-        .eq("id", match.id);
+        .eq("id", match.id)
+        .eq("environment", environment)
+        .eq("season_year", seasonYear);
 
       if (matchUpdateError) {
         throw new Error(`Match update failed: ${matchUpdateError.message}`);

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSeasonYear } from "../../../../lib/season";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { getAflFixtureOverride } from "../../../../lib/aflFixtureOverrides";
 
@@ -13,6 +14,7 @@ type TeamMapping = {
 
 type SyncMatchRow = {
   environment: string;
+  season_year: number;
   afl_round: number;
   afl_match_id: number;
   afl_match_provider_id: string;
@@ -214,6 +216,7 @@ function mapMatchToRow(
   match: unknown,
   aflRound: number,
   environment: string,
+  seasonYear: number,
   updatedAt: string
 ): { row: SyncMatchRow | null; reason?: string } {
   const matchObject = asObject(match);
@@ -259,6 +262,7 @@ function mapMatchToRow(
   return {
     row: {
       environment,
+      season_year: seasonYear,
       afl_round: aflRound,
       afl_match_id: aflMatchId,
       afl_match_provider_id: aflMatchProviderId,
@@ -330,7 +334,7 @@ async function upsertMatches(
   const { error } = await supabase
     .from("afl_matches")
     .upsert(rows, {
-      onConflict: "environment,afl_match_id",
+      onConflict: "environment,season_year,afl_match_id",
     });
 
   if (error) {
@@ -348,6 +352,10 @@ export async function GET(request: NextRequest) {
   const supabaseUrl = getRequiredEnv("NEXT_PUBLIC_SUPABASE_URL");
   const serviceRoleKey = getRequiredEnv("SUPABASE_SERVICE_ROLE_KEY");
   const supabase: AdminSupabaseClient = createClient(supabaseUrl, serviceRoleKey);
+  const { data: settings, error: settingsError } = await supabase
+    .from("app_settings").select("season_year").eq("environment", environment).single();
+  if (settingsError) throw new Error(`Season load failed: ${settingsError.message}`);
+  const seasonYear = requireSeasonYear(settings?.season_year);
   const updatedAt = new Date().toISOString();
   const rounds = getRoundsToSync(request);
 
@@ -360,7 +368,7 @@ export async function GET(request: NextRequest) {
     const skipped: string[] = [];
 
     for (const match of rawMatches) {
-      const result = mapMatchToRow(match, round, environment, updatedAt);
+      const result = mapMatchToRow(match, round, environment, seasonYear, updatedAt);
 
       if (result.row) {
         mappedRows.push(result.row);

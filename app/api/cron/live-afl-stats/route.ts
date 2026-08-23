@@ -10,6 +10,7 @@ import {
   mapAflPlayerStats,
 } from "../../../../lib/aflLiveStats";
 import { finaliseSuper8RoundFromLiveStats } from "../../../../lib/super8LiveFinalisation";
+import { requireSeasonYear } from "../../../../lib/season";
 
 type AdminSupabaseClient = SupabaseClient;
 
@@ -113,13 +114,13 @@ function getMatchesFromResponse(payload: unknown): unknown[] {
   return rootMatches.length ? rootMatches : asArray(data.matches);
 }
 
-async function loadCurrentAflRound(
+async function loadCurrentSettings(
   supabase: AdminSupabaseClient,
   environment: string
-): Promise<number | null> {
+): Promise<{ currentAflRound: number | null; seasonYear: number }> {
   const { data, error } = await supabase
     .from("app_settings")
-    .select("current_afl_round")
+    .select("current_afl_round, season_year")
     .eq("environment", environment)
     .maybeSingle();
 
@@ -127,16 +128,36 @@ async function loadCurrentAflRound(
     throw new Error(`Current AFL round load failed: ${error.message}`);
   }
 
-  return toNumber((data as { current_afl_round?: unknown } | null)?.current_afl_round);
+  const settings = data as { current_afl_round?: unknown; season_year?: unknown } | null;
+  return {
+    currentAflRound: toNumber(settings?.current_afl_round),
+    seasonYear: requireSeasonYear(settings?.season_year),
+  };
+}
+
+async function loadSeasonStatus(
+  supabase: AdminSupabaseClient,
+  environment: string,
+  seasonYear: number
+): Promise<string> {
+  const { data, error } = await supabase
+    .from("competition_seasons")
+    .select("status")
+    .eq("environment", environment)
+    .eq("season_year", seasonYear)
+    .single();
+  if (error) throw new Error(`Season status load failed: ${error.message}`);
+  return String(data?.status ?? "");
 }
 
 async function refreshMatchStatuses(params: {
   supabase: AdminSupabaseClient;
   environment: string;
+  seasonYear: number;
   round: number | null;
   refreshedAt: string;
 }): Promise<MatchStatusRefreshResult> {
-  const { supabase, environment, round, refreshedAt } = params;
+  const { supabase, environment, seasonYear, round, refreshedAt } = params;
 
   if (!round) {
     return {
@@ -186,6 +207,7 @@ async function refreshMatchStatuses(params: {
           updated_at: refreshedAt,
         })
         .eq("environment", environment)
+        .eq("season_year", seasonYear)
         .eq("afl_match_id", aflMatchId);
 
       if (error) {
@@ -279,6 +301,7 @@ async function importMatch(params: {
       .from("afl_player_round_stats")
       .select("id", { count: "exact", head: true })
       .eq("environment", match.environment)
+      .eq("season_year", match.season_year)
       .eq("afl_round", match.afl_round)
       .in("afl_team_code", matchTeamCodes)
       .eq("score_source", "csv");
@@ -334,6 +357,7 @@ async function importMatch(params: {
       "upsert_live_match_if_unprotected",
       {
         p_environment: match.environment,
+        p_season_year: match.season_year,
         p_afl_round: match.afl_round,
         p_team_codes: matchTeamCodes,
         p_rows: upsertRows,
@@ -378,7 +402,9 @@ async function importMatch(params: {
     const { error: matchUpdateError } = await supabase
       .from("afl_matches")
       .update(matchUpdatePayload)
-      .eq("id", match.id);
+      .eq("id", match.id)
+      .eq("environment", match.environment)
+      .eq("season_year", match.season_year);
 
     if (matchUpdateError) {
       throw new Error(`Match update failed: ${matchUpdateError.message}`);
@@ -429,6 +455,19 @@ export async function GET(request: NextRequest) {
     });
 
     let targetRound: number | null = null;
+    const controlledSettings = await loadCurrentSettings(supabase, environment);
+    const seasonYear = controlledSettings.seasonYear;
+    const seasonStatus = await loadSeasonStatus(supabase, environment, seasonYear);
+    if (!['draft', 'active'].includes(seasonStatus)) {
+      return NextResponse.json({
+        importedAt,
+        environment,
+        seasonYear,
+        seasonStatus,
+        action: "skipped",
+        reason: "The controlled season is completed or archived; live-stat writes are disabled.",
+      });
+    }
 
     if (roundParam) {
       targetRound = Number(roundParam);
@@ -437,12 +476,13 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Invalid round" }, { status: 400 });
       }
     } else {
-      targetRound = await loadCurrentAflRound(supabase, environment);
+      targetRound = controlledSettings.currentAflRound;
     }
 
     const statusRefresh = await refreshMatchStatuses({
       supabase,
       environment,
+      seasonYear,
       round: targetRound,
       refreshedAt: importedAt,
     });
@@ -450,9 +490,10 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from("afl_matches")
       .select(
-        "id, environment, afl_round, afl_match_id, afl_match_provider_id, home_team_provider_id, away_team_provider_id, home_team_code, away_team_code, home_app_team_code, away_app_team_code, home_team_name, away_team_name, status, utc_start_time, final_imported_at"
+        "id, environment, season_year, afl_round, afl_match_id, afl_match_provider_id, home_team_provider_id, away_team_provider_id, home_team_code, away_team_code, home_app_team_code, away_app_team_code, home_team_name, away_team_name, status, utc_start_time, final_imported_at"
       )
       .eq("environment", environment)
+      .eq("season_year", seasonYear)
       .order("utc_start_time", { ascending: true });
 
     if (targetRound) {
@@ -472,6 +513,7 @@ export async function GET(request: NextRequest) {
         ? await finaliseSuper8RoundFromLiveStats({
             supabase,
             environment,
+            seasonYear,
             aflRound: targetRound,
             finalisedAt: importedAt,
           })
@@ -509,6 +551,7 @@ export async function GET(request: NextRequest) {
       ? await finaliseSuper8RoundFromLiveStats({
           supabase,
           environment,
+          seasonYear,
           aflRound: targetRound,
           finalisedAt: importedAt,
         })
