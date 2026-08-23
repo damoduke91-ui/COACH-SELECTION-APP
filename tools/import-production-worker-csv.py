@@ -58,6 +58,21 @@ headers = {
     "Authorization": f"Bearer {service_role_key}",
     "Content-Type": "application/json",
 }
+settings_response = requests.get(
+    f"{supabase_url}/rest/v1/app_settings",
+    headers=headers,
+    params={"select": "season_year,current_afl_round", "environment": "eq.production"},
+    timeout=30,
+)
+settings_response.raise_for_status()
+settings_rows = settings_response.json()
+if len(settings_rows) != 1:
+    raise SystemExit("Safety stop: production controlled season settings are unavailable.")
+season_year = settings_rows[0].get("season_year")
+if not isinstance(season_year, int) or season_year < 2000 or season_year > 2100:
+    raise SystemExit("Safety stop: production controlled season year is invalid.")
+if settings_rows[0].get("current_afl_round") != expected_round:
+    raise SystemExit("Safety stop: confirmed round does not match production Round Control.")
 rpc_url = f"{supabase_url}/rest/v1/rpc/replace_match_with_protected_csv"
 files = []
 inserted_rows = 0
@@ -96,6 +111,7 @@ for csv_path in match_files:
         row = {}
         for column, value in raw_row.items():
             row[column] = int(value or 0) if column in number_columns else value.strip()
+        row["season_year"] = season_year
         rows.append(row)
 
     if len(team_codes) != 2:
@@ -106,6 +122,7 @@ for csv_path in match_files:
         headers=headers,
         json={
             "p_environment": "production",
+            "p_season_year": season_year,
             "p_afl_round": round_number,
             "p_team_codes": team_codes,
             "p_rows": rows,
@@ -137,6 +154,7 @@ for csv_path in match_files:
 
 summary = {
     "environment": "production",
+    "season_year": season_year,
     "destination_host": parsed_url.hostname,
     "round": round_number,
     "match_files": len(match_files),
