@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { APP_ENV, supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { requireSeasonYear } from "../../../../lib/season";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ type ProfileRow = {
 type AppSettingsRow = {
   environment: string;
   current_afl_round: number | null;
+  season_year: number | null;
 };
 
 type FixtureRow = {
@@ -173,6 +175,7 @@ async function getCurrentUserProfile(request: NextRequest): Promise<ProfileRow |
 
 async function maybeSnapshotLadder(
   shouldSnapshot: boolean,
+  seasonYear: number,
   roundNumber: number | null,
   aflRound: number,
   ladderRows: LadderRow[]
@@ -195,6 +198,7 @@ async function maybeSnapshotLadder(
 
   const rowsToInsert = ladderRows.map((row) => ({
     environment: APP_ENV,
+    season_year: seasonYear,
     round_number: roundNumber,
     afl_round: aflRound,
     position: row.position,
@@ -212,7 +216,7 @@ async function maybeSnapshotLadder(
   const { error } = await supabaseAdmin
     .from("super8_ladder_snapshots")
     .upsert(rowsToInsert, {
-      onConflict: "environment,round_number,team",
+      onConflict: "environment,season_year,round_number,team",
     });
 
   if (error) {
@@ -248,7 +252,7 @@ export async function POST(request: NextRequest) {
 
     const { data: settingsData, error: settingsError } = await supabaseAdmin
       .from("app_settings")
-      .select("environment, current_afl_round")
+      .select("environment, current_afl_round, season_year")
       .eq("environment", APP_ENV)
       .maybeSingle();
 
@@ -262,6 +266,7 @@ export async function POST(request: NextRequest) {
 
     const settings = settingsData as AppSettingsRow | null;
     const currentAflRound = toNumber(settings?.current_afl_round);
+    const seasonYear = requireSeasonYear(settings?.season_year);
 
     if (!currentAflRound || currentAflRound < 1) {
       return jsonResponse(400, {
@@ -274,6 +279,7 @@ export async function POST(request: NextRequest) {
       .from("afl_player_round_stats")
       .select("afl_team_code")
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("afl_round", currentAflRound);
 
     if (statsError) {
@@ -309,6 +315,7 @@ export async function POST(request: NextRequest) {
         "competition_round, afl_round, matchup_index, coach_id, coach_name, opponent_coach_id, opponent_coach_name"
       )
       .eq("environment", APP_ENV)
+      .eq("season_year", seasonYear)
       .eq("afl_round", currentAflRound);
 
     if (fixtureError) {
@@ -352,6 +359,8 @@ export async function POST(request: NextRequest) {
         .select(
           "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
         )
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .eq("afl_round", currentAflRound);
 
     if (matchResultsError) {
@@ -404,6 +413,8 @@ export async function POST(request: NextRequest) {
         .select(
           "round_number, afl_round, matchup_index, coach_1_name, coach_1_score, coach_2_name, coach_2_score"
         )
+        .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .lte("afl_round", currentAflRound);
 
     if (ladderResultsError) {
@@ -420,6 +431,7 @@ export async function POST(request: NextRequest) {
 
     const ladderSnapshot = await maybeSnapshotLadder(
       body.snapshotLadder === true,
+      seasonYear,
       currentSuper8Round,
       currentAflRound,
       ladderRows
@@ -430,6 +442,7 @@ export async function POST(request: NextRequest) {
         .from("season_fixture")
         .select("competition_round, afl_round, matchup_index")
         .eq("environment", APP_ENV)
+        .eq("season_year", seasonYear)
         .gt("afl_round", currentAflRound)
         .order("afl_round", { ascending: true })
         .order("competition_round", { ascending: true })
