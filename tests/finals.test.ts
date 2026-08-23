@@ -12,6 +12,7 @@ import {
 import {
   buildPreviewFinalsPrerequisites,
   getPreviewFinalsScenario,
+  PREVIEW_FINALS_REGULAR_RESULTS,
 } from "../lib/previewFinalsScenarios.ts";
 import { buildDeterministicPreviewStats } from "../lib/previewAflStats.ts";
 import { validatePreviewImportAccess, validatePreviewImportCoverage, validatePreviewImportRound } from "../lib/previewImportGuards.ts";
@@ -137,6 +138,27 @@ test("builds repeatable Preview fixture stats for mapped players", () => {
   assert.equal(first.length, 2);
   assert.deepEqual(first.map((row) => row.afl_team_code), ["ONE", "TWO"]);
   assert.ok(first.every((row) => row.d === row.k + row.hb && row.af > 0));
+});
+
+test("builds a complete deterministic Preview finals seed when regular results are empty", () => {
+  const seeds = buildFinalsBracket(
+    PREVIEW_FINALS_REGULAR_RESULTS.map((result) => ({
+      round_number: 1,
+      coach_1_name: result.coach1Name,
+      coach_1_score: result.coach1Score,
+      coach_2_name: result.coach2Name,
+      coach_2_score: result.coach2Score,
+    })),
+    [],
+  ).seeds;
+
+  assert.deepEqual(seeds.map((seed) => seed.name), [
+    "The Cattery",
+    "Kalamata Pythons",
+    "Damos Magpies",
+    "Spread Eagle",
+    "Push Up Kings",
+  ]);
 });
 
 test("guards the Preview import route environment, admin, and round", () => {

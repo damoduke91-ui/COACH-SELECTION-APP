@@ -1,5 +1,12 @@
 import type { FinalsMatchCode, FinalsResult } from "./finals";
 
+export const PREVIEW_FINALS_REGULAR_RESULTS = [
+  { matchupIndex: 1, coach1Id: 1, coach1Name: "The Cattery", coach1Score: 1800, coach2Id: 8, coach2Name: "Snow Coast", coach2Score: 1000 },
+  { matchupIndex: 2, coach1Id: 2, coach1Name: "Kalamata Pythons", coach1Score: 1700, coach2Id: 7, coach2Name: "Pogers Bombers", coach2Score: 1100 },
+  { matchupIndex: 3, coach1Id: 3, coach1Name: "Damos Magpies", coach1Score: 1600, coach2Id: 6, coach2Name: "Western Warriors", coach2Score: 1200 },
+  { matchupIndex: 4, coach1Id: 4, coach1Name: "Spread Eagle", coach1Score: 1500, coach2Id: 5, coach2Name: "Push Up Kings", coach2Score: 1300 },
+] as const;
+
 export const PREVIEW_FINALS_SCENARIOS = [
   { week: 1, aflRound: 21, super8Round: 15, prerequisiteMatches: [] },
   { week: 2, aflRound: 22, super8Round: 16, prerequisiteMatches: ["QF", "EF"] },

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildPreviewFinalsPrerequisites,
   getPreviewFinalsScenario,
+  PREVIEW_FINALS_REGULAR_RESULTS,
 } from "../../../../lib/previewFinalsScenarios";
 import { APP_ENV, supabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireSeasonYear } from "../../../../lib/season";
@@ -60,6 +61,42 @@ export async function POST(request: NextRequest) {
     const seasonYear = requireSeasonYear(settings?.season_year);
     const prerequisites = buildPreviewFinalsPrerequisites(week);
     const now = new Date().toISOString();
+
+    const { count: regularResultCount, error: regularResultCountError } = await supabaseAdmin
+      .from("super8_match_results")
+      .select("id", { count: "exact", head: true })
+      .eq("environment", "preview")
+      .eq("season_year", seasonYear)
+      .lte("round_number", 14);
+    if (regularResultCountError) {
+      throw new Error(`Preview regular-season result check failed: ${regularResultCountError.message}`);
+    }
+
+    if (regularResultCount === 0) {
+      const { error: seedError } = await supabaseAdmin.from("super8_match_results").upsert(
+        PREVIEW_FINALS_REGULAR_RESULTS.map((result) => ({
+          environment: "preview",
+          season_year: seasonYear,
+          round_number: 1,
+          afl_round: 1,
+          matchup_index: result.matchupIndex,
+          coach_1_id: result.coach1Id,
+          coach_1_name: result.coach1Name,
+          coach_1_score: result.coach1Score,
+          coach_2_id: result.coach2Id,
+          coach_2_name: result.coach2Name,
+          coach_2_score: result.coach2Score,
+          imported_at: now,
+          source_updated_at: now,
+          score_source: "csv",
+        })),
+        { onConflict: "environment,season_year,round_number,matchup_index" },
+      );
+      if (seedError) {
+        throw new Error(`Preview regular-season seed failed: ${seedError.message}`);
+      }
+    }
+
     const { error: stagingError } = await supabaseAdmin.rpc("stage_preview_finals_scenario", {
       p_week: scenario.week,
       p_season_year: seasonYear,

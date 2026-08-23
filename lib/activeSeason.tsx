@@ -19,7 +19,11 @@ export function ActiveSeasonProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     let mounted = true;
+
     async function loadActiveSeason() {
+      if (!mounted) return;
+      setIsLoading(true);
+
       const result = await supabase
         .from("app_settings")
         .select("season_year")
@@ -41,9 +45,39 @@ export function ActiveSeasonProvider({ children }: { children: React.ReactNode }
       }
       setIsLoading(false);
     }
-    void loadActiveSeason();
+
+    function clearActiveSeason() {
+      if (!mounted) return;
+      setSeasonYear(null);
+      setError(null);
+      setIsLoading(false);
+    }
+
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      if (data.session) {
+        void loadActiveSeason();
+      } else {
+        clearActiveSeason();
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      window.setTimeout(() => {
+        if (!mounted) return;
+        if (session) {
+          void loadActiveSeason();
+        } else {
+          clearActiveSeason();
+        }
+      }, 0);
+    });
+
     return () => {
       mounted = false;
+      subscription.unsubscribe();
     };
   }, []);
 
@@ -59,4 +93,3 @@ export function useActiveSeason(): ActiveSeasonContextValue {
   if (!context) throw new Error("useActiveSeason must be used inside ActiveSeasonProvider.");
   return context;
 }
-
