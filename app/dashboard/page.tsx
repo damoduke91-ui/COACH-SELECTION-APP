@@ -2197,6 +2197,15 @@ async function handleExportTeamsXlsx() {
               Follow the top-five premiership race.
             </div>
           </Link>
+          <Link
+            href="/history"
+            className="rounded-2xl border border-violet-300/25 bg-violet-300/10 p-5 transition hover:bg-violet-300/20"
+          >
+            <div className="text-lg font-bold text-violet-200">Season History</div>
+            <div className="mt-2 text-sm text-violet-100/75">
+              View locked ladders, results, Finals and Premiers from earlier seasons.
+            </div>
+          </Link>
           {loginSession.role === "admin" ? (
             <Link
               href="/admin-teams"

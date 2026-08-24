@@ -82,6 +82,18 @@ test.describe("Preview finals journey", () => {
     await expect(page.getByText(/in 2026\./)).toBeVisible();
 
     await returnToDashboard(page);
+    await page.getByRole("link", { name: /Season History/ }).click();
+    await page.waitForURL("**/history");
+    await expectHeading(page, "Season History");
+    const historySeason = page.getByRole("combobox", { name: "History season" });
+    await expect(historySeason).toBeVisible();
+    await expect(historySeason.getByRole("option", { name: /^2026/ })).toHaveCount(1);
+    await historySeason.selectOption("2026");
+    await expectHeading(page, "Final Ladder");
+    await expectHeading(page, "Finals Series");
+    await expectHeading(page, "Regular Season Results");
+
+    await returnToDashboard(page);
     await page.getByRole("link", { name: /Coach Selection/ }).click();
     await page.waitForURL("**/select-team");
     await expectHeading(page, "Coach Team Selection");
