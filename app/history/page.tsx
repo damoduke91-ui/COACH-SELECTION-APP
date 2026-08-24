@@ -42,6 +42,7 @@ function statusStyle(status: SeasonStatus): string {
 export default function SeasonHistoryPage() {
   const router = useRouter();
   const { seasonYear: activeSeasonYear, isLoading: isLoadingSeason, error: seasonError } = useActiveSeason();
+  const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [seasons, setSeasons] = useState<CompetitionSeason[]>([]);
   const [selectedSeasonYear, setSelectedSeasonYear] = useState<number | null>(null);
   const [results, setResults] = useState<MatchResult[]>([]);
@@ -59,6 +60,7 @@ export default function SeasonHistoryPage() {
         router.replace("/login");
         return;
       }
+      setIsAuthenticating(false);
 
       const { data, error } = await supabase
         .from("competition_seasons")
@@ -152,7 +154,7 @@ export default function SeasonHistoryPage() {
   }, [regularResults]);
   const premier = selectedSeason?.premier_name?.trim() || bracket.premier?.name || null;
 
-  if (isLoadingSeason) {
+  if (isAuthenticating || isLoadingSeason) {
     return <main className="min-h-screen bg-neutral-950 p-8 text-white">Loading season history…</main>;
   }
   if (seasonError || activeSeasonYear === null) {
