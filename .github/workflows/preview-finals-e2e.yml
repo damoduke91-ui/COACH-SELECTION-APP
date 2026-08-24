@@ -7,6 +7,19 @@ on:
         description: Vercel Preview deployment URL
         required: true
         type: string
+      test_suite:
+        description: Browser journey to run
+        required: true
+        default: finals
+        type: choice
+        options:
+          - finals
+          - rollover
+      expected_season_year:
+        description: Active Preview season year for the rollover journey
+        required: false
+        default: "2027"
+        type: string
 
 permissions:
   contents: read
@@ -22,6 +35,7 @@ jobs:
     environment: preview-testing
     env:
       PREVIEW_BASE_URL: ${{ inputs.preview_url }}
+      E2E_EXPECTED_SEASON_YEAR: ${{ inputs.expected_season_year }}
       E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
       E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
       VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
@@ -39,7 +53,12 @@ jobs:
           test -n "$E2E_ADMIN_EMAIL"
           test -n "$E2E_ADMIN_PASSWORD"
           test -n "$VERCEL_AUTOMATION_BYPASS_SECRET"
-      - run: npm run test:e2e
+      - name: Run Preview Finals journey
+        if: inputs.test_suite == 'finals'
+        run: npx playwright test tests/e2e/preview-finals.spec.ts
+      - name: Run Preview rollover journey
+        if: inputs.test_suite == 'rollover'
+        run: npx playwright test tests/e2e/preview-rollover.spec.ts
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
