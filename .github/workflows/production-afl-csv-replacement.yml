@@ -41,6 +41,17 @@ jobs:
       - name: Check out approved production code
         uses: actions/checkout@v7
 
+      - name: Create isolated Python environment
+        shell: powershell
+        run: |
+          & "C:\Program Files\Python313\python.exe" --version
+          & "C:\Program Files\Python313\python.exe" -m venv .production-worker-venv
+
+      - name: Install fetcher packages
+        shell: powershell
+        run: |
+          & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" -m pip install --requirement tools/afl-preview-fetcher/requirements.txt
+
       - name: Resolve active Production season and round
         if: github.event_name == 'schedule'
         id: production-context
@@ -49,20 +60,7 @@ jobs:
           PRODUCTION_SUPABASE_URL: ${{ secrets.PRODUCTION_SUPABASE_URL }}
           PRODUCTION_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          & "C:\Program Files\Python313\python.exe" tools/resolve-production-pipeline-context.py
-
-      - name: Create isolated Python environment
-        if: github.event_name == 'workflow_dispatch' || steps.production-context.outputs.should_run == 'true'
-        shell: powershell
-        run: |
-          & "C:\Program Files\Python313\python.exe" --version
-          & "C:\Program Files\Python313\python.exe" -m venv .production-worker-venv
-
-      - name: Install fetcher packages
-        if: github.event_name == 'workflow_dispatch' || steps.production-context.outputs.should_run == 'true'
-        shell: powershell
-        run: |
-          & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" -m pip install --requirement tools/afl-preview-fetcher/requirements.txt
+          & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" tools/resolve-production-pipeline-context.py
 
       - name: Fetch completed FootyWire matches and generate production CSV files
         if: github.event_name == 'workflow_dispatch' || steps.production-context.outputs.should_run == 'true'

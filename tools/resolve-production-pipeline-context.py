@@ -2,9 +2,13 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
+
+import requests
+import truststore
+
+
+truststore.inject_into_ssl()
 
 
 def require_hosted_supabase_url(value: str) -> str:
@@ -22,25 +26,25 @@ def require_hosted_supabase_url(value: str) -> str:
 
 
 def fetch_rows(base_url: str, service_role_key: str, table: str, params: dict[str, str]):
-    query = urlencode(params)
-    request = Request(
-        f"{base_url}/rest/v1/{table}?{query}",
-        headers={
-            "apikey": service_role_key,
-            "Authorization": f"Bearer {service_role_key}",
-            "Accept": "application/json",
-        },
-    )
     try:
-        with urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        details = error.read().decode("utf-8", errors="replace")
+        response = requests.get(
+            f"{base_url}/rest/v1/{table}",
+            params=params,
+            headers={
+                "apikey": service_role_key,
+                "Authorization": f"Bearer {service_role_key}",
+                "Accept": "application/json",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as error:
+        status = error.response.status_code if error.response is not None else "network"
+        details = error.response.text if error.response is not None else str(error)
         raise SystemExit(
-            f"Safety stop: Production context lookup failed ({error.code}): {details}"
+            f"Safety stop: Production context lookup failed ({status}): {details}"
         ) from error
-    except (URLError, TimeoutError) as error:
-        raise SystemExit(f"Safety stop: Production context lookup failed: {error}") from error
 
 
 def write_github_output(name: str, value: str | int) -> None:

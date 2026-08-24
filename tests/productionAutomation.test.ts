@@ -23,6 +23,9 @@ test("scheduled Production runs resolve controlled active season context", () =>
   assert.match(workflow, /steps\.production-context\.outputs\.should_run == 'true'/);
   assert.match(resolver, /"competition_seasons"/);
   assert.match(resolver, /"afl_matches"/);
+  assert.match(resolver, /import requests/);
+  assert.match(resolver, /truststore\.inject_into_ssl\(\)/);
+  assert.match(workflow, /production-worker-venv\\Scripts\\python\.exe" tools\/resolve-production-pipeline-context\.py/);
   assert.match(resolver, /season_rows\[0\]\.get\("status"\) != "active"/);
   assert.match(resolver, /"environment": "eq\.production"/);
   assert.match(resolver, /min\(start_times\) <= datetime\.now\(timezone\.utc\)/);
