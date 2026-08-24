@@ -1,6 +1,8 @@
 name: Production AFL CSV replacement (LOCKED)
 
 on:
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       expected_round:
@@ -28,7 +30,10 @@ jobs:
     name: Protected production CSV replacement
     if: >-
       ${{ vars.PRODUCTION_PIPELINE_ENABLED == 'true' &&
-          inputs.confirmation_phrase == 'PRODUCTION_AFL_CSV_REPLACEMENT' }}
+          ((github.event_name == 'schedule' &&
+            vars.PRODUCTION_PIPELINE_AUTOMATION_ENABLED == 'true') ||
+           (github.event_name == 'workflow_dispatch' &&
+            inputs.confirmation_phrase == 'PRODUCTION_AFL_CSV_REPLACEMENT')) }}
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 20
 
@@ -36,39 +41,54 @@ jobs:
       - name: Check out approved production code
         uses: actions/checkout@v7
 
+      - name: Resolve active Production season and round
+        if: github.event_name == 'schedule'
+        id: production-context
+        shell: powershell
+        env:
+          PRODUCTION_SUPABASE_URL: ${{ secrets.PRODUCTION_SUPABASE_URL }}
+          PRODUCTION_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          & "C:\Program Files\Python313\python.exe" tools/resolve-production-pipeline-context.py
+
       - name: Create isolated Python environment
+        if: github.event_name == 'workflow_dispatch' || steps.production-context.outputs.should_run == 'true'
         shell: powershell
         run: |
           & "C:\Program Files\Python313\python.exe" --version
           & "C:\Program Files\Python313\python.exe" -m venv .production-worker-venv
 
       - name: Install fetcher packages
+        if: github.event_name == 'workflow_dispatch' || steps.production-context.outputs.should_run == 'true'
         shell: powershell
         run: |
           & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" -m pip install --requirement tools/afl-preview-fetcher/requirements.txt
 
       - name: Fetch completed FootyWire matches and generate production CSV files
+        if: github.event_name == 'workflow_dispatch' || steps.production-context.outputs.should_run == 'true'
         shell: powershell
         working-directory: tools/afl-preview-fetcher
         env:
           AFL_STATS_ENVIRONMENT: production
-          AFL_STATS_FORCED_ROUND: ${{ inputs.recovery_match_ids && inputs.expected_round || '' }}
-          AFL_STATS_MATCH_IDS: ${{ inputs.recovery_match_ids || '' }}
+          AFL_STATS_FORCED_ROUND: ${{ github.event_name == 'workflow_dispatch' && inputs.recovery_match_ids && inputs.expected_round || '' }}
+          AFL_STATS_MATCH_IDS: ${{ github.event_name == 'workflow_dispatch' && inputs.recovery_match_ids || '' }}
         run: |
           & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" afl_stats_scheduled_runner.py
 
       - name: Validate round, structure, and production environment
+        if: github.event_name == 'workflow_dispatch' || steps.production-context.outputs.should_run == 'true'
         shell: powershell
         env:
-          EXPECTED_AFL_ROUND: ${{ inputs.expected_round }}
+          EXPECTED_AFL_ROUND: ${{ github.event_name == 'schedule' && steps.production-context.outputs.expected_round || inputs.expected_round }}
           EXPECTED_CSV_ENVIRONMENT: production
         run: |
           & "$env:GITHUB_WORKSPACE\.production-worker-venv\Scripts\python.exe" tools/validate-preview-worker-output.py
 
       - name: Import only unprotected production match CSV files
+        if: github.event_name == 'workflow_dispatch' || steps.production-context.outputs.should_run == 'true'
         shell: powershell
         env:
-          EXPECTED_AFL_ROUND: ${{ inputs.expected_round }}
+          EXPECTED_AFL_ROUND: ${{ github.event_name == 'schedule' && steps.production-context.outputs.expected_round || inputs.expected_round }}
           PRODUCTION_SUPABASE_URL: ${{ secrets.PRODUCTION_SUPABASE_URL }}
           PRODUCTION_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_SERVICE_ROLE_KEY }}
           ENABLE_PRODUCTION_CSV_IMPORT: ENABLE_PROTECTED_PRODUCTION_CSV_IMPORT

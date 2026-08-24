@@ -38,3 +38,16 @@ Playwright sends the Vercel bypass secret only as protected request headers and 
 - logs out and confirms the Login page is restored
 
 The journey mutates Preview data only and runs serially to prevent shared scenario state from racing. Failure traces and screenshots are retained as a workflow artifact.
+
+## Production live-to-CSV automation
+
+The protected Production CSV workflow runs at 17 minutes past each hour when both repository variables are `true`:
+
+- `PRODUCTION_PIPELINE_ENABLED`
+- `PRODUCTION_PIPELINE_AUTOMATION_ENABLED`
+
+The scheduled path reads the controlled Production `season_year` and `current_afl_round` from Supabase. It stops unless that exact season has `active` status in `competition_seasons`, and remains a successful no-op until the current round's first configured fixture has started. It then uses the same protected importer as the admin button: existing CSV match rows are retained, new completed matches are imported, and archived seasons cannot be changed.
+
+The self-hosted Production runner PC, runner service, and internet connection must be available for scheduled jobs. GitHub may delay scheduled jobs during busy periods. The **Run Live → CSV Pipeline** button remains the manual backup, and locked recovery IDs remain available only through an explicitly confirmed manual workflow dispatch.
+
+To pause automatic runs without disabling the manual backup, set `PRODUCTION_PIPELINE_AUTOMATION_ENABLED=false`. To lock both automatic and manual workflow execution, set `PRODUCTION_PIPELINE_ENABLED=false`.
