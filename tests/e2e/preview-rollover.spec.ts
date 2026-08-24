@@ -52,7 +52,7 @@ test.describe("Preview season rollover smoke test", () => {
     await page.waitForURL("**/select-team");
     await expectHeading(page, "Coach Team Selection");
 
-    await page.getByRole("link", { name: "Back to Dashboard" }).click();
+    await page.getByRole("button", { name: /Back to Dashboard/ }).click();
     await page.getByRole("button", { name: "Log Out" }).click();
     await page.waitForURL("**/login");
     await expectHeading(page, "Coach Team Login");
