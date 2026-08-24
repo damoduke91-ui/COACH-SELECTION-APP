@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildSeasonYearOptions,
   canWriteSeason,
   isSeasonYear,
   nextSeasonYear,
@@ -32,3 +33,9 @@ test("the next season is derived from controlled state", () => {
   assert.equal(nextSeasonYear(2026), 2027);
 });
 
+test("season selectors retain history and prefer the active season", () => {
+  assert.deepEqual(buildSeasonYearOptions(2027, [2026, 2027, 2026, null, "2025"]), [
+    2027,
+    2026,
+  ]);
+});

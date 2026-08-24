@@ -75,6 +75,11 @@ test.describe("Preview finals journey", () => {
     await expect(page.getByRole("columnheader", { name: "Admin" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Action" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Reason" })).toBeVisible();
+    const auditSeason = page.getByRole("combobox", { name: "Audit season" });
+    await expect(auditSeason).toBeVisible();
+    await expect(auditSeason.getByRole("option", { name: /^2026/ })).toHaveCount(1);
+    await auditSeason.selectOption("2026");
+    await expect(page.getByText(/in 2026\./)).toBeVisible();
 
     await returnToDashboard(page);
     await page.getByRole("link", { name: /Coach Selection/ }).click();
@@ -114,7 +119,7 @@ test.describe("Preview finals journey", () => {
     await returnToDashboard(page);
     await page.getByRole("link", { name: /^Ladder\b/ }).click();
     await page.waitForURL("**/ladder");
-    await expectHeading(page, "2026 Ladder");
+    await expectHeading(page, /^\d{4} Ladder$/);
     await expectHeading(page, "Season Ladder");
 
     await returnToDashboard(page);

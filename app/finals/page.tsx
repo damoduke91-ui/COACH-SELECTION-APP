@@ -19,7 +19,7 @@ import {
 } from "../../lib/finalsLiveScores";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { calculateFinalsReadiness } from "../../lib/finalsReadiness";
-import { INITIAL_SEASON_YEAR, requireSeasonYear } from "../../lib/season";
+import { requireSeasonYear } from "../../lib/season";
 
 function TeamLine({
   team,
@@ -89,7 +89,7 @@ export default function FinalsPage() {
   const [currentPreviewWeek, setCurrentPreviewWeek] = useState<number | null>(null);
   const [currentAflRound, setCurrentAflRound] = useState<number | null>(null);
   const [currentSuper8Round, setCurrentSuper8Round] = useState<number | null>(null);
-  const [seasonYear, setSeasonYear] = useState(INITIAL_SEASON_YEAR);
+  const [seasonYear, setSeasonYear] = useState<number | null>(null);
   const [resettingPreview, setResettingPreview] = useState(false);
   const [drafts, setDrafts] = useState<Partial<Record<FinalsMatchCode, [string, string]>>>({});
 
@@ -269,6 +269,10 @@ export default function FinalsPage() {
   );
 
   async function saveResult(finalsMatch: FinalsMatch) {
+    if (seasonYear === null) {
+      setMessage("The active season is still loading.");
+      return;
+    }
     const draft = drafts[finalsMatch.code] ?? [
       finalsMatch.homeScore?.toString() ?? "",
       finalsMatch.awayScore?.toString() ?? "",
@@ -302,6 +306,10 @@ export default function FinalsPage() {
   }
 
   async function clearResult(finalsMatch: FinalsMatch) {
+    if (seasonYear === null) {
+      setMessage("The active season is still loading.");
+      return;
+    }
     setSavingCode(finalsMatch.code);
     const { error } = await supabase
       .from("finals_results")

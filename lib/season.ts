@@ -1,5 +1,3 @@
-export const INITIAL_SEASON_YEAR = 2026;
-
 export type SeasonStatus = "draft" | "active" | "completed" | "archived";
 
 export type ActiveSeasonSettings = {
@@ -26,3 +24,10 @@ export function nextSeasonYear(currentSeasonYear: number): number {
   return requireSeasonYear(currentSeasonYear) + 1;
 }
 
+export function buildSeasonYearOptions(
+  activeSeasonYear: number,
+  availableSeasonYears: unknown[],
+): number[] {
+  return [...new Set([requireSeasonYear(activeSeasonYear), ...availableSeasonYears.filter(isSeasonYear)])]
+    .sort((left, right) => right - left);
+}
