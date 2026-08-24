@@ -1,4 +1,5 @@
 -- Make future Production closeouts season-aware without changing archived 2026 data.
+-- Version 202608240002 follows the season-scoped natural primary-key migration.
 -- The season row lock and trigger share lock serialize closeout against competition writes.
 
 CREATE OR REPLACE FUNCTION public.reject_locked_season_write()
