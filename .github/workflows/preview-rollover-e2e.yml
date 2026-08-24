@@ -1,0 +1,55 @@
+name: Preview rollover browser test
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_url:
+        description: Vercel Preview deployment URL
+        required: true
+        type: string
+      expected_season_year:
+        description: Active Preview season year
+        required: true
+        default: "2027"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-rollover-e2e
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: preview-testing
+    env:
+      PREVIEW_BASE_URL: ${{ inputs.preview_url }}
+      E2E_EXPECTED_SEASON_YEAR: ${{ inputs.expected_season_year }}
+      E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Verify browser-test configuration
+        run: |
+          test -n "$PREVIEW_BASE_URL"
+          test -n "$E2E_EXPECTED_SEASON_YEAR"
+          test -n "$E2E_ADMIN_EMAIL"
+          test -n "$E2E_ADMIN_PASSWORD"
+          test -n "$VERCEL_AUTOMATION_BYPASS_SECRET"
+      - run: npx playwright test tests/e2e/preview-rollover.spec.ts
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-rollover-playwright-report
+          path: playwright-report/
+          retention-days: 14

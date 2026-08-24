@@ -367,7 +367,7 @@ export default function LadderPage() {
         <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h1 className="text-3xl font-bold">2026 Ladder</h1>
+              <h1 className="text-3xl font-bold">{seasonYear} Ladder</h1>
               <p className="mt-2 text-sm text-white/70">
                 Signed in as {loginSession.coachName} • {loginSession.role}
               </p>
