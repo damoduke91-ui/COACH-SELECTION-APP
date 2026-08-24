@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { useActiveSeason } from "../../lib/activeSeason";
+import { buildLadderStandings } from "../../lib/ladder";
 
 type LoginSession = {
   userId: string;
@@ -29,18 +30,6 @@ type MatchResultRow = {
   coach_1_score: number | null;
   coach_2_name: string | null;
   coach_2_score: number | null;
-};
-
-type LadderRow = {
-  team: string;
-  played: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  pointsFor: number;
-  pointsAgainst: number;
-  percentage: number;
-  ladderPoints: number;
 };
 
 function toNumber(value: unknown): number | null {
@@ -247,95 +236,7 @@ export default function LadderPage() {
     router.replace("/login");
   }
 
-  const ladder = useMemo(() => {
-    const ladderMap = new Map<string, LadderRow>();
-
-    function getOrCreateTeam(teamName: string): LadderRow {
-      const existing = ladderMap.get(teamName);
-
-      if (existing) {
-        return existing;
-      }
-
-      const created: LadderRow = {
-        team: teamName,
-        played: 0,
-        wins: 0,
-        losses: 0,
-        draws: 0,
-        pointsFor: 0,
-        pointsAgainst: 0,
-        percentage: 0,
-        ladderPoints: 0,
-      };
-
-      ladderMap.set(teamName, created);
-      return created;
-    }
-
-    for (const match of results) {
-      const coach1Name = match.coach_1_name?.trim() || "Unknown Team";
-      const coach2Name = match.coach_2_name?.trim() || "Unknown Team";
-      const coach1Score = match.coach_1_score;
-      const coach2Score = match.coach_2_score;
-
-      if (
-        coach1Name === "Unknown Team" ||
-        coach2Name === "Unknown Team" ||
-        coach1Score === null ||
-        coach2Score === null
-      ) {
-        continue;
-      }
-
-      const team1 = getOrCreateTeam(coach1Name);
-      const team2 = getOrCreateTeam(coach2Name);
-
-      team1.played += 1;
-      team2.played += 1;
-
-      team1.pointsFor += coach1Score;
-      team1.pointsAgainst += coach2Score;
-
-      team2.pointsFor += coach2Score;
-      team2.pointsAgainst += coach1Score;
-
-      if (coach1Score > coach2Score) {
-        team1.wins += 1;
-        team1.ladderPoints += 4;
-        team2.losses += 1;
-      } else if (coach2Score > coach1Score) {
-        team2.wins += 1;
-        team2.ladderPoints += 4;
-        team1.losses += 1;
-      } else {
-        team1.draws += 1;
-        team2.draws += 1;
-        team1.ladderPoints += 2;
-        team2.ladderPoints += 2;
-      }
-    }
-
-    const rows = Array.from(ladderMap.values()).map((team) => ({
-      ...team,
-      percentage:
-        team.pointsAgainst > 0 ? (team.pointsFor / team.pointsAgainst) * 100 : 0,
-    }));
-
-    rows.sort((a, b) => {
-      if (b.ladderPoints !== a.ladderPoints) {
-        return b.ladderPoints - a.ladderPoints;
-      }
-
-      if (b.pointsFor !== a.pointsFor) {
-        return b.pointsFor - a.pointsFor;
-      }
-
-      return a.team.localeCompare(b.team);
-    });
-
-    return rows;
-  }, [results]);
+  const ladder = useMemo(() => buildLadderStandings(results), [results]);
 
   if (isAuthenticating || isLoadingSeason) {
     return (

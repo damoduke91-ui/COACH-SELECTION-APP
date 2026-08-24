@@ -39,6 +39,13 @@ export default function HomePage() {
           >
             Finals
           </Link>
+
+          <Link
+            href="/history"
+            className="rounded-xl border border-violet-300/50 bg-violet-300/10 px-6 py-3 font-semibold text-violet-200 transition hover:bg-violet-300/20"
+          >
+            Season History
+          </Link>
         </div>
 
         <div className="mt-12 w-full max-w-5xl rounded-3xl border border-slate-800 bg-slate-900/80 p-6 text-left shadow-2xl">
