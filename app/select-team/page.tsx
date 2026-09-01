@@ -10,6 +10,7 @@ import {
 } from "../../lib/playersByCoach";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { useActiveSeason } from "../../lib/activeSeason";
+import { getExactPreviousRound } from "../../lib/teamCarryForward";
 import {
   buildFinalsSeeds,
   FINALS_TEAM_NAMES,
@@ -2325,13 +2326,28 @@ export default function SelectTeamPage() {
     setSubmitMessage("Loading last week's team...");
 
     try {
+      const currentRoundNumber = await getSnapshotRoundNumber();
+      const previousRoundNumber = getExactPreviousRound(currentRoundNumber);
+
+      if (previousRoundNumber === null) {
+        setSubmitMessage(
+          `No previous Super 8 round exists before round ${currentRoundNumber}.`
+        );
+        setIsLoadingLastTeam(false);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("round_submissions")
-        .select("team_data, round_number, snapshot_created_at, is_submitted")
+        .select(
+          "team_data, round_number, afl_round, submitted_at, snapshot_created_at, is_submitted"
+        )
         .eq("coach_id", selectedCoach.id)
         .eq("environment", APP_ENV)
         .eq("season_year", seasonYear)
-        .order("round_number", { ascending: false })
+        .eq("round_number", previousRoundNumber)
+        .eq("is_submitted", true)
+        .order("submitted_at", { ascending: false, nullsFirst: false })
         .order("snapshot_created_at", { ascending: false })
         .limit(1);
 
@@ -2339,7 +2355,7 @@ export default function SelectTeamPage() {
 
       if (!data || data.length === 0) {
         setSubmitMessage(
-          "No previous team snapshot was found for this coach."
+          `No submitted team was found for ${selectedCoach.name} in Super 8 round ${previousRoundNumber}.`
         );
         setIsLoadingLastTeam(false);
         return;
@@ -2372,7 +2388,14 @@ export default function SelectTeamPage() {
       }));
 
       markCoachAsDirty(selectedCoach.id);
-      setSubmitMessage("Last week's team loaded. Save or submit when ready.");
+      const previousAflRound = Number(data[0].afl_round);
+      const aflRoundLabel =
+        Number.isFinite(previousAflRound) && previousAflRound > 0
+          ? ` / AFL round ${previousAflRound}`
+          : "";
+      setSubmitMessage(
+        `Last round loaded: Super 8 round ${previousRoundNumber}${aflRoundLabel}. Save or submit when ready.`
+      );
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown error loading last week's team.";
