@@ -6,6 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { useActiveSeason } from "../../lib/activeSeason";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
+import { calculateLivePlayerCounts } from "../../lib/livePlayerCounts";
 import {
   buildFinalsBracket,
   FINALS_AFL_ROUNDS,
@@ -1603,11 +1604,10 @@ export default function ResultsPage() {
                       playerLookup
                     );
                     const teamTotal = calculateTeamTotal(rows);
-                    const countedPlayers = rows.filter((row) => row.countsToTotal).length;
-                    const selectedScoringSlots = rows.filter(
-                      (row) => row.selectedType === "X"
-                    ).length;
-                    const pendingPlayers = Math.max(0, selectedScoringSlots - countedPlayers);
+                    const {
+                      countingPlayers: countedPlayers,
+                      pendingPlayers,
+                    } = calculateLivePlayerCounts(rows);
 
                     return {
                       coachId,

@@ -11,6 +11,7 @@ import {
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { useActiveSeason } from "../../lib/activeSeason";
 import { getExactPreviousRound } from "../../lib/teamCarryForward";
+import { sanitiseTeamSelection } from "../../lib/teamSelectionSanitiser";
 import {
   buildFinalsSeeds,
   FINALS_TEAM_NAMES,
@@ -793,35 +794,12 @@ function createTeamsByCoach(coaches: CoachConfigShape[]): TeamsByCoach {
   return initial;
 }
 
-function sanitiseTeamState(input: unknown): TeamState {
-  const clean = emptyTeamState();
-
-  if (!input || typeof input !== "object") {
-    return clean;
-  }
-
-  const obj = input as Record<string, unknown>;
-
-  for (const position of POSITIONS) {
-    const savedPosition = obj[position];
-
-    if (!savedPosition || typeof savedPosition !== "object") {
-      continue;
-    }
-
-    const positionObj = savedPosition as Record<string, unknown>;
-
-    clean[position] = {
-      onField: Array.isArray(positionObj.onField)
-        ? positionObj.onField.filter((value): value is string => typeof value === "string")
-        : [],
-      emergencies: Array.isArray(positionObj.emergencies)
-        ? positionObj.emergencies.filter((value): value is string => typeof value === "string")
-        : [],
-    };
-  }
-
-  return clean;
+function sanitiseTeamState(input: unknown, coachPool?: CoachPlayerPool): TeamState {
+  return sanitiseTeamSelection({
+    input,
+    positions: POSITIONS,
+    roster: coachPool,
+  }) as TeamState;
 }
 
 function getAllSelectedPlayers(teamState: TeamState): string[] {
@@ -1565,7 +1543,10 @@ export default function SelectTeamPage() {
         return {
           coach_id: coach.id,
           coach_name: existingRow?.coach_name ?? coach.name,
-          team_data: sanitiseTeamState(existingRow?.team_data),
+          team_data: sanitiseTeamState(
+            existingRow?.team_data,
+            getPlayersForCoach({ coachId: coach.id, coachName: coach.name })
+          ),
           is_submitted: Boolean(existingRow?.is_submitted),
           submitted_at: existingRow?.submitted_at ?? null,
           updated_at: existingRow?.updated_at ?? null,
@@ -1821,7 +1802,7 @@ export default function SelectTeamPage() {
       const row = data as SavedTeamRow | null;
 
       if (row?.team_data) {
-        const cleanTeam = sanitiseTeamState(row.team_data);
+        const cleanTeam = sanitiseTeamState(row.team_data, getCoachPool(selectedCoach));
 
         setTeamsByCoach((prev) => ({
           ...prev,
@@ -1892,7 +1873,8 @@ export default function SelectTeamPage() {
           const next = { ...prev };
 
           for (const row of rows) {
-            next[row.coach_id] = sanitiseTeamState(row.team_data);
+            const coach = coachConfigs.find((item) => item.id === row.coach_id);
+            next[row.coach_id] = sanitiseTeamState(row.team_data, getCoachPool(coach));
           }
 
           return next;
@@ -2003,7 +1985,11 @@ export default function SelectTeamPage() {
 
       const row = data as SavedTeamRow | null;
 
-      setOpponentTeam(row?.team_data ? sanitiseTeamState(row.team_data) : emptyTeamState());
+      setOpponentTeam(
+        row?.team_data
+          ? sanitiseTeamState(row.team_data, getCoachPool(opponentCoach))
+          : emptyTeamState()
+      );
       setOpponentCoachName(row?.coach_name ?? opponentCoach?.name ?? `Coach ${opponentCoachId}`);
       setIsLoadingOpponentTeam(false);
     }
@@ -2361,7 +2347,7 @@ export default function SelectTeamPage() {
         return;
       }
 
-      const lastTeam = sanitiseTeamState(data[0].team_data);
+      const lastTeam = sanitiseTeamState(data[0].team_data, getCoachPool(selectedCoach));
 
       setTeamsByCoach((prev) => ({
         ...prev,
@@ -2479,7 +2465,8 @@ export default function SelectTeamPage() {
 
       let adminSubmissionReason: string | null = null;
       let auditErrorMessage = "";
-      const result = validateTeamState(coach, team);
+      const safeTeam = sanitiseTeamState(team, getCoachPool(coach));
+      const result = validateTeamState(coach, safeTeam);
 
       if (isSubmitting) {
         if (!result.valid) {
@@ -2534,7 +2521,7 @@ export default function SelectTeamPage() {
       const payload = {
         coach_id: coach.id,
         coach_name: coach.name,
-        team_data: team,
+        team_data: safeTeam,
         environment: APP_ENV,
         season_year: seasonYear,
         is_submitted: isSubmitting ? true : alreadySubmitted,
@@ -2561,7 +2548,7 @@ export default function SelectTeamPage() {
         const snapshotPayload = {
           coach_id: coach.id,
           coach_name: coach.name,
-          team_data: team,
+          team_data: safeTeam,
           is_submitted: true,
           submitted_at: nowIso,
           updated_at: nowIso,
