@@ -3,7 +3,13 @@
 
 with required_columns(table_name, column_name) as (
   values
+    ('app_settings', 'environment'),
+    ('app_settings', 'season_year'),
+    ('competition_seasons', 'environment'),
+    ('competition_seasons', 'season_year'),
+    ('competition_seasons', 'status'),
     ('afl_player_round_stats', 'environment'),
+    ('afl_player_round_stats', 'season_year'),
     ('afl_player_round_stats', 'afl_round'),
     ('afl_player_round_stats', 'afl_team_name'),
     ('afl_player_round_stats', 'afl_team_code'),
@@ -29,6 +35,7 @@ with required_columns(table_name, column_name) as (
     ('afl_player_round_stats', 'imported_at'),
     ('afl_player_round_stats', 'updated_at'),
     ('afl_round_finalisation', 'environment'),
+    ('afl_round_finalisation', 'season_year'),
     ('afl_round_finalisation', 'afl_round'),
     ('afl_round_finalisation', 'active_source'),
     ('afl_round_finalisation', 'csv_imported_at'),
@@ -65,19 +72,93 @@ unique_indexes as (
 ),
 unique_checks as (
   select
-    'unique key public.afl_player_round_stats(environment, afl_round, afl_team_code, player_name)' as requirement,
+    'unique key public.afl_player_round_stats(environment, season_year, afl_round, afl_team_code, player_name)' as requirement,
     exists (
       select 1 from unique_indexes
       where table_name = 'afl_player_round_stats'
-        and column_names = array['environment', 'afl_round', 'afl_team_code', 'player_name']::name[]
+        and column_names = array['environment', 'season_year', 'afl_round', 'afl_team_code', 'player_name']::name[]
     ) as passed
   union all
   select
-    'unique key public.afl_round_finalisation(environment, afl_round)',
+    'unique key public.afl_round_finalisation(environment, season_year, afl_round)',
     exists (
       select 1 from unique_indexes
       where table_name = 'afl_round_finalisation'
-        and column_names = array['environment', 'afl_round']::name[]
+        and column_names = array['environment', 'season_year', 'afl_round']::name[]
+    )
+  union all
+  select
+    'primary key public.competition_seasons(environment, season_year)',
+    exists (
+      select 1 from unique_indexes
+      where table_name = 'competition_seasons'
+        and column_names = array['environment', 'season_year']::name[]
+    )
+),
+function_signature_checks as (
+  select
+    'function public.replace_match_with_protected_csv(environment, season_year, afl_round, team_codes, rows)' as requirement,
+    to_regprocedure('public.replace_match_with_protected_csv(text, integer, integer, text[], jsonb)') is not null as passed
+  union all
+  select
+    'function public.upsert_live_match_if_unprotected(environment, season_year, afl_round, team_codes, rows)',
+    to_regprocedure('public.upsert_live_match_if_unprotected(text, integer, integer, text[], jsonb)') is not null
+  union all
+  select
+    'function public.delete_protected_round_csv(environment, season_year, afl_round)',
+    to_regprocedure('public.delete_protected_round_csv(text, integer, integer)') is not null
+  union all
+  select
+    'function public.archive_production_season(season_year, payload, row_counts, checksum, premier, confirmation)',
+    to_regprocedure('public.archive_production_season(integer, jsonb, jsonb, text, text, text)') is not null
+),
+legacy_signature_checks as (
+  select
+    'legacy non-season replace_match_with_protected_csv signature is absent' as requirement,
+    to_regprocedure('public.replace_match_with_protected_csv(text, integer, text[], jsonb)') is null as passed
+  union all
+  select
+    'legacy non-season upsert_live_match_if_unprotected signature is absent',
+    to_regprocedure('public.upsert_live_match_if_unprotected(text, integer, text[], jsonb)') is null
+  union all
+  select
+    'legacy non-season delete_protected_round_csv signature is absent',
+    to_regprocedure('public.delete_protected_round_csv(text, integer)') is null
+),
+locked_season_trigger_checks as (
+  select
+    'locked season write trigger exists on public.' || required.table_name as requirement,
+    exists (
+      select 1
+      from information_schema.triggers actual
+      where actual.trigger_schema = 'public'
+        and actual.event_object_table = required.table_name
+        and actual.trigger_name = 'reject_locked_season_write'
+    ) as passed
+  from (
+    values
+      ('super8_match_results'),
+      ('season_fixture'),
+      ('round_submissions'),
+      ('coach_team_selections'),
+      ('finals_results'),
+      ('afl_player_round_stats'),
+      ('afl_matches'),
+      ('afl_round_finalisation'),
+      ('weekly_team_lists')
+  ) as required(table_name)
+),
+active_season_check as (
+  select
+    'production app_settings points at one draft or active competition season' as requirement,
+    exists (
+      select 1
+      from public.app_settings settings
+      join public.competition_seasons seasons
+        on seasons.environment = settings.environment
+       and seasons.season_year = settings.season_year
+      where settings.environment = 'production'
+        and seasons.status in ('draft', 'active')
     )
 ),
 score_source_check as (
@@ -112,6 +193,14 @@ from (
   select * from column_checks
   union all
   select * from unique_checks
+  union all
+  select * from function_signature_checks
+  union all
+  select * from legacy_signature_checks
+  union all
+  select * from locked_season_trigger_checks
+  union all
+  select * from active_season_check
   union all
   select * from score_source_check
 ) checks
