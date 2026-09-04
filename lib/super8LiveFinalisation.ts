@@ -1,5 +1,5 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { getPlayersForCoach } from "./playersByCoach";
+import { getPlayersForCoach } from "./playersByCoach.ts";
 
 type AdminSupabaseClient = SupabaseClient;
 
@@ -36,12 +36,12 @@ type FixtureMatch = {
   coach2Name: string;
 };
 
-type TeamPositionData = {
+export type TeamPositionData = {
   onField?: string[];
   emergencies?: string[];
 };
 
-type CoachTeamData = Record<string, TeamPositionData>;
+export type CoachTeamData = Record<string, TeamPositionData>;
 
 type RoundSubmissionRow = {
   coach_id: number | null;
@@ -50,7 +50,7 @@ type RoundSubmissionRow = {
   submitted_at: string | null;
 };
 
-type PlayerStatRow = {
+export type PlayerStatRow = {
   afl_team_code: string | null;
   player_name: string | null;
   d: number | null;
@@ -63,11 +63,11 @@ type PlayerStatRow = {
   fa: number | null;
 };
 
-type PlayerClubInfo = {
+export type PlayerClubInfo = {
   club: string;
 };
 
-type PlayerBreakdownRow = {
+export type PlayerBreakdownRow = {
   selectedType: string;
   playerClub: string | null;
   stat: PlayerStatRow | null;
@@ -183,7 +183,7 @@ function buildPlayerClubLookup(params: {
   return lookup;
 }
 
-function buildCoachBreakdownRows(params: {
+export function buildCoachBreakdownRows(params: {
   teamData: CoachTeamData;
   statsMap: Map<string, PlayerStatRow>;
   importedClubCodes: Set<string>;
