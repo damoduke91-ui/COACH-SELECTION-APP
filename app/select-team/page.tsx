@@ -2727,6 +2727,26 @@ export default function SelectTeamPage() {
     setSubmitMessage("Resetting all teams...");
 
     const nowIso = new Date().toISOString();
+    const nextLockoutAt = lockoutScheduleEnabled
+      ? buildLockoutAtIso(lockoutScheduleDay, lockoutScheduleTime, lockoutScheduleTimezone)
+      : null;
+    const settingsResult = await saveAppSettingsRow({
+      environment: APP_ENV,
+      team_lockout: false,
+      lockout_enabled: lockoutScheduleEnabled,
+      lockout_day: lockoutScheduleDay,
+      lockout_time: `${normaliseTimeValue(lockoutScheduleTime)}:00`,
+      lockout_timezone: lockoutScheduleTimezone,
+      lockout_at: nextLockoutAt,
+      updated_at: nowIso,
+    });
+
+    if (settingsResult.errorMessage) {
+      setSubmitMessage(`Reset all teams failed: ${settingsResult.errorMessage}`);
+      setIsSavingTeam(false);
+      return;
+    }
+
     const resetRows = coachConfigs.map((coach) => ({
       coach_id: coach.id,
       coach_name: coach.name,
@@ -2773,8 +2793,15 @@ export default function SelectTeamPage() {
     setLoadedCoachIds(resetLoaded);
     setDirtyCoachIds(resetDirty);
     setSaveIndicatorByCoachId(resetIndicator);
+    setManualTeamLockout(false);
+    setLockoutScheduleAt(nextLockoutAt);
+    setLockoutClockTick(Date.now());
 
-    setSubmitMessage("All coach teams have been reset.");
+    setSubmitMessage(
+      lockoutScheduleEnabled
+        ? `All coach teams have been reset and unlocked. The next scheduled lockout is ${formatTimestamp(nextLockoutAt)}.`
+        : "All coach teams have been reset and unlocked."
+    );
     setIsSavingTeam(false);
   }
 
