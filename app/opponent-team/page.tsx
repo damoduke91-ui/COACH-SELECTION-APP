@@ -7,6 +7,7 @@ import { COACHES } from "../../lib/coachConfig";
 import { APP_ENV, supabase } from "../../lib/supabase";
 import { useActiveSeason } from "../../lib/activeSeason";
 import { getPlayersForCoach } from "../../lib/playersByCoach";
+import { calculateLivePlayerCounts } from "../../lib/livePlayerCounts";
 import {
   buildFinalsBracket,
   FINALS_TEAM_NAMES,
@@ -1462,10 +1463,14 @@ export default function OpponentTeamPage() {
 
             const selectedTotal = calculateTeamTotal(selectedRows);
             const opponentTotal = calculateTeamTotal(opponentRows);
-            const selectedPending = selectedRows.filter((row) => row.selectedType === "X" && !row.played && !row.clubImported).length;
-            const opponentPending = opponentRows.filter((row) => row.selectedType === "X" && !row.played && !row.clubImported).length;
-            const selectedCounting = selectedRows.filter((row) => row.countsToTotal).length;
-            const opponentCounting = opponentRows.filter((row) => row.countsToTotal).length;
+            const {
+              countingPlayers: selectedCounting,
+              pendingPlayers: selectedPending,
+            } = calculateLivePlayerCounts(selectedRows);
+            const {
+              countingPlayers: opponentCounting,
+              pendingPlayers: opponentPending,
+            } = calculateLivePlayerCounts(opponentRows);
             const selectedAverage = selectedCounting > 0 ? Math.round(selectedTotal / selectedCounting) : 0;
             const opponentAverage = opponentCounting > 0 ? Math.round(opponentTotal / opponentCounting) : 0;
             const scoreMargin = Math.abs(selectedTotal - opponentTotal);
