@@ -54,6 +54,16 @@ type SavedTeamRow = {
   environment: "production" | "preview";
 };
 
+type RoundSubmissionExportRow = {
+  coach_id: number;
+  coach_name: string;
+  team_data: unknown;
+  is_submitted: boolean | null;
+  submitted_at: string | null;
+  updated_at: string | null;
+  environment: "production" | "preview";
+};
+
 type PositionState = {
   onField: string[];
   emergencies: string[];
@@ -661,7 +671,7 @@ const [isCheckingPreviewPipeline, setIsCheckingPreviewPipeline] = useState(false
 const [isImportingPreviewStats, setIsImportingPreviewStats] = useState(false);
 const [isDeletingProductionCsv, setIsDeletingProductionCsv] = useState(false);
 const [isExportingTeams, setIsExportingTeams] = useState(false);
-const [snapshotRoundInput, setSnapshotRoundInput] = useState("8");
+const [snapshotRoundInput, setSnapshotRoundInput] = useState("1");
 const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
 
   const loadProfileForUser = useCallback(async (userId: string, email: string) => {
@@ -762,6 +772,7 @@ const [isExportingSnapshot, setIsExportingSnapshot] = useState(false);
     setCurrentSuper8RoundSetting(settings.current_super8_round);
     setTeamListSyncHealth(settings);
     setRoundInput(String(settings.current_afl_round ?? 1));
+    setSnapshotRoundInput(String(settings.current_super8_round ?? 1));
     const finalsWeek =
       getFinalsWeekForCompetitionRound(settings.current_super8_round) ??
       getFinalsWeekForAflRound(settings.current_afl_round);
@@ -1812,7 +1823,7 @@ async function handleExportSnapshotRoundXlsx() {
   try {
     const { data, error } = await supabase
       .from("round_submissions")
-      .select("coach_id, coach_name, team_data")
+      .select("coach_id, coach_name, team_data, is_submitted, submitted_at, updated_at, environment")
       .eq("environment", APP_ENV)
       .eq("season_year", seasonYear)
       .eq("round_number", parsedRound);
@@ -1821,7 +1832,7 @@ async function handleExportSnapshotRoundXlsx() {
       throw new Error(error.message);
     }
 
-    const snapshotRows = data ?? [];
+    const snapshotRows = (data ?? []) as RoundSubmissionExportRow[];
 
     if (snapshotRows.length === 0) {
       throw new Error(
@@ -1836,10 +1847,10 @@ async function handleExportSnapshotRoundXlsx() {
         coach_id: row.coach_id,
         coach_name: row.coach_name,
         team_data: row.team_data,
-        is_submitted: true,
-        submitted_at: null,
-        updated_at: null,
-        environment: APP_ENV as "production" | "preview",
+        is_submitted: Boolean(row.is_submitted),
+        submitted_at: row.submitted_at,
+        updated_at: row.updated_at,
+        environment: row.environment,
       };
     }
 
@@ -2497,14 +2508,21 @@ async function handleExportTeamsXlsx() {
       </button>
 
       <div className="flex items-center gap-2">
-        <input
-          type="number"
-          min={1}
-          step={1}
-          value={snapshotRoundInput}
-          onChange={(e) => setSnapshotRoundInput(e.target.value)}
-          className="w-24 rounded-xl border border-white/10 bg-neutral-900 px-3 py-3 text-sm text-white outline-none"
-        />
+        <label className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+            Super 8 Round
+          </span>
+
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={snapshotRoundInput}
+            onChange={(e) => setSnapshotRoundInput(e.target.value)}
+            aria-label="Super 8 round to export"
+            className="w-24 rounded-xl border border-white/10 bg-neutral-900 px-3 py-3 text-sm text-white outline-none"
+          />
+        </label>
 
         <button
           type="button"
