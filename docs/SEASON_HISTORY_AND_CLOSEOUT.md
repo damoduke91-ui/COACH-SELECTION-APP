@@ -43,3 +43,15 @@ available through Season History.
 7. Smoke-test active-season writes and historical-season reads.
 
 Never reset or delete the previous Production season during rollover.
+
+## AFL fixture context
+
+Coach Selection reads opponent, venue and start time from the season-scoped
+`afl_matches` rows for the controlled active season. The spreadsheet-derived
+Round 23 and 24 overrides in `lib/aflFixtureOverrides.ts` are historical 2026
+fallbacks only. Their lookup includes the season year so a future fixture with
+the same round and clubs cannot inherit a 2026 date or venue.
+
+For 2027 and later seasons, configure the current AFL provider season and sync
+fixtures into `afl_matches`. Do not extend the 2026 override set or read the
+spreadsheet live.

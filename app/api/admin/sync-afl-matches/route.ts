@@ -254,6 +254,7 @@ function mapMatchToRow(
   }
 
   const fixtureOverride = getAflFixtureOverride(
+    seasonYear,
     aflRound,
     homeMapping.appCode,
     awayMapping.appCode
