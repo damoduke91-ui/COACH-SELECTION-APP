@@ -1128,7 +1128,11 @@ export default function OpponentTeamPage() {
 
   useEffect(() => {
     if (!loginSession) return;
-    void refreshPageData();
+    const timer = window.setTimeout(() => {
+      void refreshPageData();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [loginSession, refreshPageData]);
 
   useEffect(() => {
@@ -1228,18 +1232,28 @@ export default function OpponentTeamPage() {
       return coach.name.trim().toLowerCase() === requestedCoachName || teamName === requestedCoachName;
     });
 
-    if (requestedCoach) setSelectedCoachId(requestedCoach.id);
+    if (!requestedCoach) return;
+
+    const timer = window.setTimeout(() => {
+      setSelectedCoachId(requestedCoach.id);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [availableCoaches, loginSession?.role]);
 
   useEffect(() => {
     if (selectedCoachId || availableCoaches.length === 0) return;
 
-    if (loginSession?.role === "coach" && loginSession.coachId) {
-      setSelectedCoachId(loginSession.coachId);
-      return;
-    }
+    const nextSelectedCoachId =
+      loginSession?.role === "coach" && loginSession.coachId
+        ? loginSession.coachId
+        : availableCoaches[0].id;
 
-    setSelectedCoachId(availableCoaches[0].id);
+    const timer = window.setTimeout(() => {
+      setSelectedCoachId(nextSelectedCoachId);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [availableCoaches, loginSession, selectedCoachId]);
 
   const selectedCoachName = useMemo(() => {

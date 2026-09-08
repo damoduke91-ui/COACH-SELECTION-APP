@@ -5,7 +5,8 @@ import { getAflFixtureOverride } from "../../../../lib/aflFixtureOverrides";
 
 export const dynamic = "force-dynamic";
 
-type AdminSupabaseClient = SupabaseClient<any, "public", any>;
+type AdminSupabaseClient = SupabaseClient;
+type JsonRecord = Record<string, unknown>;
 
 type TeamMapping = {
   aflCode: string;
@@ -93,13 +94,13 @@ function isAuthorized(request: NextRequest): boolean {
   return Boolean(configuredSecret && providedSecret === configuredSecret);
 }
 
-function asObject(value: unknown): Record<string, any> {
+function asObject(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, any>)
+    ? (value as JsonRecord)
     : {};
 }
 
-function asArray(value: unknown): any[] {
+function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
@@ -132,7 +133,7 @@ function firstText(...values: unknown[]): string {
   return "";
 }
 
-function getMatchesFromResponse(payload: unknown): any[] {
+function getMatchesFromResponse(payload: unknown): unknown[] {
   if (Array.isArray(payload)) {
     return payload;
   }
@@ -145,22 +146,22 @@ function getMatchesFromResponse(payload: unknown): any[] {
     : asArray(data.matches);
 }
 
-function getTeam(match: Record<string, any>, side: "home" | "away"): Record<string, any> {
+function getTeam(match: JsonRecord, side: "home" | "away"): JsonRecord {
   const sideObject = asObject(match[side]);
   const nestedTeam = asObject(sideObject.team);
 
   return Object.keys(nestedTeam).length ? nestedTeam : sideObject;
 }
 
-function getTeamName(team: Record<string, any>): string {
+function getTeamName(team: JsonRecord): string {
   return firstText(team.name, team.teamName, team.fullName, team.nickname);
 }
 
-function getTeamProviderId(team: Record<string, any>): string {
+function getTeamProviderId(team: JsonRecord): string {
   return firstText(team.providerId, team.provider_id, team.id);
 }
 
-function getAflTeamCode(team: Record<string, any>, teamName: string): string {
+function getAflTeamCode(team: JsonRecord, teamName: string): string {
   return firstText(
     team.abbreviation,
     team.abbrev,
@@ -170,7 +171,7 @@ function getAflTeamCode(team: Record<string, any>, teamName: string): string {
   ).toUpperCase() || TEAM_MAPPINGS_BY_NAME[teamName.toLowerCase()]?.aflCode || "";
 }
 
-function getTeamMapping(team: Record<string, any>, teamName: string): TeamMapping | null {
+function getTeamMapping(team: JsonRecord, teamName: string): TeamMapping | null {
   const aflCode = getAflTeamCode(team, teamName);
 
   if (aflCode && TEAM_MAPPINGS_BY_AFL_CODE[aflCode]) {
@@ -180,7 +181,7 @@ function getTeamMapping(team: Record<string, any>, teamName: string): TeamMappin
   return TEAM_MAPPINGS_BY_NAME[teamName.toLowerCase()] ?? null;
 }
 
-function getStartTime(match: Record<string, any>): string | null {
+function getStartTime(match: JsonRecord): string | null {
   const value = firstText(
     match.utcStartTime,
     match.startTime,
@@ -191,7 +192,7 @@ function getStartTime(match: Record<string, any>): string | null {
   return value || null;
 }
 
-function getVenue(match: Record<string, any>): string | null {
+function getVenue(match: JsonRecord): string | null {
   const venue = asObject(match.venue);
   const stadium = asObject(match.stadium);
   const ground = asObject(match.ground);
@@ -301,7 +302,7 @@ function getRoundsToSync(request: NextRequest): number[] {
   return rounds;
 }
 
-async function fetchRoundMatches(round: number): Promise<any[]> {
+async function fetchRoundMatches(round: number): Promise<unknown[]> {
   const competitionId = process.env.AFL_COMPETITION_ID ?? "1";
   const compSeasonId = process.env.AFL_COMP_SEASON_ID ?? "85";
   const url = new URL(AFL_MATCHES_URL);

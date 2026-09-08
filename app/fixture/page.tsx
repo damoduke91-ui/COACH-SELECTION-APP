@@ -406,13 +406,14 @@ export default function FixturePage() {
     return fixtureGroups.find((group) => group.aflRound === currentAflRound + 1) ?? null;
   }, [currentAflRound, fixtureGroups]);
 
+  const loginCoachId = loginSession?.coachId ?? null;
   const usersCurrentMatches = useMemo(() => {
-    if (!loginSession?.coachId || !currentFixtureGroup) return [];
+    if (!loginCoachId || !currentFixtureGroup) return [];
 
     return currentFixtureGroup.matches.filter((match) =>
-      isUsersMatch(match, loginSession.coachId)
+      isUsersMatch(match, loginCoachId)
     );
-  }, [currentFixtureGroup, loginSession?.coachId]);
+  }, [currentFixtureGroup, loginCoachId]);
 
   if (isAuthenticating || isLoadingSeason) {
     return (
