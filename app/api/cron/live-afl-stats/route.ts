@@ -12,6 +12,8 @@ import {
 import { finaliseSuper8RoundFromLiveStats } from "../../../../lib/super8LiveFinalisation";
 import { requireSeasonYear } from "../../../../lib/season";
 
+import { createLiveStatsTelemetry } from "../../../../lib/liveStatsTelemetry";
+
 type AdminSupabaseClient = SupabaseClient;
 
 type CronMatchRow = AflMatchRow & {
@@ -432,6 +434,7 @@ async function importMatch(params: {
 }
 
 export async function GET(request: NextRequest) {
+  let telemetry: ReturnType<typeof createLiveStatsTelemetry> | undefined;
   try {
     if (!isCronAuthorized(request)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -454,11 +457,16 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    telemetry = createLiveStatsTelemetry(supabase, environment);
+    await telemetry.start();
+
     let targetRound: number | null = null;
     const controlledSettings = await loadCurrentSettings(supabase, environment);
     const seasonYear = controlledSettings.seasonYear;
+    await telemetry.update({ season_year: seasonYear, afl_round: controlledSettings.currentAflRound });
     const seasonStatus = await loadSeasonStatus(supabase, environment, seasonYear);
     if (!['draft', 'active'].includes(seasonStatus)) {
+      await telemetry.finish({ status: "skipped", error: "The controlled season is completed or archived; live-stat writes are disabled." });
       return NextResponse.json({
         importedAt,
         environment,
@@ -473,11 +481,14 @@ export async function GET(request: NextRequest) {
       targetRound = Number(roundParam);
 
       if (!Number.isInteger(targetRound) || targetRound < 1) {
+        await telemetry.finish({ status: "failed", error: "Invalid round" });
         return NextResponse.json({ error: "Invalid round" }, { status: 400 });
       }
     } else {
       targetRound = controlledSettings.currentAflRound;
     }
+
+    await telemetry.update({ afl_round: targetRound });
 
     const statusRefresh = await refreshMatchStatuses({
       supabase,
@@ -508,6 +519,8 @@ export async function GET(request: NextRequest) {
 
     const matches = ((data ?? []) as CronMatchRow[]).filter((match) => isInPollingWindow(match, nowMs));
 
+    await telemetry.update({ checked_matches: data?.length ?? 0, candidate_matches: matches.length, error: statusRefresh.error ?? null });
+
     if (matches.length === 0) {
       const finalisation = targetRound
         ? await finaliseSuper8RoundFromLiveStats({
@@ -518,6 +531,9 @@ export async function GET(request: NextRequest) {
             finalisedAt: importedAt,
           })
         : null;
+
+      const healthError = [statusRefresh.error, finalisation?.action === "failed" ? finalisation.reason : null].filter(Boolean).join("; ") || null;
+      await telemetry.finish({ status: healthError ? "degraded" : "completed", error: healthError });
 
       return NextResponse.json({
         importedAt,
@@ -545,6 +561,7 @@ export async function GET(request: NextRequest) {
           importedAt,
         })
       );
+      await telemetry.update({ results });
     }
 
     const finalisation = targetRound
@@ -556,6 +573,12 @@ export async function GET(request: NextRequest) {
           finalisedAt: importedAt,
         })
       : null;
+
+    const healthError = [statusRefresh.error, finalisation?.action === "failed" ? finalisation.reason : null].filter(Boolean).join("; ") || null;
+    await telemetry.finish({
+      status: healthError || results.some((result) => result.action === "failed") ? "degraded" : "completed",
+      error: healthError, results,
+    });
 
     return NextResponse.json({
       importedAt,
@@ -569,6 +592,7 @@ export async function GET(request: NextRequest) {
       results,
     });
   } catch (error) {
+    await telemetry?.finish({ status: "failed", error: error instanceof Error ? error.message : "Unknown error" });
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Unknown error",

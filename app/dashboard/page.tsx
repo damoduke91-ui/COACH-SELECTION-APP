@@ -2135,6 +2135,13 @@ async function handleExportTeamsXlsx() {
           ) : null}
         </section>
 
+        {loginSession.role === "admin" && (
+          <Link href="/admin/live-stats" className="block rounded-2xl border border-cyan-300/25 bg-cyan-300/10 p-5 hover:bg-cyan-300/20">
+            <div className="text-lg font-bold text-cyan-200">Live Stats Health</div>
+            <div className="mt-2 text-sm text-cyan-100/75">Check cron activity, match imports and recent errors.</div>
+          </Link>
+        )}
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <Link
             href="/select-team"
