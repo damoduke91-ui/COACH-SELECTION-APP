@@ -490,6 +490,14 @@ export async function GET(request: NextRequest) {
 
     await telemetry.update({ afl_round: targetRound });
 
+    // A new season stays paused until its official AFL source has been configured.
+    // Explicit but invalid/wrong-season values still fail validation below.
+    if (seasonYear !== 2026 && !process.env.AFL_COMP_SEASON_ID?.trim()) {
+      const reason = `Live imports paused: AFL source season ${seasonYear} is not configured. Set AFL_COMP_SEASON_ID to the verified source ID when fixtures are ready.`;
+      await telemetry.finish({ status: "skipped", error: reason, checked_matches: 0, candidate_matches: 0, results: [] });
+      return NextResponse.json({ importedAt, environment, seasonYear, targetRound, action: "skipped", reason, results: [] });
+    }
+
     // Validate even when no round is configured; never reuse 2026's source for a new season.
     resolveAflSeasonId(seasonYear, process.env.AFL_COMP_SEASON_ID);
 

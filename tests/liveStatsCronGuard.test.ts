@@ -40,8 +40,8 @@ function harness(configured?: string) {
   return { writes, events, fetches: () => fetches, get: (headers: Headers) => exports.GET!({ headers, nextUrl: new URL("https://mock.local/api/cron/live-afl-stats") }) };
 }
 
-test("missing 2027 configuration and wrong-season response stop cron before fixture/stat writes", async () => {
-  for (const configured of [undefined, "85", "999"]) {
+test("invalid configuration and wrong-season response stop cron before fixture/stat writes", async () => {
+  for (const configured of ["garbage", "85", "999"]) {
     const h = harness(configured);
     const response = await h.get(new Headers({ "x-admin-secret": "test-secret" }));
     assert.equal(response.status, 500);
@@ -57,4 +57,19 @@ test("a spoofed cron user agent cannot reach settings, telemetry or AFL requests
   assert.equal((await h.get(new Headers({ "user-agent": "vercel-cron" }))).status, 401);
   assert.equal(h.events.length, 0);
   assert.equal(h.fetches(), 0);
+});
+
+
+test("an unconfigured new season is a successful skip without AFL requests or stats writes", async () => {
+  for (const configured of [undefined, "", "  "]) {
+    const h = harness(configured);
+    const response = await h.get(new Headers({ "user-agent": "Upstash-QStash", "x-admin-secret": "test-secret" }));
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.action, "skipped");
+    assert.match(body.reason, /Live imports paused.*2027/);
+    assert.equal(h.fetches(), 0);
+    assert.equal(h.writes.length, 0);
+    assert.equal(h.events.at(-1)?.status, "skipped");
+  }
 });
