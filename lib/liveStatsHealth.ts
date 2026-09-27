@@ -56,8 +56,11 @@ export function heartbeatHealth(run: HealthRun | null, nowMs: number, intervalMi
   return run.status === "running" ? "running" : "recent";
 }
 
-export function recentRunErrors(runs: HealthRun[]) {
+export function recentRunErrors(runs: HealthRun[], nowMs = Date.now(), intervalMinutes = 5) {
   return runs.flatMap((run) => [
+    ...(run.status === "running" && !run.finished_at && nowMs - Date.parse(run.started_at) > Math.max(10, intervalMinutes * 2) * 60_000
+      ? [{ at: run.started_at, label: "Completion not recorded", reason: "This run has no completion record. It may have been interrupted or its monitoring write may have failed; the import outcome is unknown." }]
+      : []),
     ...(run.error && run.status !== "skipped" ? [{ at: run.started_at, label: "Cron run", reason: run.error }] : []),
     ...run.results.filter((result) => result.action === "failed").map((result) => ({
       at: run.started_at, label: result.label, reason: result.reason ?? "Import failed",

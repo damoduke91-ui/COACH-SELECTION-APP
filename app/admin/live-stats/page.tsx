@@ -107,8 +107,8 @@ export default function LiveStatsHealthPage() {
             <p className="mt-3 text-xs text-white/50">Row counts describe the latest recorded attempt, not totals. A dash means the importer did not report a count.</p>
           </section>
           <section className={panel}>
-            <h2 className="text-xl font-bold">Recent errors</h2>
-            <p className="mt-1 text-sm text-white/60">Up to 30 errors from recent runs in this season, including failures before season settings could be loaded.</p>
+            <h2 className="text-xl font-bold">Recent errors and unfinished runs</h2>
+            <p className="mt-1 text-sm text-white/60">Up to 30 recent issues in this season. Missing completion records are flagged after at least 10 minutes; their import outcome is unknown.</p>
             {data.errors.length === 0 ? <p className="mt-4 text-white/60">No errors in available history.</p> : <ul className="mt-4 space-y-3">{data.errors.map((item, index) => <li key={`${item.at}-${index}`} className="rounded-xl border border-red-400/20 bg-red-950/20 p-3"><div className="font-semibold">{item.label}</div><p className="break-words text-red-200">{item.reason}</p><div className="mt-1 text-xs text-white/50">{timestamp(item.at)}</div></li>)}</ul>}
           </section>
           <p className="text-sm text-white/50">Updated {timestamp(data.generatedAt)} · Refreshes every 30 seconds while visible · Times shown in your local timezone.</p>

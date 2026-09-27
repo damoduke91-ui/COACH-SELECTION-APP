@@ -1,3 +1,4 @@
+import { resolveAflSeasonId, assertAflFixtureSeason } from "../../../../lib/liveStatsGuards";
 import { NextRequest, NextResponse } from "next/server";
 import { requireSeasonYear } from "../../../../lib/season";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
@@ -302,9 +303,9 @@ function getRoundsToSync(request: NextRequest): number[] {
   return rounds;
 }
 
-async function fetchRoundMatches(round: number): Promise<unknown[]> {
+async function fetchRoundMatches(round: number, seasonYear: number): Promise<unknown[]> {
   const competitionId = process.env.AFL_COMPETITION_ID ?? "1";
-  const compSeasonId = process.env.AFL_COMP_SEASON_ID ?? "85";
+  const compSeasonId = resolveAflSeasonId(seasonYear, process.env.AFL_COMP_SEASON_ID);
   const url = new URL(AFL_MATCHES_URL);
 
   url.searchParams.set("competitionId", competitionId);
@@ -322,7 +323,9 @@ async function fetchRoundMatches(round: number): Promise<unknown[]> {
     throw new Error(`AFL fixture request failed for round ${round}: ${response.status}`);
   }
 
-  return getMatchesFromResponse(await response.json());
+  const matches = getMatchesFromResponse(await response.json());
+  assertAflFixtureSeason(matches, seasonYear);
+  return matches;
 }
 
 async function upsertMatches(
@@ -365,7 +368,7 @@ export async function GET(request: NextRequest) {
   const rowsToWrite: SyncMatchRow[] = [];
 
   for (const round of rounds) {
-    const rawMatches = await fetchRoundMatches(round);
+    const rawMatches = await fetchRoundMatches(round, seasonYear);
     const mappedRows: SyncMatchRow[] = [];
     const skipped: string[] = [];
 
