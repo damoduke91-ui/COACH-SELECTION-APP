@@ -11,7 +11,7 @@ Open **Dashboard → Live Stats Health** (`/admin/live-stats`) while signed in a
 
 ## What is recorded
 
-`afl_live_stats_runs` stores a heartbeat before settings load, season/round context, candidate counts, per-match outcomes as they finish, and completion/failure. Fixture refresh and finalisation errors also appear. An interrupted process leaves a running heartbeat which becomes stale. Monitoring requests have a 1.5 second timeout; the first monitoring failure disables further logging for that invocation. Monitoring failure never throws into the import pipeline. No stats RPC, CSV protection, match eligibility, final validation or season guard was changed.
+`afl_live_stats_runs` stores a heartbeat before settings load, season/round context, candidate counts, per-match outcomes as they finish, and completion/failure. Fixture refresh and finalisation errors also appear. An interrupted process leaves a running heartbeat which becomes stale. Checkpoint writes have a 1.5 second timeout. After a transient failure, further checkpoints accumulate in memory and one completion upsert (bounded to 3 seconds) can repair the run using its original ID and start time. Missing-table and permission errors disable further writes. Monitoring failure never throws into the import pipeline. The protected stats RPC, CSV protection, match eligibility and final-snapshot validation are unchanged. AFL source-season validation is now enforced before fixture refresh/import writes.
 
 The API verifies Supabase bearer tokens and admin profiles on the server. Preview accepts its existing Production-admin fallback; Production does not accept Preview-only admins. The table has RLS enabled and no client policies or client grants; access is through the service-role API only. Responses are private/no-store and scoped to the server's environment. Match data uses the controlled season and round.
 
@@ -53,3 +53,16 @@ In a Preview deployment/database:
 6. Verify an unavailable telemetry table leaves the importer operational. Do not delete or disrupt the production monitoring table to test this.
 
 No database migration or live import should be triggered merely to render or refresh the dashboard.
+
+
+## Reliability follow-up (26 September 2026)
+
+Read-only Vercel log inspection identified `Upstash-QStash` as the caller. A sampled Production request returned 200 in 6.81 seconds, with a five-minute function maximum. The deployed route accepted this user-agent only with the existing admin secret; the user-agent itself is not proof of identity. The follow-up retains that header/query secret path and adds `Authorization: Bearer <CRON_SECRET>` support while rejecting user-agent-only access. No QStash schedule or secret was changed or exposed.
+
+The checked 500-row history contained 467 completed runs and 33 without completion. The historical runtime logs were outside the account's available log window. A telemetry timeout previously disabled even the final write, which is a reproducible way to leave an unfinished row, not proof of what happened to each historical import. Completion upserts now get an independent bounded attempt after a transient checkpoint failure. The dashboard shows older unfinished records alongside recent errors, with outcome explicitly unknown.
+
+The project and shared Vercel environment-variable search showed no `AFL_COMP` override. The public AFL fixture API confirms source ID 85 is the 2026 Premiership. Production's controlled season is 2027 and it has no 2027 match rows. The fallback to 85 is now allowed only for 2026; other years require an explicit positive `AFL_COMP_SEASON_ID`. Fixture responses must provide matching year evidence through their season/match provider ID or season name; conflicting or unverified rows stop the entire batch before writes. This applies to cron fixture refresh and manual fixture synchronization.
+
+When the controlled season is newer than 2026 and AFL_COMP_SEASON_ID is absent or blank, cron returns HTTP 200 with action skipped and a clear pause reason saved in history. It makes no AFL requests, fixture/stat writes or finalisation calls. This acknowledges the QStash delivery without retrying an intentional off-season pause. An explicitly invalid ID, the known 2026 ID used for another year, or a mismatched fixture response still fails validation. Before live 2027 imports are wanted, verify the official 2027 AFL source ID and fixtures, configure the value in Vercel and redeploy. No 2027 ID has been assumed or fabricated. Do not run the manual fixture-sync endpoint using the 2026 source ID.
+
+No database migration is required. No live importer was invoked for testing and no historical run status was overwritten. Validate with the unit/API tests and a build using placeholder database settings. After an approved deployment, inspect normal QStash calls for correct secret authorization and the expected configuration message; once the 2027 source is verified, use normal scheduled runs to observe completion recovery. Do not use spoofed user-agent requests against the existing Production route as an authentication test, as it is write-capable.

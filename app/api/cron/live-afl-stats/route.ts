@@ -12,6 +12,7 @@ import {
 import { finaliseSuper8RoundFromLiveStats } from "../../../../lib/super8LiveFinalisation";
 import { requireSeasonYear } from "../../../../lib/season";
 
+import { isLiveStatsAuthorized, resolveAflSeasonId, assertAflFixtureSeason, AflSeasonConfigurationError } from "../../../../lib/liveStatsGuards";
 import { createLiveStatsTelemetry } from "../../../../lib/liveStatsTelemetry";
 
 type AdminSupabaseClient = SupabaseClient;
@@ -63,13 +64,10 @@ function getEnv(name: string): string {
 }
 
 function isCronAuthorized(request: NextRequest): boolean {
-  const secret = process.env.LIVE_STATS_ADMIN_SECRET;
-  const suppliedSecret = request.nextUrl.searchParams.get("secret") ?? request.headers.get("x-admin-secret");
-  const userAgent = request.headers.get("user-agent") ?? "";
-
-  if (secret && suppliedSecret === secret) return true;
-
-  return userAgent.includes("vercel-cron");
+  return isLiveStatsAuthorized(request.headers, request.nextUrl.searchParams, {
+    adminSecret: process.env.LIVE_STATS_ADMIN_SECRET,
+    cronSecret: process.env.CRON_SECRET,
+  });
 }
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -174,7 +172,7 @@ async function refreshMatchStatuses(params: {
   try {
     const url = new URL(AFL_MATCHES_URL);
     url.searchParams.set("competitionId", process.env.AFL_COMPETITION_ID ?? "1");
-    url.searchParams.set("compSeasonId", process.env.AFL_COMP_SEASON_ID ?? "85");
+    url.searchParams.set("compSeasonId", resolveAflSeasonId(seasonYear, process.env.AFL_COMP_SEASON_ID));
     url.searchParams.set("roundNumber", String(round));
 
     const response = await fetch(url, {
@@ -189,6 +187,7 @@ async function refreshMatchStatuses(params: {
     }
 
     const rawMatches = getMatchesFromResponse(await response.json());
+    assertAflFixtureSeason(rawMatches, seasonYear);
     let updatedMatches = 0;
     let skippedMatches = 0;
 
@@ -226,6 +225,7 @@ async function refreshMatchStatuses(params: {
       skippedMatches,
     };
   } catch (error) {
+    if (error instanceof AflSeasonConfigurationError) throw error;
     return {
       round,
       rawMatches: 0,
@@ -489,6 +489,17 @@ export async function GET(request: NextRequest) {
     }
 
     await telemetry.update({ afl_round: targetRound });
+
+    // A new season stays paused until its official AFL source has been configured.
+    // Explicit but invalid/wrong-season values still fail validation below.
+    if (seasonYear !== 2026 && !process.env.AFL_COMP_SEASON_ID?.trim()) {
+      const reason = `Live imports paused: AFL source season ${seasonYear} is not configured. Set AFL_COMP_SEASON_ID to the verified source ID when fixtures are ready.`;
+      await telemetry.finish({ status: "skipped", error: reason, checked_matches: 0, candidate_matches: 0, results: [] });
+      return NextResponse.json({ importedAt, environment, seasonYear, targetRound, action: "skipped", reason, results: [] });
+    }
+
+    // Validate even when no round is configured; never reuse 2026's source for a new season.
+    resolveAflSeasonId(seasonYear, process.env.AFL_COMP_SEASON_ID);
 
     const statusRefresh = await refreshMatchStatuses({
       supabase,

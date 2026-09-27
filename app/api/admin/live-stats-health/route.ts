@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
           latestOutcome: run?.results.find((result) => result.afl_match_id === match.afl_match_id) ?? null,
           outcomeAt: run?.started_at ?? null };
       }),
-      errors: recentRunErrors(runs.filter((run) => run.season_year === seasonYear || run.season_year === null)),
+      errors: recentRunErrors(runs.filter((run) => run.season_year === seasonYear || run.season_year === null), now, intervalMinutes),
     };
     return json(body);
   } catch (error) {

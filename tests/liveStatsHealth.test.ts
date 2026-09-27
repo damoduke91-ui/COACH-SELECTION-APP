@@ -37,36 +37,66 @@ test("recent errors include match and run failures but exclude ordinary season s
   assert.equal(recentRunErrors([{ ...run, status: "skipped", error: "Season archived" }]).length, 0);
 });
 
-test("telemetry failures do not throw or keep adding requests to the import", async () => {
-  for (const throws of [false, true]) {
-    let calls = 0;
-    const fake = { from: () => ({ insert: () => ({ abortSignal: async (signal: AbortSignal) => {
-      calls++;
+test("old unfinished runs surface without being labelled failed imports", () => {
+  assert.equal(recentRunErrors([{ ...run, status: "running" }], now + 600_000).length, 0);
+  const issues = recentRunErrors([{ ...run, status: "running" }], now + 600_001);
+  assert.equal(issues[0].label, "Completion not recorded");
+  assert.match(issues[0].reason, /outcome is unknown/);
+  assert.equal(recentRunErrors([{ ...run, status: "running" }], now + 600_001, 30).length, 0);
+});
+
+function telemetryDatabase(failures: (string | null)[]) {
+  const writes: Record<string, unknown>[] = [];
+  const fake = { from: () => ({ upsert: (values: Record<string, unknown>, options: { onConflict: string }) => ({
+    abortSignal: async (signal: AbortSignal) => {
+      assert.equal(options.onConflict, "id");
       assert.ok(signal instanceof AbortSignal);
-      if (throws) throw new Error("Network unavailable");
-      return { error: { message: "Missing migration" } };
-    } }) }) } as unknown as SupabaseClient;
+      writes.push(values);
+      const code = failures.shift();
+      if (code === "throws") throw new Error("Network unavailable");
+      return { error: code ? { code } : null };
+    },
+  }) }) } as unknown as SupabaseClient;
+  return { fake, writes };
+}
+
+test("completion repairs a transient checkpoint failure with the full accumulated snapshot", async () => {
+  for (const failure of ["throws", "57014"]) {
+    const { fake, writes } = telemetryDatabase([null, failure, null]);
     const telemetry = createLiveStatsTelemetry(fake, "preview");
     await telemetry.start();
-    await telemetry.update({ results: [] });
-    await telemetry.finish({ status: "completed" });
-    assert.equal(calls, 1);
+    await telemetry.update({ season_year: 2027 });
+    await telemetry.update({ afl_round: 1, checked_matches: 0 });
+    await telemetry.finish({ status: "completed", results: [] });
+    assert.equal(writes.length, 3);
+    assert.equal(writes[2].id, writes[0].id);
+    assert.equal(writes[2].season_year, 2027);
+    assert.equal(writes[2].afl_round, 1);
+    assert.equal(writes[2].status, "completed");
+    assert.ok(writes[2].finished_at);
   }
 });
 
-test("telemetry checkpoints and completion use the same run id", async () => {
-  const saved: Record<string, unknown>[] = [];
-  const ids: unknown[] = [];
-  const fake = { from: () => ({
-    insert: (values: Record<string, unknown>) => ({ abortSignal: async () => { saved.push(values); return { error: null }; } }),
-    update: (values: Record<string, unknown>) => ({ eq: (_column: string, id: unknown) => ({ abortSignal: async () => { ids.push(id); saved.push(values); return { error: null }; } }) }),
-  }) } as unknown as SupabaseClient;
-  const telemetry = createLiveStatsTelemetry(fake, "preview");
+test("completion can recover after a missing start; persistent schema failures stop requests", async () => {
+  for (const code of ["throws", "42P01", "PGRST205", "42501"]) {
+    const { fake, writes } = telemetryDatabase([code, null]);
+    const telemetry = createLiveStatsTelemetry(fake, "production");
+    await telemetry.start();
+    await telemetry.update({ season_year: 2027 });
+    await telemetry.finish({ status: "failed", error: "Season configuration missing" });
+    assert.equal(writes.length, code === "throws" ? 2 : 1);
+    if (writes.length === 2) {
+      assert.equal(writes[1].id, writes[0].id);
+      assert.equal(writes[1].started_at, writes[0].started_at);
+      assert.equal(writes[1].error, "Season configuration missing");
+    }
+  }
+});
+
+test("an unavailable completion write does not throw into the importer", async () => {
+  const { fake, writes } = telemetryDatabase(["throws", "throws"]);
+  const telemetry = createLiveStatsTelemetry(fake, "production");
   await telemetry.start();
-  await telemetry.update({ season_year: 2026, results: [] });
-  await telemetry.finish({ status: "failed", error: "Token unavailable" });
-  assert.equal(saved[0].environment, "preview");
-  assert.deepEqual(ids, [saved[0].id, saved[0].id]);
-  assert.equal(saved[2].status, "failed");
-  assert.ok(saved[2].finished_at);
+  await telemetry.finish({ status: "completed" });
+  assert.equal(writes.length, 2);
 });
