@@ -639,11 +639,10 @@ export default function ResultsPage() {
         .select("id, role, coach_id, coach_name")
         .eq("id", userId)
         .eq("environment", "production")
-        .eq("role", "admin")
         .maybeSingle();
 
       if (productionError) {
-        setMessage(`Preview admin verification failed: ${productionError.message}`);
+        setMessage(`Preview profile verification failed: ${productionError.message}`);
         return null;
       }
 
